@@ -1,0 +1,1291 @@
+{
+  "components": {
+    "comp-backtest-op": {
+      "executorLabel": "exec-backtest-op",
+      "inputDefinitions": {
+        "parameters": {
+          "features_path": {
+            "parameterType": "STRING"
+          },
+          "lstm_model_dir": {
+            "parameterType": "STRING"
+          },
+          "output_gcs_prefix": {
+            "parameterType": "STRING"
+          },
+          "pair": {
+            "parameterType": "STRING"
+          },
+          "project_id": {
+            "parameterType": "STRING"
+          },
+          "rl_model_path": {
+            "parameterType": "STRING"
+          },
+          "timeframe": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "artifacts": {
+          "backtest_metrics": {
+            "artifactType": {
+              "schemaTitle": "system.Metrics",
+              "schemaVersion": "0.0.1"
+            }
+          }
+        },
+        "parameters": {
+          "Output": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    },
+    "comp-condition-1": {
+      "dag": {
+        "tasks": {
+          "notify-pipeline-status-op": {
+            "cachingOptions": {
+              "enableCache": true
+            },
+            "componentRef": {
+              "name": "comp-notify-pipeline-status-op"
+            },
+            "inputs": {
+              "parameters": {
+                "model_promoted": {
+                  "runtimeValue": {
+                    "constant": true
+                  }
+                },
+                "pair": {
+                  "componentInputParameter": "pipelinechannel--pair"
+                },
+                "pipeline_run_status": {
+                  "runtimeValue": {
+                    "constant": "SUCCESS"
+                  }
+                },
+                "project_id": {
+                  "runtimeValue": {
+                    "constant": "trading-ai-460823"
+                  }
+                },
+                "timeframe": {
+                  "componentInputParameter": "pipelinechannel--timeframe"
+                }
+              }
+            },
+            "taskInfo": {
+              "name": "Notify_Pipeline_Success_Promoted"
+            }
+          }
+        }
+      },
+      "inputDefinitions": {
+        "parameters": {
+          "pipelinechannel--decide-promotion-op-Output": {
+            "parameterType": "BOOLEAN"
+          },
+          "pipelinechannel--pair": {
+            "parameterType": "STRING"
+          },
+          "pipelinechannel--timeframe": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    },
+    "comp-condition-2": {
+      "dag": {
+        "tasks": {
+          "notify-pipeline-status-op-2": {
+            "cachingOptions": {
+              "enableCache": true
+            },
+            "componentRef": {
+              "name": "comp-notify-pipeline-status-op-2"
+            },
+            "inputs": {
+              "parameters": {
+                "model_promoted": {
+                  "runtimeValue": {
+                    "constant": false
+                  }
+                },
+                "pair": {
+                  "componentInputParameter": "pipelinechannel--pair"
+                },
+                "pipeline_run_status": {
+                  "runtimeValue": {
+                    "constant": "SUCCESS"
+                  }
+                },
+                "project_id": {
+                  "runtimeValue": {
+                    "constant": "trading-ai-460823"
+                  }
+                },
+                "timeframe": {
+                  "componentInputParameter": "pipelinechannel--timeframe"
+                }
+              }
+            },
+            "taskInfo": {
+              "name": "Notify_Pipeline_Success_Not_Promoted"
+            }
+          }
+        }
+      },
+      "inputDefinitions": {
+        "parameters": {
+          "pipelinechannel--decide-promotion-op-Output": {
+            "parameterType": "BOOLEAN"
+          },
+          "pipelinechannel--pair": {
+            "parameterType": "STRING"
+          },
+          "pipelinechannel--timeframe": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    },
+    "comp-decide-promotion-op": {
+      "executorLabel": "exec-decide-promotion-op",
+      "inputDefinitions": {
+        "parameters": {
+          "current_production_metrics_path": {
+            "parameterType": "STRING"
+          },
+          "gcs_bucket_name": {
+            "parameterType": "STRING"
+          },
+          "new_backtest_metrics_dir": {
+            "parameterType": "STRING"
+          },
+          "new_lstm_artifacts_dir": {
+            "parameterType": "STRING"
+          },
+          "new_rl_model_path": {
+            "parameterType": "STRING"
+          },
+          "pair": {
+            "parameterType": "STRING"
+          },
+          "production_base_dir": {
+            "parameterType": "STRING"
+          },
+          "project_id": {
+            "parameterType": "STRING"
+          },
+          "timeframe": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "Output": {
+            "parameterType": "BOOLEAN"
+          }
+        }
+      }
+    },
+    "comp-notify-pipeline-status-op": {
+      "executorLabel": "exec-notify-pipeline-status-op",
+      "inputDefinitions": {
+        "parameters": {
+          "model_promoted": {
+            "defaultValue": false,
+            "isOptional": true,
+            "parameterType": "BOOLEAN"
+          },
+          "pair": {
+            "parameterType": "STRING"
+          },
+          "pipeline_run_status": {
+            "parameterType": "STRING"
+          },
+          "project_id": {
+            "parameterType": "STRING"
+          },
+          "timeframe": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "Output": {
+            "parameterType": "BOOLEAN"
+          }
+        }
+      }
+    },
+    "comp-notify-pipeline-status-op-2": {
+      "executorLabel": "exec-notify-pipeline-status-op-2",
+      "inputDefinitions": {
+        "parameters": {
+          "model_promoted": {
+            "defaultValue": false,
+            "isOptional": true,
+            "parameterType": "BOOLEAN"
+          },
+          "pair": {
+            "parameterType": "STRING"
+          },
+          "pipeline_run_status": {
+            "parameterType": "STRING"
+          },
+          "project_id": {
+            "parameterType": "STRING"
+          },
+          "timeframe": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "Output": {
+            "parameterType": "BOOLEAN"
+          }
+        }
+      }
+    },
+    "comp-optimize-lstm-op": {
+      "executorLabel": "exec-optimize-lstm-op",
+      "inputDefinitions": {
+        "parameters": {
+          "features_path": {
+            "parameterType": "STRING"
+          },
+          "gcs_bucket_name": {
+            "parameterType": "STRING"
+          },
+          "n_trials": {
+            "parameterType": "NUMBER_INTEGER"
+          },
+          "output_gcs_prefix": {
+            "parameterType": "STRING"
+          },
+          "pair": {
+            "parameterType": "STRING"
+          },
+          "project_id": {
+            "parameterType": "STRING"
+          },
+          "timeframe": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "artifacts": {
+          "optimization_metrics": {
+            "artifactType": {
+              "schemaTitle": "system.Metrics",
+              "schemaVersion": "0.0.1"
+            }
+          }
+        },
+        "parameters": {
+          "Output": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    },
+    "comp-prepare-opt-data-op": {
+      "executorLabel": "exec-prepare-opt-data-op",
+      "inputDefinitions": {
+        "parameters": {
+          "gcs_bucket_name": {
+            "parameterType": "STRING"
+          },
+          "output_gcs_prefix": {
+            "parameterType": "STRING"
+          },
+          "pair": {
+            "parameterType": "STRING"
+          },
+          "project_id": {
+            "parameterType": "STRING"
+          },
+          "timeframe": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "Output": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    },
+    "comp-prepare-rl-data-op": {
+      "executorLabel": "exec-prepare-rl-data-op",
+      "inputDefinitions": {
+        "parameters": {
+          "gcs_bucket_name": {
+            "parameterType": "STRING"
+          },
+          "lstm_model_dir": {
+            "parameterType": "STRING"
+          },
+          "output_gcs_prefix": {
+            "parameterType": "STRING"
+          },
+          "pair": {
+            "parameterType": "STRING"
+          },
+          "project_id": {
+            "parameterType": "STRING"
+          },
+          "timeframe": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "Output": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    },
+    "comp-train-lstm-vertex-ai-op": {
+      "executorLabel": "exec-train-lstm-vertex-ai-op",
+      "inputDefinitions": {
+        "parameters": {
+          "gcs_bucket_name": {
+            "parameterType": "STRING"
+          },
+          "output_gcs_prefix": {
+            "parameterType": "STRING"
+          },
+          "pair": {
+            "parameterType": "STRING"
+          },
+          "params_path": {
+            "parameterType": "STRING"
+          },
+          "project_id": {
+            "parameterType": "STRING"
+          },
+          "region": {
+            "parameterType": "STRING"
+          },
+          "timeframe": {
+            "parameterType": "STRING"
+          },
+          "vertex_accelerator_count": {
+            "parameterType": "NUMBER_INTEGER"
+          },
+          "vertex_accelerator_type": {
+            "parameterType": "STRING"
+          },
+          "vertex_machine_type": {
+            "parameterType": "STRING"
+          },
+          "vertex_service_account": {
+            "parameterType": "STRING"
+          },
+          "vertex_training_image_uri": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "Output": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    },
+    "comp-train-rl-op": {
+      "executorLabel": "exec-train-rl-op",
+      "inputDefinitions": {
+        "parameters": {
+          "gcs_bucket_name": {
+            "parameterType": "STRING"
+          },
+          "lstm_model_dir": {
+            "parameterType": "STRING"
+          },
+          "output_gcs_prefix": {
+            "parameterType": "STRING"
+          },
+          "pair": {
+            "parameterType": "STRING"
+          },
+          "project_id": {
+            "parameterType": "STRING"
+          },
+          "rl_data_path": {
+            "parameterType": "STRING"
+          },
+          "tensorboard_logs_gcs_prefix": {
+            "parameterType": "STRING"
+          },
+          "timeframe": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "Output": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    },
+    "comp-update-data-op": {
+      "executorLabel": "exec-update-data-op",
+      "inputDefinitions": {
+        "parameters": {
+          "gcs_bucket_name": {
+            "parameterType": "STRING"
+          },
+          "pair": {
+            "parameterType": "STRING"
+          },
+          "polygon_api_key_secret_name": {
+            "parameterType": "STRING"
+          },
+          "polygon_api_key_secret_version": {
+            "defaultValue": "latest",
+            "isOptional": true,
+            "parameterType": "STRING"
+          },
+          "project_id": {
+            "parameterType": "STRING"
+          },
+          "timeframe": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "Output": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    }
+  },
+  "defaultPipelineRoot": "gs://trading-ai-models-460823/pipeline_root_v2",
+  "deploymentSpec": {
+    "executors": {
+      "exec-backtest-op": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "backtest_op"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage' 'gcsfs' 'pandas' 'numpy' 'tensorflow' 'stable-baselines3' 'gymnasium' 'pandas_ta' 'scikit-learn' 'joblib' 'optuna' 'kfp-pipeline-spec>=0.1.16' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef backtest_op(\n    lstm_model_dir: str,\n    rl_model_path: str,\n    features_path: str,\n    pair: str,\n    timeframe: str,\n    output_gcs_prefix: str,\n    project_id: str,\n    backtest_metrics: Output[Metrics]\n) -> str:\n    import subprocess\n    from datetime import datetime\n    import logging\n    import json as py_json\n    from google.cloud import storage as gcp_storage\n\n    logging.basicConfig(level=logging.INFO, format=\"%(asctime)s - %(levelname)s - %(message)s\")\n    logger = logging.getLogger(__name__)\n\n    if not lstm_model_dir.startswith(\"gs://\") or not rl_model_path.startswith(\"gs://\"):\n        raise ValueError(\"backtest_op requires valid GCS paths for models.\")\n    lstm_model_path = f\"{lstm_model_dir.rstrip('/')}/model.h5\"\n    lstm_scaler_path = f\"{lstm_model_dir.rstrip('/')}/scaler.pkl\"\n    lstm_params_path = f\"{lstm_model_dir.rstrip('/')}/params.json\"\n    timestamp_str = datetime.utcnow().strftime(\"%Y%m%d%H%M%S\")\n    backtest_output_gcs_dir = f\"{output_gcs_prefix.rstrip('/')}/{pair}/{timeframe}/{timestamp_str}/\"\n    expected_metrics_file_gcs_path = f\"{backtest_output_gcs_dir}metrics.json\"\n    logger.info(f\"Initializing backtest.py for {pair} {timeframe}. Output dir: {backtest_output_gcs_dir}\")\n    command = [\n        \"python\", \"backtest.py\", \"--pair\", pair, \"--timeframe\", timeframe,\n        \"--lstm-model-path\", lstm_model_path, \"--lstm-scaler-path\", lstm_scaler_path,\n        \"--lstm-params-path\", lstm_params_path, \"--rl-model-path\", rl_model_path,\n        \"--features-path\", features_path, \"--output-dir\", backtest_output_gcs_dir,\n    ]\n    process = subprocess.run(command, capture_output=True, text=True, check=False)\n    if process.returncode != 0:\n        logger.error(f\"Error in backtest.py.\\nSTDOUT: {process.stdout}\\nSTDERR: {process.stderr}\")\n        raise RuntimeError(f\"backtest.py failed for {pair} {timeframe}\")\n    else:\n        logger.info(f\"backtest.py completed.\\nSTDOUT: {process.stdout}\")\n        try:\n            storage_client = gcp_storage.Client(project=project_id)\n            bucket_name_str, blob_path_str = expected_metrics_file_gcs_path.replace(\"gs://\", \"\").split(\"/\", 1)\n            bucket = storage_client.bucket(bucket_name_str)\n            blob = bucket.blob(blob_path_str)\n            if blob.exists():\n                metrics_content = blob.download_as_string()\n                metrics_data = py_json.loads(metrics_content)\n                for key, value in metrics_data.items():\n                    if isinstance(value, (int, float)):\n                        backtest_metrics.log_metric(key, value)\n                    else:\n                        try:\n                            backtest_metrics.log_metric(key, float(value))\n                        except (ValueError, TypeError):\n                            logger.warning(f\"Cannot log metric '{key}' with value '{value}' as float. Skipping or consider logging as metadata.\")\n                logger.info(f\"Logged metrics from {expected_metrics_file_gcs_path} to KFP Metrics.\")\n            else:\n                logger.warning(f\"Metrics file {expected_metrics_file_gcs_path} not found for KFP logging.\")\n        except Exception as e_metrics:\n            logger.error(f\"Failed to log metrics from {expected_metrics_file_gcs_path} to KFP: {e_metrics}\")\n    return backtest_output_gcs_dir\n\n"
+          ],
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest",
+          "resources": {
+            "cpuLimit": 8.0,
+            "memoryLimit": 30.0,
+            "resourceCpuLimit": "8",
+            "resourceMemoryLimit": "30G"
+          }
+        }
+      },
+      "exec-decide-promotion-op": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "decide_promotion_op"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage' 'gcsfs' 'pandas' 'numpy' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef decide_promotion_op(\n    new_backtest_metrics_dir: str,\n    new_lstm_artifacts_dir: str,\n    new_rl_model_path: str,\n    gcs_bucket_name: str,\n    pair: str,\n    timeframe: str,\n    project_id: str,\n    current_production_metrics_path: str,\n    production_base_dir: str,\n) -> bool:\n    import subprocess\n    import logging\n    logging.basicConfig(level=logging.INFO, format=\"%(asctime)s - %(levelname)s - %(message)s\")\n    logger = logging.getLogger(__name__)\n\n    new_metrics_file_path = f\"{new_backtest_metrics_dir.rstrip('/')}/metrics.json\"\n\n    if not new_lstm_artifacts_dir.startswith(\"gs://\") or \\\n       not new_rl_model_path.startswith(\"gs://\") or \\\n       not new_metrics_file_path.startswith(\"gs://\"):\n        raise ValueError(\"decide_promotion_op requires valid GCS paths for artifacts and metrics.\")\n    logger.info(f\"Initializing model promotion for {pair} {timeframe}. New metrics file: {new_metrics_file_path}\")\n    command = [\n        \"python\", \"model_promotion_decision.py\", \"--new-metrics-path\", new_metrics_file_path,\n        \"--current-production-metrics-path\", current_production_metrics_path,\n        \"--new-lstm-artifacts-dir\", new_lstm_artifacts_dir,\n        \"--new-rl-model-path\", new_rl_model_path,\n        \"--production-pair-timeframe-dir\", f\"{production_base_dir.rstrip('/')}/{pair}/{timeframe}\",\n        \"--pair\", pair, \"--timeframe\", timeframe,\n    ]\n    process = subprocess.run(command, capture_output=True, text=True, check=False)\n    model_promoted_flag = False\n    if process.returncode == 0:\n        logger.info(f\"model_promotion_decision.py completed.\\nSTDOUT: {process.stdout}\")\n        if \"PROMOVIDO a producci\u00f3n.\" in process.stdout: model_promoted_flag = True\n    else:\n        logger.error(f\"Error in model_promotion_decision.py.\\nSTDOUT: {process.stdout}\\nSTDERR: {process.stderr}\")\n    logger.info(f\"Model promoted: {model_promoted_flag}\")\n    return model_promoted_flag\n\n"
+          ],
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest",
+          "resources": {
+            "cpuLimit": 2.0,
+            "memoryLimit": 4.0,
+            "resourceCpuLimit": "2",
+            "resourceMemoryLimit": "4G"
+          }
+        }
+      },
+      "exec-notify-pipeline-status-op": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "notify_pipeline_status_op"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-pubsub' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef notify_pipeline_status_op(\n    project_id: str,\n    pair: str,\n    timeframe: str,\n    pipeline_run_status: str,\n    model_promoted: bool = False,\n) -> bool:\n    from google.cloud import pubsub_v1\n    import logging\n    import json as py_json\n    from datetime import datetime, timezone\n    logging.basicConfig(level=logging.INFO, format=\"%(asctime)s - %(levelname)s - %(message)s\")\n    logger = logging.getLogger(__name__)\n\n    SUCCESS_TOPIC_ID = \"data-ingestion-success\"\n    FAILURE_TOPIC_ID = \"data-ingestion-failures\"\n    try:\n        publisher = pubsub_v1.PublisherClient()\n        ts_utc_iso = datetime.now(timezone.utc).isoformat()\n        details = {\n            \"pipeline_name\": \"algo-trading-mlops-pipeline-v2\", \"pair\": pair, \"timeframe\": timeframe,\n            \"run_status\": pipeline_run_status, \"model_promoted_status\": model_promoted,\n            \"timestamp_utc\": ts_utc_iso\n        }\n        target_topic_id = SUCCESS_TOPIC_ID if pipeline_run_status.upper() == \"SUCCESS\" else FAILURE_TOPIC_ID\n        summary = f\"Training Pipeline {pair} {timeframe} {pipeline_run_status.upper()}. Promoted: {model_promoted}.\"\n        if pipeline_run_status.upper() != \"SUCCESS\": details[\"run_status\"] = \"FAILURE\"\n\n        msg_data = {\"summary\": summary, \"details\": details}\n        msg_bytes = py_json.dumps(msg_data).encode(\"utf-8\")\n        topic_path = publisher.topic_path(project_id, target_topic_id)\n        future = publisher.publish(topic_path, msg_bytes)\n        logger.info(f\"Notification to {topic_path} with ID {future.result(timeout=60)} sent.\")\n        return True\n    except Exception as e:\n        logger.error(f\"Error publishing to Pub/Sub: {e}\")\n        return False\n\n"
+          ],
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
+        }
+      },
+      "exec-notify-pipeline-status-op-2": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "notify_pipeline_status_op"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-pubsub' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef notify_pipeline_status_op(\n    project_id: str,\n    pair: str,\n    timeframe: str,\n    pipeline_run_status: str,\n    model_promoted: bool = False,\n) -> bool:\n    from google.cloud import pubsub_v1\n    import logging\n    import json as py_json\n    from datetime import datetime, timezone\n    logging.basicConfig(level=logging.INFO, format=\"%(asctime)s - %(levelname)s - %(message)s\")\n    logger = logging.getLogger(__name__)\n\n    SUCCESS_TOPIC_ID = \"data-ingestion-success\"\n    FAILURE_TOPIC_ID = \"data-ingestion-failures\"\n    try:\n        publisher = pubsub_v1.PublisherClient()\n        ts_utc_iso = datetime.now(timezone.utc).isoformat()\n        details = {\n            \"pipeline_name\": \"algo-trading-mlops-pipeline-v2\", \"pair\": pair, \"timeframe\": timeframe,\n            \"run_status\": pipeline_run_status, \"model_promoted_status\": model_promoted,\n            \"timestamp_utc\": ts_utc_iso\n        }\n        target_topic_id = SUCCESS_TOPIC_ID if pipeline_run_status.upper() == \"SUCCESS\" else FAILURE_TOPIC_ID\n        summary = f\"Training Pipeline {pair} {timeframe} {pipeline_run_status.upper()}. Promoted: {model_promoted}.\"\n        if pipeline_run_status.upper() != \"SUCCESS\": details[\"run_status\"] = \"FAILURE\"\n\n        msg_data = {\"summary\": summary, \"details\": details}\n        msg_bytes = py_json.dumps(msg_data).encode(\"utf-8\")\n        topic_path = publisher.topic_path(project_id, target_topic_id)\n        future = publisher.publish(topic_path, msg_bytes)\n        logger.info(f\"Notification to {topic_path} with ID {future.result(timeout=60)} sent.\")\n        return True\n    except Exception as e:\n        logger.error(f\"Error publishing to Pub/Sub: {e}\")\n        return False\n\n"
+          ],
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
+        }
+      },
+      "exec-optimize-lstm-op": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "optimize_lstm_op"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage' 'gcsfs' 'pandas' 'numpy' 'tensorflow' 'stable-baselines3' 'gymnasium' 'pandas_ta' 'scikit-learn' 'joblib' 'optuna' 'kfp-pipeline-spec>=0.1.16' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef optimize_lstm_op(\n    gcs_bucket_name: str,\n    features_path: str,\n    pair: str,\n    timeframe: str,\n    n_trials: int,\n    output_gcs_prefix: str,\n    project_id: str,\n    optimization_metrics: Output[Metrics]\n) -> str:\n    import subprocess\n    from datetime import datetime\n    import json\n    import logging\n\n    logging.basicConfig(level=logging.INFO, format=\"%(asctime)s - %(levelname)s - %(message)s\")\n    logger = logging.getLogger(__name__)\n    timestamp_str = datetime.utcnow().strftime(\"%Y%m%d%H%M%S\")\n    params_output_path = f\"{output_gcs_prefix}/{pair}/{timeframe}/{timestamp_str}/best_params.json\"\n    logger.info(f\"Initializing optimize_lstm.py for {pair} {timeframe} (Features: {features_path}, Params Output: {params_output_path}, Trials: {n_trials})\")\n    command = [\n        \"python\", \"optimize_lstm.py\", \"--features\", features_path, \"--pair\", pair,\n        \"--timeframe\", timeframe, \"--output\", params_output_path, \"--n-trials\", str(n_trials),\n    ]\n    process = subprocess.run(command, capture_output=True, text=True, check=False)\n\n    if process.returncode != 0:\n        logger.error(f\"Error in optimize_lstm.py for {pair} {timeframe}.\\nSTDOUT: {process.stdout}\\nSTDERR: {process.stderr}\")\n        raise RuntimeError(f\"optimize_lstm.py failed for {pair} {timeframe}\")\n    else:\n        logger.info(f\"optimize_lstm.py completed for {pair} {timeframe}.\\nSTDOUT: {process.stdout}\")\n        try:\n            score_line = next((line for line in process.stdout.splitlines() if \"Quick BT para entrenamiento completo:\" in line), None)\n            if score_line:\n                score_value = float(score_line.split(\":\")[1].strip().replace(\"ATR-pips netos\", \"\").strip())\n                optimization_metrics.log_metric(\"quick_bt_score\", score_value)\n                logger.info(f\"Quick BT Score metric logged: {score_value}\")\n            else:\n                logger.warning(\"Could not find Quick BT score in stdout for metrics logging.\")\n        except Exception as e:\n            logger.warning(f\"Error parsing Quick BT score: {e}. Metrics may not be fully logged.\")\n    return params_output_path\n\n"
+          ],
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest",
+          "resources": {
+            "cpuLimit": 8.0,
+            "memoryLimit": 30.0,
+            "resourceCpuLimit": "8",
+            "resourceMemoryLimit": "30G"
+          }
+        }
+      },
+      "exec-prepare-opt-data-op": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "prepare_opt_data_op"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage' 'gcsfs' 'pandas' 'numpy' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef prepare_opt_data_op(\n    gcs_bucket_name: str,\n    pair: str,\n    timeframe: str,\n    output_gcs_prefix: str,\n    project_id: str,\n) -> str:\n    import subprocess\n    from datetime import datetime\n    import logging\n\n    logging.basicConfig(level=logging.INFO, format=\"%(asctime)s - %(levelname)s - %(message)s\")\n    logger = logging.getLogger(__name__)\n    input_gcs_path = f\"gs://{gcs_bucket_name}/data/{pair}/{timeframe}/{pair}_{timeframe}.parquet\"\n    timestamp_str = datetime.utcnow().strftime(\"%Y%m%d%H%M%S\")\n    output_gcs_path = f\"{output_gcs_prefix}/{pair}/{timeframe}/{timestamp_str}/{pair}_{timeframe}_recent.parquet\"\n    logger.info(f\"Initializing prepare_opt_data.py for {pair} {timeframe} (Input: {input_gcs_path}, Output: {output_gcs_path})\")\n    command = [\"python\", \"prepare_opt_data.py\", \"--input_path\", input_gcs_path, \"--output_path\", output_gcs_path]\n    process = subprocess.run(command, capture_output=True, text=True, check=False)\n\n    if process.returncode != 0:\n        logger.error(f\"Error in prepare_opt_data.py for {pair} {timeframe}.\\nSTDOUT: {process.stdout}\\nSTDERR: {process.stderr}\")\n        raise RuntimeError(f\"prepare_opt_data.py failed for {pair} {timeframe}\")\n    else:\n        logger.info(f\"prepare_opt_data.py completed for {pair} {timeframe}.\\nSTDOUT: {process.stdout}\")\n    return output_gcs_path\n\n"
+          ],
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest",
+          "resources": {
+            "cpuLimit": 4.0,
+            "memoryLimit": 15.0,
+            "resourceCpuLimit": "4",
+            "resourceMemoryLimit": "15G"
+          }
+        }
+      },
+      "exec-prepare-rl-data-op": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "prepare_rl_data_op"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage' 'gcsfs' 'pandas' 'numpy' 'tensorflow' 'stable-baselines3' 'gymnasium' 'pandas_ta' 'scikit-learn' 'joblib' 'optuna' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef prepare_rl_data_op(\n    gcs_bucket_name: str,\n    lstm_model_dir: str,\n    pair: str,\n    timeframe: str,\n    output_gcs_prefix: str,\n    project_id: str,\n) -> str:\n    import subprocess\n    from datetime import datetime\n    import logging\n    logging.basicConfig(level=logging.INFO, format=\"%(asctime)s - %(levelname)s - %(message)s\")\n    logger = logging.getLogger(__name__)\n\n    if not lstm_model_dir or not lstm_model_dir.startswith(\"gs://\"):\n        raise ValueError(f\"prepare_rl_data_op requires valid GCS lstm_model_dir, got: {lstm_model_dir}\")\n    lstm_model_path = f\"{lstm_model_dir.rstrip('/')}/model.h5\"\n    lstm_scaler_path = f\"{lstm_model_dir.rstrip('/')}/scaler.pkl\"\n    lstm_params_path = f\"{lstm_model_dir.rstrip('/')}/params.json\"\n    timestamp_str = datetime.utcnow().strftime(\"%Y%m%d%H%M%S\")\n    rl_data_output_path = f\"{output_gcs_prefix}/{pair}/{timeframe}/{timestamp_str}/ppo_input_data.npz\"\n    logger.info(f\"Initializing prepare_rl_data.py for {pair} {timeframe}. LSTM model dir: {lstm_model_dir}. Output: {rl_data_output_path}\")\n    command = [\n        \"python\", \"prepare_rl_data.py\", \"--model\", lstm_model_path, \"--scaler\", lstm_scaler_path,\n        \"--params\", lstm_params_path, \"--output\", rl_data_output_path,\n    ]\n    process = subprocess.run(command, capture_output=True, text=True, check=False)\n    if process.returncode != 0:\n        logger.error(f\"Error in prepare_rl_data.py.\\nSTDOUT: {process.stdout}\\nSTDERR: {process.stderr}\")\n        raise RuntimeError(f\"prepare_rl_data.py failed for {pair} {timeframe}\")\n    else:\n        logger.info(f\"prepare_rl_data.py completed.\\nSTDOUT: {process.stdout}\")\n    return rl_data_output_path\n\n"
+          ],
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest",
+          "resources": {
+            "cpuLimit": 8.0,
+            "memoryLimit": 30.0,
+            "resourceCpuLimit": "8",
+            "resourceMemoryLimit": "30G"
+          }
+        }
+      },
+      "exec-train-lstm-vertex-ai-op": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "train_lstm_vertex_ai_op"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform' 'google-cloud-storage' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef train_lstm_vertex_ai_op(\n    project_id: str,\n    region: str,\n    gcs_bucket_name: str,\n    params_path: str,\n    pair: str,\n    timeframe: str,\n    output_gcs_prefix: str,\n    vertex_training_image_uri: str,\n    vertex_machine_type: str,\n    vertex_accelerator_type: str,\n    vertex_accelerator_count: int,\n    vertex_service_account: str,\n) -> str:\n    import logging\n    import time\n    from datetime import datetime, timezone\n    from google.cloud import aiplatform as gcp_aiplatform\n    from google.cloud import storage as gcp_storage\n\n    logging.basicConfig(level=logging.INFO, format=\"%(asctime)s - %(levelname)s - %(message)s\")\n    logger = logging.getLogger(__name__)\n\n    gcp_aiplatform.init(project=project_id, location=region)\n    timestamp_for_job = datetime.now(timezone.utc).strftime(\"%Y%m%d%H%M%S\")\n    job_display_name = f\"lstm-training-{pair.lower()}-{timeframe.lower()}-{timestamp_for_job}\"\n    training_script_args = [\n        \"--params\", params_path, \"--output-gcs-base-dir\", output_gcs_prefix,\n        \"--pair\", pair, \"--timeframe\", timeframe, \"--project-id\", project_id,\n        \"--gcs-bucket-name\", gcs_bucket_name,\n    ]\n\n    current_accelerator_type = vertex_accelerator_type\n    current_accelerator_count = vertex_accelerator_count\n\n    worker_pool_specs = [{\n        \"machine_spec\": {\n            \"machine_type\": vertex_machine_type,\n        },\n        \"replica_count\": 1,\n        \"container_spec\": {\n            \"image_uri\": vertex_training_image_uri,\n            \"args\": training_script_args,\n            \"command\": [\"python\", \"train_lstm.py\"],\n        },\n    }]\n\n    if current_accelerator_count > 0 and current_accelerator_type != \"ACCELERATOR_TYPE_UNSPECIFIED\":\n        worker_pool_specs[0][\"machine_spec\"][\"accelerator_type\"] = current_accelerator_type\n        worker_pool_specs[0][\"machine_spec\"][\"accelerator_count\"] = current_accelerator_count\n        logger.info(f\"Configurando Custom Job con GPU: {current_accelerator_count} x {current_accelerator_type}\")\n    else:\n        logger.info(f\"Configurando Custom Job solo con CPU.\")\n\n    vertex_job_base_output_dir = f\"{output_gcs_prefix}/{pair}/{timeframe}/vertex_ai_job_outputs/{job_display_name}\"\n    logger.info(f\"Submitting Vertex AI Custom Job: {job_display_name} with args: {training_script_args}\")\n\n    custom_job = gcp_aiplatform.CustomJob(\n        display_name=job_display_name, worker_pool_specs=worker_pool_specs,\n        base_output_dir=vertex_job_base_output_dir, project=project_id, location=region,\n    )\n    custom_job_launch_time_utc = datetime.utcnow().replace(tzinfo=timezone.utc)\n    try:\n        custom_job.run(service_account=vertex_service_account, sync=True, timeout=10800)\n        logger.info(f\"Vertex AI Custom Job {custom_job.display_name} (ID: {custom_job.resource_name}) completed.\")\n    except Exception as e:\n        logger.error(f\"Vertex AI Custom Job {job_display_name} failed or timed out: {e}\")\n        if custom_job and custom_job.resource_name:\n             logger.error(f\"Job details: {custom_job.resource_name}, state: {custom_job.state}\")\n        raise RuntimeError(f\"Vertex AI Custom Job for LSTM training failed: {e}\")\n\n    if not output_gcs_prefix.startswith(\"gs://\"): raise ValueError(\"output_gcs_prefix must be gs://\")\n    prefix_parts = output_gcs_prefix.replace(\"gs://\", \"\").split(\"/\")\n    expected_bucket_name = prefix_parts[0]\n    base_path_in_bucket = \"/\".join(prefix_parts[1:])\n    gcs_listing_prefix = f\"{base_path_in_bucket}/{pair}/{timeframe}/\"\n    if not gcs_listing_prefix.endswith('/'): gcs_listing_prefix += '/'\n    logger.info(f\"Polling GCS bucket '{expected_bucket_name}' under prefix '{gcs_listing_prefix}' for artifacts created around {custom_job_launch_time_utc.isoformat()}.\")\n\n    storage_client = gcp_storage.Client(project=project_id)\n    bucket = storage_client.bucket(expected_bucket_name)\n    max_poll_wait_sec, poll_interval_sec = 15 * 60, 30\n    start_poll_time = time.time()\n    found_model_dir_gcs_path = None\n\n    while time.time() - start_poll_time < max_poll_wait_sec:\n        logger.info(f\"GCS poll elapsed: {int(time.time() - start_poll_time)}s / {max_poll_wait_sec}s\")\n        blobs = bucket.list_blobs(prefix=gcs_listing_prefix, delimiter=\"/\")\n        candidate_dirs = []\n        for page in blobs.pages:\n            if page.prefixes:\n                for dir_prefix in page.prefixes:\n                    try:\n                        datetime.strptime(dir_prefix.strip('/').split('/')[-1], \"%Y%m%d%H%M%S\")\n                        if bucket.blob(f\"{dir_prefix}model.h5\").exists():\n                            candidate_dirs.append(f\"gs://{expected_bucket_name}/{dir_prefix}\")\n                    except ValueError: continue\n        if candidate_dirs:\n            found_model_dir_gcs_path = sorted(candidate_dirs, reverse=True)[0]\n            logger.info(f\"Found LSTM model directory in GCS: {found_model_dir_gcs_path}\")\n            return found_model_dir_gcs_path\n        time.sleep(poll_interval_sec)\n\n    err_msg = f\"LSTM model.h5 not found in gs://{expected_bucket_name}/{gcs_listing_prefix} after {max_poll_wait_sec / 60:.1f} min. Job: {custom_job.display_name}\"\n    logger.error(err_msg)\n    raise TimeoutError(err_msg)\n\n"
+          ],
+          "image": "python:3.9-slim",
+          "resources": {
+            "cpuLimit": 1.0,
+            "memoryLimit": 2.0,
+            "resourceCpuLimit": "1",
+            "resourceMemoryLimit": "2G"
+          }
+        }
+      },
+      "exec-train-rl-op": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "train_rl_op"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage' 'gcsfs' 'pandas' 'numpy' 'tensorflow' 'stable-baselines3' 'gymnasium' 'pandas_ta' 'scikit-learn' 'joblib' 'optuna' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef train_rl_op(\n    gcs_bucket_name: str,\n    lstm_model_dir: str,\n    rl_data_path: str,\n    pair: str,\n    timeframe: str,\n    output_gcs_prefix: str,\n    tensorboard_logs_gcs_prefix: str,\n    project_id: str,\n) -> str:\n    import subprocess\n    from datetime import datetime\n    import logging\n    logging.basicConfig(level=logging.INFO, format=\"%(asctime)s - %(levelname)s - %(message)s\")\n    logger = logging.getLogger(__name__)\n\n    if not lstm_model_dir or not lstm_model_dir.startswith(\"gs://\"):\n        raise ValueError(f\"train_rl_op requires valid GCS lstm_model_dir, got: {lstm_model_dir}\")\n    lstm_model_path = f\"{lstm_model_dir.rstrip('/')}/model.h5\"\n    lstm_scaler_path = f\"{lstm_model_dir.rstrip('/')}/scaler.pkl\"\n    lstm_params_path = f\"{lstm_model_dir.rstrip('/')}/params.json\"\n    tensorboard_log_gcs_path = f\"{tensorboard_logs_gcs_prefix}/{pair}/{timeframe}\"\n    logger.info(f\"Initializing train_rl.py for {pair} {timeframe}. LSTM: {lstm_model_dir}, RL Data: {rl_data_path}, Output Base: {output_gcs_prefix}\")\n    command = [\n        \"python\", \"train_rl.py\", \"--model\", lstm_model_path, \"--scaler\", lstm_scaler_path,\n        \"--params\", lstm_params_path, \"--rl-data\", rl_data_path, \"--output-bucket\", gcs_bucket_name,\n        \"--pair\", pair, \"--timeframe\", timeframe, \"--output-model-base-gcs-path\", output_gcs_prefix,\n        \"--tensorboard-log-dir\", tensorboard_log_gcs_path,\n    ]\n    process = subprocess.run(command, capture_output=True, text=True, check=False)\n    if process.returncode != 0:\n        logger.error(f\"Error in train_rl.py.\\nSTDOUT: {process.stdout}\\nSTDERR: {process.stderr}\")\n        raise RuntimeError(f\"train_rl.py failed for {pair} {timeframe}\")\n    else:\n        logger.info(f\"train_rl.py completed.\\nSTDOUT: {process.stdout}\")\n        rl_model_upload_line = next((l for l in process.stdout.splitlines() if \"Subido ppo_filter_model.zip a\" in l), None)\n        if rl_model_upload_line:\n            uploaded_rl_path = rl_model_upload_line.split(\"Subido ppo_filter_model.zip a \")[1].strip()\n            logger.info(f\"RL model uploaded to: {uploaded_rl_path}\")\n            return uploaded_rl_path\n        else:\n            raise RuntimeError(\"Failed to determine RL model output path from train_rl.py stdout.\")\n\n"
+          ],
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest",
+          "resources": {
+            "cpuLimit": 16.0,
+            "memoryLimit": 60.0,
+            "resourceCpuLimit": "16",
+            "resourceMemoryLimit": "60G"
+          }
+        }
+      },
+      "exec-update-data-op": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "update_data_op"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'kfp==2.13.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&  python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage' 'google-cloud-pubsub' 'gcsfs' 'pandas' 'google-cloud-secret-manager' 'requests' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef update_data_op(\n    pair: str,\n    timeframe: str,\n    gcs_bucket_name: str,\n    project_id: str,\n    polygon_api_key_secret_name: str,\n    polygon_api_key_secret_version: str = \"latest\",\n) -> str:\n    import subprocess\n    import logging\n    import json\n    import os\n    import requests # <--- A\u00d1ADIDO\n    from google.cloud import secretmanager as sm_client_lib\n\n    for handler in logging.root.handlers[:]:\n        logging.root.removeHandler(handler)\n    logging.basicConfig(level=logging.INFO, format=\"%(asctime)s - %(levelname)s [%(funcName)s]: %(message)s\")\n    logger = logging.getLogger(__name__)\n\n    # --- INICIO: Loguear identidad de la cuenta de servicio ---\n    try:\n        metadata_url = \"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email\"\n        headers = {\"Metadata-Flavor\": \"Google\"}\n        sa_email_response = requests.get(metadata_url, headers=headers, timeout=5) # Timeout corto\n        sa_email_response.raise_for_status() # Lanza excepci\u00f3n si hay error HTTP\n        current_sa = sa_email_response.text\n        logger.info(f\"El componente update-data-op se est\u00e1 ejecutando con la cuenta de servicio (desde metadata): {current_sa}\")\n    except Exception as sa_err:\n        logger.warning(f\"No se pudo obtener la cuenta de servicio actual del metadata server: {sa_err}\")\n        logger.warning(\"Esto es normal si se ejecuta localmente fuera de GCP. En GCP, podr\u00eda indicar un problema de red/configuraci\u00f3n del metadata server.\")\n    # --- FIN: Loguear identidad de la cuenta de servicio ---\n\n    try:\n        logger.info(f\"Accediendo al secreto: projects/{project_id}/secrets/{polygon_api_key_secret_name}/versions/{polygon_api_key_secret_version}\")\n        client = sm_client_lib.SecretManagerServiceClient()\n        secret_path = client.secret_version_path(\n            project_id,\n            polygon_api_key_secret_name,\n            polygon_api_key_secret_version\n        )\n        response = client.access_secret_version(request={\"name\": secret_path})\n        polygon_api_key = response.payload.data.decode(\"UTF-8\")\n\n        os.environ[\"POLYGON_API_KEY\"] = polygon_api_key\n        logger.info(f\"API Key de Polygon obtenida de Secret Manager ({polygon_api_key_secret_name}) y configurada en el entorno.\")\n\n    except Exception as e:\n        logger.error(f\"Error al obtener la API Key de Polygon de Secret Manager: {e}\", exc_info=True) # exc_info=True para traceback completo\n        raise RuntimeError(f\"Fallo al obtener la API Key de Secret Manager '{polygon_api_key_secret_name}': {e}\")\n\n    logger.info(f\"Initializing data_orchestrator.py for {pair} {timeframe}...\")\n    message_dict = {\"symbols\": [pair], \"timeframes\": [timeframe]}\n    message_str = json.dumps(message_dict)\n\n    command = [\"python\", \"data_orchestrator.py\", \"--mode\", \"on-demand\", \"--message\", message_str]\n\n    logger.info(f\"Command to execute for data_orchestrator.py: {' '.join(command)}\")\n\n    current_env = os.environ.copy()\n    process = subprocess.run(command, capture_output=True, text=True, check=False, env=current_env)\n\n    if process.returncode != 0:\n        error_message = f\"data_orchestrator.py failed for {pair} {timeframe}.\"\n        stdout_output = process.stdout.strip()\n        stderr_output = process.stderr.strip()\n        if stdout_output:\n            error_message += f\"\\nSTDOUT:\\n{stdout_output}\"\n        if stderr_output:\n            error_message += f\"\\nSTDERR:\\n{stderr_output}\"\n\n        logger.error(error_message)\n        raise RuntimeError(error_message)\n    else:\n        logger.info(f\"data_orchestrator.py completed for {pair} {timeframe}.\\nSTDOUT: {process.stdout.strip()}\")\n        if process.stderr.strip():\n            logger.info(f\"STDERR (aunque exit code fue 0):\\n{process.stderr.strip()}\")\n    return f\"Data update process completed for {pair}/{timeframe}.\"\n\n"
+          ],
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest",
+          "resources": {
+            "cpuLimit": 2.0,
+            "memoryLimit": 4.0,
+            "resourceCpuLimit": "2",
+            "resourceMemoryLimit": "4G"
+          }
+        }
+      }
+    }
+  },
+  "pipelineInfo": {
+    "description": "KFP v2 Pipeline for training and deploying algorithmic trading models.",
+    "name": "algo-trading-mlops-gcp-pipeline-v2"
+  },
+  "root": {
+    "dag": {
+      "tasks": {
+        "backtest-op": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-backtest-op"
+          },
+          "dependentTasks": [
+            "train-lstm-vertex-ai-op",
+            "train-rl-op"
+          ],
+          "inputs": {
+            "parameters": {
+              "features_path": {
+                "componentInputParameter": "backtest_features_path"
+              },
+              "lstm_model_dir": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "Output",
+                  "producerTask": "train-lstm-vertex-ai-op"
+                }
+              },
+              "output_gcs_prefix": {
+                "runtimeValue": {
+                  "constant": "gs://trading-ai-models-460823/backtest_results_v2"
+                }
+              },
+              "pair": {
+                "componentInputParameter": "pair"
+              },
+              "project_id": {
+                "runtimeValue": {
+                  "constant": "trading-ai-460823"
+                }
+              },
+              "rl_model_path": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "Output",
+                  "producerTask": "train-rl-op"
+                }
+              },
+              "timeframe": {
+                "componentInputParameter": "timeframe"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "Execute_Full_Backtesting"
+          }
+        },
+        "condition-1": {
+          "componentRef": {
+            "name": "comp-condition-1"
+          },
+          "dependentTasks": [
+            "decide-promotion-op"
+          ],
+          "inputs": {
+            "parameters": {
+              "pipelinechannel--decide-promotion-op-Output": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "Output",
+                  "producerTask": "decide-promotion-op"
+                }
+              },
+              "pipelinechannel--pair": {
+                "componentInputParameter": "pair"
+              },
+              "pipelinechannel--timeframe": {
+                "componentInputParameter": "timeframe"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "If_Model_Promoted"
+          },
+          "triggerPolicy": {
+            "condition": "inputs.parameter_values['pipelinechannel--decide-promotion-op-Output'] == true"
+          }
+        },
+        "condition-2": {
+          "componentRef": {
+            "name": "comp-condition-2"
+          },
+          "dependentTasks": [
+            "decide-promotion-op"
+          ],
+          "inputs": {
+            "parameters": {
+              "pipelinechannel--decide-promotion-op-Output": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "Output",
+                  "producerTask": "decide-promotion-op"
+                }
+              },
+              "pipelinechannel--pair": {
+                "componentInputParameter": "pair"
+              },
+              "pipelinechannel--timeframe": {
+                "componentInputParameter": "timeframe"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "If_Model_Not_Promoted"
+          },
+          "triggerPolicy": {
+            "condition": "inputs.parameter_values['pipelinechannel--decide-promotion-op-Output'] == false"
+          }
+        },
+        "decide-promotion-op": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-decide-promotion-op"
+          },
+          "dependentTasks": [
+            "backtest-op",
+            "train-lstm-vertex-ai-op",
+            "train-rl-op"
+          ],
+          "inputs": {
+            "parameters": {
+              "current_production_metrics_path": {
+                "runtimeValue": {
+                  "constant": "gs://trading-ai-models-460823/models/production/{{$.inputs.parameters['pipelinechannel--pair']}}/{{$.inputs.parameters['pipelinechannel--timeframe']}}/metrics_production.json"
+                }
+              },
+              "gcs_bucket_name": {
+                "runtimeValue": {
+                  "constant": "trading-ai-models-460823"
+                }
+              },
+              "new_backtest_metrics_dir": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "Output",
+                  "producerTask": "backtest-op"
+                }
+              },
+              "new_lstm_artifacts_dir": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "Output",
+                  "producerTask": "train-lstm-vertex-ai-op"
+                }
+              },
+              "new_rl_model_path": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "Output",
+                  "producerTask": "train-rl-op"
+                }
+              },
+              "pair": {
+                "componentInputParameter": "pair"
+              },
+              "pipelinechannel--pair": {
+                "componentInputParameter": "pair"
+              },
+              "pipelinechannel--timeframe": {
+                "componentInputParameter": "timeframe"
+              },
+              "production_base_dir": {
+                "runtimeValue": {
+                  "constant": "gs://trading-ai-models-460823/models/production_v2"
+                }
+              },
+              "project_id": {
+                "runtimeValue": {
+                  "constant": "trading-ai-460823"
+                }
+              },
+              "timeframe": {
+                "componentInputParameter": "timeframe"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "Decide_Model_Promotion"
+          }
+        },
+        "optimize-lstm-op": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-optimize-lstm-op"
+          },
+          "dependentTasks": [
+            "prepare-opt-data-op"
+          ],
+          "inputs": {
+            "parameters": {
+              "features_path": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "Output",
+                  "producerTask": "prepare-opt-data-op"
+                }
+              },
+              "gcs_bucket_name": {
+                "runtimeValue": {
+                  "constant": "trading-ai-models-460823"
+                }
+              },
+              "n_trials": {
+                "componentInputParameter": "n_trials"
+              },
+              "output_gcs_prefix": {
+                "runtimeValue": {
+                  "constant": "gs://trading-ai-models-460823/params/LSTM_v2"
+                }
+              },
+              "pair": {
+                "componentInputParameter": "pair"
+              },
+              "project_id": {
+                "runtimeValue": {
+                  "constant": "trading-ai-460823"
+                }
+              },
+              "timeframe": {
+                "componentInputParameter": "timeframe"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "Optimize_LSTM_Hyperparameters_CPU_Only"
+          }
+        },
+        "prepare-opt-data-op": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-prepare-opt-data-op"
+          },
+          "dependentTasks": [
+            "update-data-op"
+          ],
+          "inputs": {
+            "parameters": {
+              "gcs_bucket_name": {
+                "runtimeValue": {
+                  "constant": "trading-ai-models-460823"
+                }
+              },
+              "output_gcs_prefix": {
+                "runtimeValue": {
+                  "constant": "gs://trading-ai-models-460823/data_filtered_for_opt_v2"
+                }
+              },
+              "pair": {
+                "componentInputParameter": "pair"
+              },
+              "project_id": {
+                "runtimeValue": {
+                  "constant": "trading-ai-460823"
+                }
+              },
+              "timeframe": {
+                "componentInputParameter": "timeframe"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "Prepare_Optimization_Data"
+          }
+        },
+        "prepare-rl-data-op": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-prepare-rl-data-op"
+          },
+          "dependentTasks": [
+            "train-lstm-vertex-ai-op"
+          ],
+          "inputs": {
+            "parameters": {
+              "gcs_bucket_name": {
+                "runtimeValue": {
+                  "constant": "trading-ai-models-460823"
+                }
+              },
+              "lstm_model_dir": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "Output",
+                  "producerTask": "train-lstm-vertex-ai-op"
+                }
+              },
+              "output_gcs_prefix": {
+                "runtimeValue": {
+                  "constant": "gs://trading-ai-models-460823/data_rl_inputs_v2"
+                }
+              },
+              "pair": {
+                "componentInputParameter": "pair"
+              },
+              "project_id": {
+                "runtimeValue": {
+                  "constant": "trading-ai-460823"
+                }
+              },
+              "timeframe": {
+                "componentInputParameter": "timeframe"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "Prepare_RL_Data"
+          }
+        },
+        "train-lstm-vertex-ai-op": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-train-lstm-vertex-ai-op"
+          },
+          "dependentTasks": [
+            "optimize-lstm-op"
+          ],
+          "inputs": {
+            "parameters": {
+              "gcs_bucket_name": {
+                "runtimeValue": {
+                  "constant": "trading-ai-models-460823"
+                }
+              },
+              "output_gcs_prefix": {
+                "runtimeValue": {
+                  "constant": "gs://trading-ai-models-460823/models/LSTM_v2"
+                }
+              },
+              "pair": {
+                "componentInputParameter": "pair"
+              },
+              "params_path": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "Output",
+                  "producerTask": "optimize-lstm-op"
+                }
+              },
+              "project_id": {
+                "runtimeValue": {
+                  "constant": "trading-ai-460823"
+                }
+              },
+              "region": {
+                "runtimeValue": {
+                  "constant": "us-central1"
+                }
+              },
+              "timeframe": {
+                "componentInputParameter": "timeframe"
+              },
+              "vertex_accelerator_count": {
+                "componentInputParameter": "vertex_lstm_accelerator_count"
+              },
+              "vertex_accelerator_type": {
+                "componentInputParameter": "vertex_lstm_accelerator_type"
+              },
+              "vertex_machine_type": {
+                "componentInputParameter": "vertex_lstm_machine_type"
+              },
+              "vertex_service_account": {
+                "componentInputParameter": "vertex_lstm_service_account"
+              },
+              "vertex_training_image_uri": {
+                "componentInputParameter": "vertex_lstm_training_image"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "Train_LSTM_Model_Vertex_AI"
+          }
+        },
+        "train-rl-op": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-train-rl-op"
+          },
+          "dependentTasks": [
+            "prepare-rl-data-op",
+            "train-lstm-vertex-ai-op"
+          ],
+          "inputs": {
+            "parameters": {
+              "gcs_bucket_name": {
+                "runtimeValue": {
+                  "constant": "trading-ai-models-460823"
+                }
+              },
+              "lstm_model_dir": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "Output",
+                  "producerTask": "train-lstm-vertex-ai-op"
+                }
+              },
+              "output_gcs_prefix": {
+                "runtimeValue": {
+                  "constant": "gs://trading-ai-models-460823/models/RL_v2"
+                }
+              },
+              "pair": {
+                "componentInputParameter": "pair"
+              },
+              "project_id": {
+                "runtimeValue": {
+                  "constant": "trading-ai-460823"
+                }
+              },
+              "rl_data_path": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "Output",
+                  "producerTask": "prepare-rl-data-op"
+                }
+              },
+              "tensorboard_logs_gcs_prefix": {
+                "runtimeValue": {
+                  "constant": "gs://trading-ai-models-460823/tensorboard_logs_v2"
+                }
+              },
+              "timeframe": {
+                "componentInputParameter": "timeframe"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "Train_PPO_Agent"
+          }
+        },
+        "update-data-op": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-update-data-op"
+          },
+          "inputs": {
+            "parameters": {
+              "gcs_bucket_name": {
+                "runtimeValue": {
+                  "constant": "trading-ai-models-460823"
+                }
+              },
+              "pair": {
+                "componentInputParameter": "pair"
+              },
+              "polygon_api_key_secret_name": {
+                "componentInputParameter": "polygon_api_key_secret_name_param"
+              },
+              "polygon_api_key_secret_version": {
+                "componentInputParameter": "polygon_api_key_secret_version_param"
+              },
+              "project_id": {
+                "runtimeValue": {
+                  "constant": "trading-ai-460823"
+                }
+              },
+              "timeframe": {
+                "componentInputParameter": "timeframe"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "Update_Market_Data"
+          }
+        }
+      }
+    },
+    "inputDefinitions": {
+      "parameters": {
+        "backtest_features_path": {
+          "defaultValue": "gs://trading-ai-models-460823/backtest_data/EURUSD_15minute_unseen.parquet",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "kfp_opt_accelerator_count": {
+          "defaultValue": 0.0,
+          "isOptional": true,
+          "parameterType": "NUMBER_INTEGER"
+        },
+        "kfp_opt_accelerator_type": {
+          "defaultValue": "ACCELERATOR_TYPE_UNSPECIFIED",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "n_trials": {
+          "defaultValue": 2.0,
+          "isOptional": true,
+          "parameterType": "NUMBER_INTEGER"
+        },
+        "pair": {
+          "defaultValue": "EURUSD",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "polygon_api_key_secret_name_param": {
+          "defaultValue": "polygon-api-key",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "polygon_api_key_secret_version_param": {
+          "defaultValue": "latest",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "timeframe": {
+          "defaultValue": "15minute",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "vertex_lstm_accelerator_count": {
+          "defaultValue": 0.0,
+          "isOptional": true,
+          "parameterType": "NUMBER_INTEGER"
+        },
+        "vertex_lstm_accelerator_type": {
+          "defaultValue": "ACCELERATOR_TYPE_UNSPECIFIED",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "vertex_lstm_machine_type": {
+          "defaultValue": "n1-standard-4",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "vertex_lstm_service_account": {
+          "defaultValue": "vertex-custom-job-sa@trading-ai-460823.iam.gserviceaccount.com",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "vertex_lstm_training_image": {
+          "defaultValue": "us-central1-docker.pkg.dev/trading-ai-460823/trading-images/trainer-cpu:latest",
+          "isOptional": true,
+          "parameterType": "STRING"
+        }
+      }
+    }
+  },
+  "schemaVersion": "2.1.0",
+  "sdkVersion": "kfp-2.13.0"
+}
