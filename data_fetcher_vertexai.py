@@ -125,7 +125,8 @@ def main():
                 current = window_end + datetime.timedelta(days=1)
             if dfs:
                 df_all = pd.concat(dfs, ignore_index=True)
-                out_path = f"{args.data_dir.rstrip('/')}/{sym}_{tf}.parquet"
+                output_directory = f"{args.data_dir.rstrip('/')}/{sym}/{tf}"
+                out_path = f"{output_directory}/{sym}_{tf}.parquet"
                 save_dataframe(df_all, out_path)
                 logger.info(f"   ✅ Guardado {len(df_all)} registros en {out_path}")
             else:
