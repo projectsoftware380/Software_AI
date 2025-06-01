@@ -114,7 +114,12 @@ def update_data_op(
     message_dict = {"symbols": [pair], "timeframes": [timeframe]}
     message_str = json.dumps(message_dict)
 
-    command = ["python", "data_orchestrator.py", "--mode", "on-demand", "--message", message_str]
+    command = [
+    "python", "data_orchestrator.py",
+    "--mode", "on-demand",
+    "--message", message_str,
+    "--project_id", project_id
+]
 
     logger.info(f"Command to execute for data_orchestrator.py: {' '.join(command)}")
 

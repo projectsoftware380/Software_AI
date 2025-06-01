@@ -37,14 +37,17 @@ try:
     from google.oauth2 import service_account
     from google.auth.exceptions import DefaultCredentialsError
 except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "gcsfs", "google-cloud-storage", "google-cloud-pubsub"])
+    subprocess.check_call([
+        sys.executable, "-m", "pip", "install", "-q",
+        "gcsfs", "google-cloud-storage", "google-cloud-pubsub"
+    ])
     import gcsfs
     from google.cloud import storage
     from google.cloud import pubsub_v1
     from google.oauth2 import service_account
     from google.auth.exceptions import DefaultCredentialsError
 
-import pandas as pd # Necesario para leer el último timestamp del parquet
+import pandas as pd  # Necesario para leer el último timestamp del parquet
 
 # ---------------- Configuración Global -------------------------------------
 # Configura logging para que sea visible en Cloud Logging
@@ -52,17 +55,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # Nombre del bucket de GCS. Se puede sobreescribir con una variable de entorno.
-# Usamos el nombre que ya confirmaste: trading-ai-models-460823
-GCS_BUCKET = os.getenv("GCS_BUCKET", "trading-ai-models-460823") 
+GCS_BUCKET = os.getenv("GCS_BUCKET", "trading-ai-models-460823")
 CONFIG_PATH = f"gs://{GCS_BUCKET}/config/data_fetch_config.json"
 DATA_BASE_PATH = f"gs://{GCS_BUCKET}/data"
 
-# ID del proyecto de GCP. Se obtiene de las variables de entorno de Cloud Run.
-PUBSUB_PROJECT_ID = os.getenv("GCP_PROJECT", os.getenv("GOOGLE_CLOUD_PROJECT"))
 # Topics de Pub/Sub (asegúrate de que existan en tu proyecto GCP)
 SUCCESS_TOPIC_ID = "data-ingestion-success"
 FAILURE_TOPIC_ID = "data-ingestion-failures"
-# Topic para solicitudes bajo demanda (el orquestador estará suscrito a este)
 REQUEST_TOPIC_ID = "data-ingestion-requests"
 
 # ---------------- Helpers para GCS y Pub/Sub -----------------------------
@@ -81,17 +80,20 @@ def get_gcs_client():
         except Exception as e:
             logger.error(f"Error al cargar credenciales de GOOGLE_APPLICATION_CREDENTIALS: {e}")
             # Si hay un problema con el archivo, intentar con credenciales predeterminadas de GCP
-            pass 
+            pass
     # Intentar obtener credenciales por defecto (funciona en GCP, o si gcloud auth application-default login se usó localmente)
     try:
         return storage.Client()
     except DefaultCredentialsError as e:
-        logger.error(f"No se pudieron obtener credenciales predeterminadas de GCP: {e}. Asegúrate de ejecutar 'gcloud auth application-default login' o de configurar GOOGLE_APPLICATION_CREDENTIALS.")
-        raise # Relanzar para abortar si no hay credenciales
+        logger.error(
+            f"No se pudieron obtener credenciales predeterminadas de GCP: {e}. "
+            "Asegúrate de ejecutar 'gcloud auth application-default login' "
+            "o de configurar GOOGLE_APPLICATION_CREDENTIALS."
+        )
+        raise  # Relanzar para abortar si no hay credenciales
 
 def get_pubsub_publisher_client():
     """Obtiene un cliente de Pub/Sub para publicar mensajes."""
-    # El cliente de Pub/Sub automáticamente busca las credenciales predeterminadas.
     return pubsub_v1.PublisherClient()
 
 def download_config_from_gcs(gcs_path: str) -> dict:
@@ -110,37 +112,42 @@ def download_config_from_gcs(gcs_path: str) -> dict:
 def check_parquet_exists(gcs_parquet_path: str) -> bool:
     """Verifica si un archivo Parquet existe en GCS."""
     try:
-        # gcsfs.GCSFileSystem.exists() intentará usar las credenciales adecuadas.
-        fs = gcsfs.GCSFileSystem(token="cloud") # 'token="cloud"' le dice a gcsfs que busque las credenciales de GCP.
+        fs = gcsfs.GCSFileSystem(token="cloud")  # 'token="cloud"' usa credenciales de GCP
         return fs.exists(gcs_parquet_path)
     except Exception as e:
-        # Aquí, si falla el chequeo de existencia, significa que no hay credenciales para GCSFS
-        # o que hay un problema de red al acceder al servicio de credenciales.
-        logger.critical(f"Error CRÍTICO al verificar la existencia de {gcs_parquet_path}: {e}. La ejecución de GCS fallará.")
-        raise # Abortar si no se puede verificar la existencia
+        logger.critical(
+            f"Error CRÍTICO al verificar la existencia de {gcs_parquet_path}: {e}. La ejecución de GCS fallará."
+        )
+        raise
 
 def get_latest_timestamp_from_parquet(gcs_parquet_path: str) -> str:
     """Lee el último timestamp de un archivo Parquet en GCS."""
     try:
-        # Usar gcsfs para que pandas pueda leer directamente de GCS.
-        # Depende de que las credenciales de GCS estén configuradas correctamente.
-        df = pd.read_parquet(gcs_parquet_path, engine="pyarrow", storage_options={"token": "cloud"})
+        df = pd.read_parquet(
+            gcs_parquet_path,
+            engine="pyarrow",
+            storage_options={"token": "cloud"}
+        )
         if "timestamp" in df.columns and not df["timestamp"].empty:
-            # Asegurarse de que el timestamp sea un tipo datetime antes de encontrar el máximo
             df["timestamp"] = pd.to_datetime(df["timestamp"])
             latest_ts = df["timestamp"].max()
-            # Devolver la fecha como string YYYY-MM-DD
             return latest_ts.strftime('%Y-%m-%d')
-        logger.warning(f"No se encontró la columna 'timestamp' o está vacía en {gcs_parquet_path}. Asumiendo que no se pudo leer el último timestamp.")
+        logger.warning(
+            f"No se encontró la columna 'timestamp' o está vacía en {gcs_parquet_path}. "
+            "Asumiendo que no se pudo leer el último timestamp."
+        )
         return None
     except Exception as e:
-        logger.error(f"Error al leer el último timestamp de {gcs_parquet_path}: {e}. Esto podría ser por problemas de credenciales o archivo corrupto.")
+        logger.error(
+            f"Error al leer el último timestamp de {gcs_parquet_path}: {e}. "
+            "Esto podría ser por problemas de credenciales o archivo corrupto."
+        )
         return None
 
-def publish_message(topic_id: str, message_data: dict):
-    """Publica un mensaje JSON en un topic de Pub/Sub."""
+def publish_message(topic_id: str, message_data: dict, project_id: str):
+    """Publica un mensaje JSON en un topic de Pub/Sub usando el project_id dado."""
     publisher = get_pubsub_publisher_client()
-    topic_path = publisher.topic_path(PUBSUB_PROJECT_ID, topic_id)
+    topic_path = publisher.topic_path(project_id, topic_id)
     message_json = json.dumps(message_data)
     message_bytes = message_json.encode("utf-8")
 
@@ -153,7 +160,7 @@ def publish_message(topic_id: str, message_data: dict):
 
 # ---------------- Lógica Principal de Orquestación -----------------------
 
-def process_data_fetch(symbol: str, timeframe: str, config: dict, env_vars_for_subprocess: dict):
+def process_data_fetch(symbol: str, timeframe: str, config: dict, env_vars_for_subprocess: dict) -> bool:
     """
     Procesa la descarga de datos para un símbolo y timeframe específico,
     incluyendo la lógica de reintentos.
@@ -170,86 +177,129 @@ def process_data_fetch(symbol: str, timeframe: str, config: dict, env_vars_for_s
         if check_parquet_exists(gcs_parquet_file):
             latest_ts_str = get_latest_timestamp_from_parquet(gcs_parquet_file)
             if latest_ts_str:
-                # Añadir un día para no duplicar el último registro
-                start_date_to_fetch = (datetime.fromisoformat(latest_ts_str).date() + timedelta(days=1)).isoformat()
-                logger.info(f"  Parquet existente. Último dato: {latest_ts_str}. Iniciando descarga incremental desde: {start_date_to_fetch}")
-                # Si el start_date calculado es posterior a la fecha actual, los datos ya están al día.
+                start_date_to_fetch = (
+                    datetime.fromisoformat(latest_ts_str).date() + timedelta(days=1)
+                ).isoformat()
+                logger.info(
+                    f"  Parquet existente. Último dato: {latest_ts_str}. "
+                    f"Iniciando descarga incremental desde: {start_date_to_fetch}"
+                )
                 if datetime.fromisoformat(start_date_to_fetch).date() > date.today():
-                    logger.info(f"  Datos para {symbol} | {timeframe} ya están actualizados. Saltando descarga.")
-                    return True # Éxito, no hay nada que hacer
+                    logger.info(
+                        f"  Datos para {symbol} | {timeframe} ya están actualizados. Saltando descarga."
+                    )
+                    return True  # Éxito, no hay nada que hacer
             else:
-                logger.warning(f"  No se pudo obtener el último timestamp del Parquet existente. Forzando descarga completa para {symbol} | {timeframe}.")
+                logger.warning(
+                    f"  No se pudo obtener el último timestamp del Parquet existente. "
+                    f"Forzando descarga completa para {symbol} | {timeframe}."
+                )
                 start_date_to_fetch = config["default_start_date_new_parquet"]
         else:
-            logger.info(f"  Parquet no existente. Iniciando descarga completa desde: {config['default_start_date_new_parquet']}")
+            logger.info(
+                f"  Parquet no existente. Iniciando descarga completa desde: "
+                f"{config['default_start_date_new_parquet']}"
+            )
             start_date_to_fetch = config["default_start_date_new_parquet"]
     except Exception as e:
-        logger.critical(f"Error al determinar el estado del parquet para {symbol} | {timeframe}: {e}. Abortando este par.")
-        return False # No podemos ni determinar el estado del parquet, es un fallo crítico para este par.
-
+        logger.critical(
+            f"Error al determinar el estado del parquet para {symbol} | {timeframe}: {e}. Abortando este par."
+        )
+        return False  # Fallo crítico
 
     # Reintentos para la llamada a data_fetcher_vertexai.py
     max_retries = 5
     for attempt in range(1, max_retries + 1):
         try:
-            logger.info(f"  Intento {attempt}/{max_retries}: Llamando a data_fetcher_vertexai.py para {symbol} | {timeframe} ({start_date_to_fetch} a {end_date_to_fetch})...")
-            
+            logger.info(
+                f"  Intento {attempt}/{max_retries}: Llamando a data_fetcher_vertexai.py "
+                f"para {symbol} | {timeframe} ({start_date_to_fetch} a {end_date_to_fetch})..."
+            )
+
             command = [
-                sys.executable,  # Usa el intérprete de Python actual
-                "data_fetcher_vertexai.py", # Asegúrate que este script es ejecutable o está en PATH
+                sys.executable,
+                "data_fetcher_vertexai.py",
                 "--data-dir", DATA_BASE_PATH,
                 "--symbols", symbol,
                 "--timeframes", timeframe,
                 "--start-date", start_date_to_fetch,
                 "--end-date", end_date_to_fetch,
-                "--polygon-key", os.getenv("POLYGON_API_KEY") # API Key inyectada por Secret Manager
+                "--polygon-key", os.getenv("POLYGON_API_KEY")
             ]
-            
-            # Capturar la salida para logging
-            # Pasa las variables de entorno al subproceso
-            result = subprocess.run(command, capture_output=True, text=True, check=False, env=env_vars_for_subprocess)
+
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env_vars_for_subprocess
+            )
 
             if result.returncode == 0:
                 logger.info(f"  ✅ data_fetcher_vertexai.py completado para {symbol} | {timeframe}.")
                 logger.info(f"  STDOUT: {result.stdout}")
-                return True # Éxito
+                return True
             else:
-                logger.error(f"  ❌ data_fetcher_vertexai.py falló para {symbol} | {timeframe} (Intento {attempt}):")
+                logger.error(
+                    f"  ❌ data_fetcher_vertexai.py falló para {symbol} | {timeframe} (Intento {attempt}):"
+                )
                 logger.error(f"  STDERR: {result.stderr}")
+
                 if "429 Too Many Requests" in result.stderr:
                     logger.warning("  Posible límite de tasa de Polygon.io. Reintentando...")
                 elif "401 Unauthorized" in result.stderr:
                     logger.critical("  API Key de Polygon.io inválida. Deteniendo reintentos.")
-                    return False # Error fatal, no reintentar
-                elif "Invalid gcloud credentials" in result.stderr or "Failed to retrieve http://metadata.google.internal" in result.stderr:
-                    logger.critical("  Error de credenciales de GCS en subproceso. Asegúrate de que GOOGLE_APPLICATION_CREDENTIALS esté configurada correctamente.")
-                    return False # Error fatal, no reintentar este tipo de error
+                    return False
+                elif (
+                    "Invalid gcloud credentials" in result.stderr
+                    or "Failed to retrieve http://metadata.google.internal" in result.stderr
+                ):
+                    logger.critical(
+                        "  Error de credenciales de GCS en subproceso. "
+                        "Asegúrate de que GOOGLE_APPLICATION_CREDENTIALS esté configurada correctamente."
+                    )
+                    return False
 
         except FileNotFoundError:
-            logger.critical("  Error: data_fetcher_vertexai.py no encontrado. Asegúrate de que esté en la imagen Docker.")
-            return False # Error fatal
+            logger.critical(
+                "  Error: data_fetcher_vertexai.py no encontrado. Asegúrate de que esté en la imagen Docker."
+            )
+            return False
 
         except Exception as e:
-            logger.error(f"  Error inesperado durante el intento {attempt} para {symbol} | {timeframe}: {e}")
+            logger.error(
+                f"  Error inesperado durante el intento {attempt} para {symbol} | {timeframe}: {e}"
+            )
 
         # Espera exponencial antes del próximo reintento
         time.sleep(2 ** attempt)
 
     logger.error(f"  ❌ Fallo persistente para {symbol} | {timeframe} después de {max_retries} reintentos.")
-    return False # Fallo después de todos los reintentos
+    return False  # Fallo total
 
 # ---------------- Función Principal del Agente de Datos --------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Agente de Orquestación de Descarga de Datos de Mercado.")
-    parser.add_argument("--mode", default="scheduled", choices=["scheduled", "on-demand"],
-                        help="Modo de ejecución: 'scheduled' para todos los pares en config, 'on-demand' para un mensaje de Pub/Sub.")
-    parser.add_argument("--message", type=str, help="Mensaje JSON de Pub/Sub para modo bajo demanda.")
+    parser = argparse.ArgumentParser(
+        description="Agente de Orquestación de Descarga de Datos de Mercado."
+    )
+    parser.add_argument(
+        "--mode", default="scheduled", choices=["scheduled", "on-demand"],
+        help="Modo de ejecución: 'scheduled' para todos los pares en config, "
+             "'on-demand' para un mensaje de Pub/Sub."
+    )
+    parser.add_argument(
+        "--message", type=str,
+        help="Mensaje JSON de Pub/Sub para modo bajo demanda."
+    )
+    parser.add_argument(
+        "--project_id", type=str, required=True,
+        help="ID del proyecto GCP (ej. trading-ai-460823)."
+    )
     args = parser.parse_args()
 
     logger.info(f"[{datetime.utcnow().isoformat()} UTC] Iniciando Agente de Datos en modo: {args.mode}")
 
-    # Cargar configuración desde GCS
     try:
         config = download_config_from_gcs(CONFIG_PATH)
         logger.info(f"Configuración cargada: {config}")
@@ -262,17 +312,15 @@ def main():
     callback_topic_id = None
     request_id = None
 
-    # Lógica para procesar el mensaje de Pub/Sub si el modo es 'on-demand'
     if args.mode == "on-demand":
         if not args.message:
-            logger.error("Modo 'on-demand' requiere un mensaje JSON de Pub/Sub (o simulación para prueba local).")
+            logger.error(
+                "Modo 'on-demand' requiere un mensaje JSON de Pub/Sub "
+                "(o simulación para prueba local)."
+            )
             sys.exit(1)
         try:
-            # En un entorno real de Cloud Run, el mensaje entrante debe ser decodificado de base64.
-            # El activador de Pub/Sub de Cloud Run pasa el mensaje real decodificado en el cuerpo.
-            # Aquí, asumimos que args.message ya es un JSON string.
-            message_data = json.loads(args.message) 
-
+            message_data = json.loads(args.message)
             symbols_to_process = message_data.get("symbols", [])
             timeframes_to_process = message_data.get("timeframes", [])
             callback_topic_id = message_data.get("callback_topic")
@@ -280,83 +328,106 @@ def main():
             if not symbols_to_process or not timeframes_to_process:
                 logger.error("Mensaje 'on-demand' inválido: 'symbols' o 'timeframes' vacíos.")
                 sys.exit(1)
-            logger.info(f"Procesando solicitud bajo demanda para símbolos: {symbols_to_process}, timeframes: {timeframes_to_process}")
+            logger.info(
+                f"Procesando solicitud bajo demanda para símbolos: {symbols_to_process}, "
+                f"timeframes: {timeframes_to_process}"
+            )
         except json.JSONDecodeError as e:
             logger.error(f"El mensaje de Pub/Sub no es un JSON válido: {e}")
             sys.exit(1)
-    else: # scheduled mode
+    else:
         symbols_to_process = config.get("symbols", [])
         timeframes_to_process = config.get("timeframes", [])
         if not symbols_to_process or not timeframes_to_process:
             logger.error("Configuración 'scheduled' inválida: 'symbols' o 'timeframes' vacíos.")
             sys.exit(1)
-        logger.info(f"Procesando todos los símbolos/timeframes configurados: {symbols_to_process}, {timeframes_to_process}")
-
+        logger.info(
+            f"Procesando todos los símbolos/timeframes configurados: "
+            f"{symbols_to_process}, {timeframes_to_process}"
+        )
 
     all_succeeded = True
     processed_pairs = []
     failed_pairs = []
 
-    # Preparar las variables de entorno que se pasarán al subproceso (data_fetcher_vertexai.py)
-    # Esto es CRUCIAL para que el subproceso tenga las credenciales de GCS y la API Key.
-    env_for_subprocess = os.environ.copy() # Copia todas las variables de entorno actuales
-    # Asegúrate de que la API Key de Polygon esté en el entorno del subproceso
+    # Variables de entorno para el subproceso (data_fetcher_vertexai.py)
+    env_for_subprocess = os.environ.copy()
     if not env_for_subprocess.get("POLYGON_API_KEY"):
-        logger.critical("Error: La variable de entorno POLYGON_API_KEY NO está configurada para el subproceso. La descarga fallará.")
-        all_succeeded = False # Considerar un fallo global si la API key falta desde el inicio.
-    # En el entorno local, asegura que GOOGLE_APPLICATION_CREDENTIALS se pase al subproceso
-    # para la autenticación de GCS. En GCP, esto no es necesario ya que las credenciales
-    # de la cuenta de servicio son automáticas.
+        logger.critical(
+            "Error: La variable de entorno POLYGON_API_KEY NO está configurada para el subproceso. "
+            "La descarga fallará."
+        )
+        all_succeeded = False
     if os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
         env_for_subprocess["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
     else:
-        logger.warning("GOOGLE_APPLICATION_CREDENTIALS no está configurada para la prueba local. Esto solo es un aviso en GCP.")
-
+        logger.warning(
+            "GOOGLE_APPLICATION_CREDENTIALS no está configurada para la prueba local. "
+            "Esto solo es un aviso en GCP."
+        )
 
     for symbol in symbols_to_process:
         for timeframe in timeframes_to_process:
-            # Si POLYGON_API_KEY no se encontró al inicio, no tiene sentido procesar.
             if not env_for_subprocess.get("POLYGON_API_KEY"):
-                failed_pairs.append({"symbol": symbol, "timeframe": timeframe, "reason": "Missing API Key env var"})
+                failed_pairs.append({
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "reason": "Missing API Key env var"
+                })
                 continue
 
-            # Pasa las variables de entorno preparadas a process_data_fetch
-            success = process_data_fetch(symbol, timeframe, config, env_vars_for_subprocess=env_for_subprocess)
+            success = process_data_fetch(
+                symbol, timeframe, config, env_vars_for_subprocess=env_for_subprocess
+            )
             if success:
                 processed_pairs.append(f"{symbol}_{timeframe}")
             else:
                 all_succeeded = False
-                failed_pairs.append({"symbol": symbol, "timeframe": timeframe, "reason": "Persistent fetch failure"})
+                failed_pairs.append({
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "reason": "Persistent fetch failure"
+                })
 
-    # Publicar notificaciones finales
     if all_succeeded:
         logger.info("🎉 Todas las descargas de datos completadas con éxito.")
-        publish_message(SUCCESS_TOPIC_ID, {
-            "status": "success",
-            "message": "Datos de mercado actualizados con éxito.",
-            "processed_pairs": processed_pairs,
-            "timestamp": datetime.utcnow().isoformat(),
-            "request_id": request_id # Incluir request_id si es modo bajo demanda
-        })
-        # Si es una solicitud bajo demanda con callback, notificar allí también
+        publish_message(
+            SUCCESS_TOPIC_ID,
+            {
+                "status": "success",
+                "message": "Datos de mercado actualizados con éxito.",
+                "processed_pairs": processed_pairs,
+                "timestamp": datetime.utcnow().isoformat(),
+                "request_id": request_id
+            },
+            args.project_id
+        )
         if callback_topic_id:
-            publish_message(callback_topic_id, {
-                "status": "data_ready",
-                "message": "Datos solicitados listos para entrenamiento.",
-                "symbols_timeframes": processed_pairs,
-                "request_id": request_id,
-                "timestamp": datetime.utcnow().isoformat()
-            })
+            publish_message(
+                callback_topic_id,
+                {
+                    "status": "data_ready",
+                    "message": "Datos solicitados listos para entrenamiento.",
+                    "symbols_timeframes": processed_pairs,
+                    "request_id": request_id,
+                    "timestamp": datetime.utcnow().isoformat()
+                },
+                args.project_id
+            )
     else:
         logger.error("❌ Algunas descargas de datos fallaron persistentemente.")
-        publish_message(FAILURE_TOPIC_ID, {
-            "status": "failure",
-            "message": "Fallo en la actualización de datos de mercado.",
-            "failed_pairs": failed_pairs,
-            "processed_pairs": processed_pairs, # Mostrar los que sí se procesaron
-            "timestamp": datetime.utcnow().isoformat(),
-            "request_id": request_id # Incluir request_id si es modo bajo demanda
-        })
+        publish_message(
+            FAILURE_TOPIC_ID,
+            {
+                "status": "failure",
+                "message": "Fallo en la actualización de datos de mercado.",
+                "failed_pairs": failed_pairs,
+                "processed_pairs": processed_pairs,
+                "timestamp": datetime.utcnow().isoformat(),
+                "request_id": request_id
+            },
+            args.project_id
+        )
 
     logger.info(f"[{datetime.utcnow().isoformat()} UTC] Agente de Datos finalizado.")
 
