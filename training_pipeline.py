@@ -255,7 +255,16 @@ def train_lstm_vertex_ai_op(
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     logger = logging.getLogger(__name__)
 
-    gcp_aiplatform.init(project=project_id, location=region)
+    # --- MODIFICACIÓN AQUÍ (Opción 1) ---
+    # Define la ruta GCS para el staging bucket.
+    # Puedes usar una subcarpeta dentro del bucket principal que ya estás utilizando.
+    staging_gcs_path = f"gs://{gcs_bucket_name}/staging_for_custom_jobs"
+
+    # Inicializa el SDK de Vertex AI incluyendo el staging_bucket
+    gcp_aiplatform.init(project=project_id, location=region, staging_bucket=staging_gcs_path)
+    logger.info(f"Vertex AI SDK inicializado. Staging bucket configurado en: {staging_gcs_path}")
+    # --- FIN DE MODIFICACIÓN ---
+
     timestamp_for_job = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     job_display_name = f"lstm-training-{pair.lower()}-{timeframe.lower()}-{timestamp_for_job}"
     training_script_args = [
@@ -313,7 +322,7 @@ def train_lstm_vertex_ai_op(
 
     storage_client = gcp_storage.Client(project=project_id)
     bucket = storage_client.bucket(expected_bucket_name)
-    max_poll_wait_sec, poll_interval_sec = 15 * 60, 30
+    max_poll_wait_sec, poll_interval_sec = 15 * 60, 30 # 15 minutos de espera máxima
     start_poll_time = time.time()
     found_model_dir_gcs_path = None
 
@@ -322,23 +331,31 @@ def train_lstm_vertex_ai_op(
         blobs = bucket.list_blobs(prefix=gcs_listing_prefix, delimiter="/")
         candidate_dirs = []
         for page in blobs.pages:
-            if page.prefixes:
+            if page.prefixes: # page.prefixes contiene los "subdirectorios"
                 for dir_prefix in page.prefixes:
+                    # dir_prefix será algo como 'models/LSTM_v2/EURUSD/15minute/20230101120000/'
+                    # Extraer el nombre del directorio (timestamp) y verificar su formato
                     try:
+                        # Asegurarse de que el último componente del prefijo sea un timestamp válido
                         datetime.strptime(dir_prefix.strip('/').split('/')[-1], "%Y%m%d%H%M%S")
+                        # Verificar si model.h5 existe en este directorio candidato
                         if bucket.blob(f"{dir_prefix}model.h5").exists():
                             candidate_dirs.append(f"gs://{expected_bucket_name}/{dir_prefix}")
-                    except ValueError: continue
+                    except ValueError:
+                        # Si el nombre del directorio no es un timestamp con el formato esperado, ignorarlo
+                        continue
+        
         if candidate_dirs:
+            # Ordenar por el nombre del directorio (timestamp) en orden descendente para obtener el más reciente
             found_model_dir_gcs_path = sorted(candidate_dirs, reverse=True)[0]
             logger.info(f"Found LSTM model directory in GCS: {found_model_dir_gcs_path}")
             return found_model_dir_gcs_path
+        
         time.sleep(poll_interval_sec)
 
     err_msg = f"LSTM model.h5 not found in gs://{expected_bucket_name}/{gcs_listing_prefix} after {max_poll_wait_sec / 60:.1f} min. Job: {custom_job.display_name}"
     logger.error(err_msg)
     raise TimeoutError(err_msg)
-
 
 @dsl.component(
     base_image=KFP_COMPONENTS_IMAGE_URI,
