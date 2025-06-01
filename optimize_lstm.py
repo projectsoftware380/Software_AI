@@ -5,8 +5,6 @@ import argparse
 from datetime import datetime
 
 # ── Importaciones de librerías principales ──────────────────────
-# Todas estas dependencias se gestionarán a través de requirements.txt en el Dockerfile.
-
 warnings.filterwarnings("ignore", category=FutureWarning)
 import numpy as np
 if not hasattr(np, "NaN"): np.NaN = np.nan
@@ -20,7 +18,7 @@ from tensorflow.keras import layers, models, callbacks, optimizers, mixed_precis
 from collections import deque
 
 # Importación corregida para módulos de core
-from indicators import build_indicators #
+from indicators import build_indicators
 
 # reproducibilidad
 random.seed(42); np.random.seed(42); tf.random.set_seed(42)
@@ -57,7 +55,7 @@ def upload_gs(local: Path, uri: str):
     Subir archivo a GCS desde una ruta local.
     """
     bucket, blob = uri[5:].split("/", 1)
-    gcs_client().bucket(bucket).blob(blob).upload_from_filename(str(local)) #
+    gcs_client().bucket(bucket).blob(blob).upload_from_filename(str(local))
 
 def maybe_local(path: str) -> Path:
     """
@@ -101,41 +99,34 @@ def make_model(inp_sh, lr, dr, filt, units, heads):
     model.compile(optimizers.Adam(lr), loss="mae")
     return model
 
-# ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-# CORRECCIÓN APLICADA DENTRO DE ESTA FUNCIÓN:
-# Se reemplazaron 'tup', 'tdn', y 'dmin' con 'up_thr', 'dn_thr', y 'delta_min' respectivamente.
-# ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-def quick_bt(pred, closes, atr_pips, rr, up_thr, dn_thr, delta_min, smooth_win): # Parámetros de entrada
+# ▶▶▶ Corrección en quick_bt: nombres de parámetros actualizados ◀◀◀
+def quick_bt(pred, closes, atr_pips, rr, up_thr, dn_thr, delta_min, smooth_win):
     net, pos = 0.0, False
     dq = deque(maxlen=smooth_win)
     for (u, d), price, atr in zip(pred, closes, atr_pips):
         mag, diff = max(u, d), abs(u - d)
         raw = 1 if u > d else -1
-        # Usar los nombres de parámetros correctos: up_thr, dn_thr, delta_min
-        cond = ((raw==1 and mag>=up_thr) or (raw==-1 and mag>=dn_thr)) and diff>=delta_min
+        cond = ((raw == 1 and mag >= up_thr) or (raw == -1 and mag >= dn_thr)) and diff >= delta_min
         dq.append(raw if cond else 0)
         buys, sells = dq.count(1), dq.count(-1)
-        signal = 1 if buys>smooth_win//2 else -1 if sells>smooth_win//2 else 0
+        signal = 1 if buys > smooth_win // 2 else -1 if sells > smooth_win // 2 else 0
         if not pos and signal:
             pos, entry, ed = True, price, signal
-            # Usar los nombres de parámetros correctos: up_thr
-            sl = (up_thr if ed==1 else dn_thr)*atr; tp = rr*sl; continue
+            sl = (up_thr if ed == 1 else dn_thr) * atr
+            tp = rr * sl
+            continue
         if pos and signal:
-            # Usar los nombres de parámetros correctos: up_thr
-            sl = min(sl, (up_thr if signal==1 else dn_thr)*atr)
-            tp = max(tp, rr*sl)
+            sl = min(sl, (up_thr if signal == 1 else dn_thr) * atr)
+            tp = max(tp, rr * sl)
         if pos:
-            pnl = (price-entry)/tick if ed==1 else (entry-price)/tick
-            if pnl>=tp or pnl<=-sl:
-                net += tp if pnl>=tp else -sl; pos=False
+            pnl = (price - entry) / tick if ed == 1 else (entry - price) / tick
+            if pnl >= tp or pnl <= -sl:
+                net += tp if pnl >= tp else -sl
+                pos = False
     return net
-# ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
-# FIN DE LA CORRECCIÓN
-# ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
 # ── Optuna objective ───────────────────────────────────────────
 def objective(trial):
-    # HP trading
     pars = {
         "horizon":    trial.suggest_int("horizon", 10, 30),
         "rr":         trial.suggest_float("rr", 1.5, 3.0),
@@ -144,13 +135,11 @@ def objective(trial):
         "delta_min":  trial.suggest_float("delta_min", 0.01, 0.5),
         "smooth_win": trial.suggest_int("smooth_win", 1, 5),
         "win":        trial.suggest_int("win", 20, 60),
-        # modelo
         "lr":   trial.suggest_float("lr", 1e-4, 3e-3, log=True),
         "dr":   trial.suggest_float("dr", 0.1, 0.5),
         "filt": trial.suggest_categorical("filt", [16, 32, 64]),
         "units":trial.suggest_categorical("units", [32, 64, 128]),
         "heads":trial.suggest_categorical("heads", [2, 4, 8]),
-        # indicadores
         "sma_len":  trial.suggest_categorical("sma_len",  [20, 40, 60]),
         "rsi_len":  trial.suggest_categorical("rsi_len",  [7, 14, 21]),
         "macd_fast":trial.suggest_categorical("macd_fast",[8, 12]),
@@ -158,56 +147,79 @@ def objective(trial):
         "stoch_len":trial.suggest_categorical("stoch_len",[14, 21]),
     }
 
-    # Pasar una copia de df_raw para no modificar el original en cada trial
+    # Construir indicadores sobre una copia de df_raw
     df = build_indicators(df_raw.copy(), pars, ATR_LEN)
-    
-    clo = df.close.values
-    atr = df[f"atr_{ATR_LEN}"].values / tick
 
-    fut  = np.roll(clo, -pars["horizon"]); fut[-pars["horizon"]:] = np.nan
+    # Validación de la columna ATR antes de usarla
+    atr_col = f"atr_{ATR_LEN}"
+    if atr_col not in df.columns:
+        print(f"Trial {trial.number}: ERROR - columna '{atr_col}' no existe. Saltando trial.")
+        return -1e9
+
+    num_nans = df[atr_col].isna().sum()
+    total_rows = len(df)
+    if num_nans == total_rows:
+        print(f"Trial {trial.number}: ERROR - columna '{atr_col}' tiene todos NaNs ({total_rows} filas). Saltando trial.")
+        return -1e9
+
+    # Rellenar NaNs puntuales en ATR
+    df[atr_col] = df[atr_col].fillna(method="bfill").fillna(method="ffill")
+    atr = df[atr_col].values / tick
+
+    # Resto de variables necesarias
+    clo = df.close.values
+    fut  = np.roll(clo, -pars["horizon"])
+    fut[-pars["horizon"]:] = np.nan
     diff = (fut - clo) / tick
-    up   = np.maximum(diff, 0)/atr
-    dn   = np.maximum(-diff, 0)/atr
+    up   = np.maximum(diff, 0) / atr
+    dn   = np.maximum(-diff, 0) / atr
     mask = (~np.isnan(diff)) & (np.maximum(up, dn) >= 0)
 
-    # Definir las columnas de features para el modelo, excluyendo ATR y timestamp
-    features_for_model = [col for col in df.columns if col not in [f"atr_{ATR_LEN}", 'timestamp']]
-    X_raw_filtered = df.loc[mask, features_for_model] #
-    
-    # Asegurarse de que X_raw_filtered sea numérico. Si hay cols no numéricas, robustscaler fallará.
-    # Esto es una validación adicional si `build_indicators` añade algo no numérico.
+    # Columnas de features (excluyendo ATR y timestamp)
+    features_for_model = [col for col in df.columns if col not in [atr_col, 'timestamp']]
+    X_raw_filtered = df.loc[mask, features_for_model]
+
+    # Mantener solo columnas numéricas
     X_raw_filtered = X_raw_filtered.select_dtypes(include=np.number)
-    
-    # Es crucial que X_raw_filtered no esté vacío. Si es así, significa que no hay datos válidos tras el mask.
+
     if X_raw_filtered.empty or len(X_raw_filtered) < pars["win"]:
-        print(f"Trial {trial.number}: X_raw_filtered está vacío o tiene menos datos que la ventana. Skipping.")
-        return -1e9 # Un valor muy bajo para indicar que este trial no es válido.
+        print(f"Trial {trial.number}: X_raw_filtered vacío o menor que ventana ({len(X_raw_filtered)} < {pars['win']}). Saltando trial.")
+        return -1e9
 
     y_up, y_dn, clo_m, atr_m = up[mask], dn[mask], clo[mask], atr[mask]
 
     sc  = RobustScaler()
-    X_s = sc.fit_transform(X_raw_filtered) #
-    
-    def seq(arr,w): return np.stack([arr[i-w:i] for i in range(w,len(arr))]).astype(np.float32)
+    X_s = sc.fit_transform(X_raw_filtered)
+
+    def seq(arr, w):
+        return np.stack([arr[i-w:i] for i in range(w, len(arr))]).astype(np.float32)
+
     X_seq = seq(X_s, pars["win"])
     if len(X_seq) < 500:
-        print(f"Trial {trial.number}: Longitud de secuencia insuficiente ({len(X_seq)}). Skipping.")
+        print(f"Trial {trial.number}: Longitud de secuencia insuficiente ({len(X_seq)}). Saltando trial.")
         return -1e6
 
     up_s, dn_s = y_up[pars["win"]:], y_dn[pars["win"]:]
     clo_s, atr_s = clo_m[pars["win"]:], atr_m[pars["win"]:]
 
-    X_tr,X_val,up_tr,up_val,dn_tr,dn_val,cl_tr,cl_val,at_tr,at_val = \
-        train_test_split(X_seq, up_s, dn_s, clo_s, atr_s,
-                         test_size=0.2, shuffle=False)
+    X_tr, X_val, up_tr, up_val, dn_tr, dn_val, cl_tr, cl_val, at_tr, at_val = \
+        train_test_split(
+            X_seq, up_s, dn_s, clo_s, atr_s,
+            test_size=0.2, shuffle=False
+        )
 
-    m = make_model(X_tr.shape[1:], pars["lr"], pars["dr"],
-                   pars["filt"], pars["units"], pars["heads"])
-    m.fit(X_tr, np.vstack([up_tr,dn_tr]).T,
-          validation_data=(X_val, np.vstack([up_val,dn_val]).T),
-          epochs=EPOCHS_OPT, batch_size=BATCH_OPT,
-          verbose=0,
-          callbacks=[callbacks.EarlyStopping(patience=5, restore_best_weights=True)])
+    m = make_model(
+        X_tr.shape[1:], pars["lr"], pars["dr"],
+        pars["filt"], pars["units"], pars["heads"]
+    )
+    m.fit(
+        X_tr,
+        np.vstack([up_tr, dn_tr]).T,
+        validation_data=(X_val, np.vstack([up_val, dn_val]).T),
+        epochs=EPOCHS_OPT, batch_size=BATCH_OPT,
+        verbose=0,
+        callbacks=[callbacks.EarlyStopping(patience=5, restore_best_weights=True)]
+    )
 
     score = quick_bt(
         m.predict(X_val, verbose=0),
@@ -216,29 +228,30 @@ def objective(trial):
         pars["delta_min"], pars["smooth_win"]
     )
 
-    tf.keras.backend.clear_session(); gc.collect()
+    tf.keras.backend.clear_session()
+    gc.collect()
     return score
 
-study = optuna.create_study(direction="maximize",
-                            sampler=optuna.samplers.TPESampler(seed=42))
+study = optuna.create_study(
+    direction="maximize",
+    sampler=optuna.samplers.TPESampler(seed=42)
+)
 study.optimize(objective, n_trials=args.n_trials, show_progress_bar=True)
 best = study.best_params
 
-# Guardar el best_params.json directamente en la ruta de salida de GCS.
-# No es necesario usar tempfile si el output es GCS y upload_gs lo maneja.
-output_gcs_path = f"{args.output}/best_params.json" # Asumiendo args.output es un prefijo de carpeta GCS
+# Guardar best_params.json en GCS
+output_gcs_path = f"{args.output}/best_params.json"
 best_params_content = json.dumps({
     **best,
     "pair": PAIR,
     "timeframe": TF,
-    "features_path": args.features, # Guardar la ruta original del parquet
+    "features_path": args.features,
     "timestamp": datetime.utcnow().isoformat()
 }, indent=2)
 
-# Crear un archivo temporal para guardar el JSON antes de subirlo.
 with tempfile.TemporaryDirectory() as tmpdir:
     local_tmp_file = Path(tmpdir) / "best_params.json"
     local_tmp_file.write_text(best_params_content)
-    upload_gs(local_tmp_file, output_gcs_path) #
-    
+    upload_gs(local_tmp_file, output_gcs_path)
+
 print(f"✅ best_params.json guardado en {output_gcs_path}")
