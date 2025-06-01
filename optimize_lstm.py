@@ -106,16 +106,19 @@ def quick_bt(pred, closes, atr_pips, rr, up_thr, dn_thr, delta_min, smooth_win):
     for (u, d), price, atr in zip(pred, closes, atr_pips):
         mag, diff = max(u, d), abs(u - d)
         raw = 1 if u > d else -1
+        # Corrección: usar up_thr, dn_thr, delta_min
         cond = ((raw == 1 and mag >= up_thr) or (raw == -1 and mag >= dn_thr)) and diff >= delta_min
         dq.append(raw if cond else 0)
         buys, sells = dq.count(1), dq.count(-1)
         signal = 1 if buys > smooth_win // 2 else -1 if sells > smooth_win // 2 else 0
         if not pos and signal:
             pos, entry, ed = True, price, signal
+            # Corrección: usar up_thr, dn_thr
             sl = (up_thr if ed == 1 else dn_thr) * atr
             tp = rr * sl
             continue
         if pos and signal:
+            # Corrección: usar up_thr, dn_thr
             sl = min(sl, (up_thr if signal == 1 else dn_thr) * atr)
             tp = max(tp, rr * sl)
         if pos:
@@ -150,21 +153,32 @@ def objective(trial):
     # Construir indicadores sobre una copia de df_raw
     df = build_indicators(df_raw.copy(), pars, ATR_LEN)
 
-    # Validación de la columna ATR antes de usarla
+    # ▶▶▶ Inicio de la corrección para TypeError en columna ATR ◀◀◀
     atr_col = f"atr_{ATR_LEN}"
     if atr_col not in df.columns:
-        print(f"Trial {trial.number}: ERROR - columna '{atr_col}' no existe. Saltando trial.")
-        return -1e9
+        print(f"Trial {trial.number}: ERROR - La columna ATR '{atr_col}' no existe en el DataFrame después de build_indicators. Saltando trial.")
+        return -1e9 # Retornar valor muy bajo
 
-    num_nans = df[atr_col].isna().sum()
-    total_rows = len(df)
-    if num_nans == total_rows:
-        print(f"Trial {trial.number}: ERROR - columna '{atr_col}' tiene todos NaNs ({total_rows} filas). Saltando trial.")
-        return -1e9
+    # Verificar si la columna está completamente vacía (None) o llena de NaNs
+    if df[atr_col].isnull().all():
+        print(f"Trial {trial.number}: ERROR - La columna ATR '{atr_col}' está completamente llena de NaNs ({len(df[atr_col])} valores). Saltando trial.")
+        return -1e9 # Retornar valor muy bajo
+    
+    num_nans_before_fill = df[atr_col].isna().sum()
+    if num_nans_before_fill > 0:
+        print(f"Trial {trial.number}: INFO - La columna ATR '{atr_col}' contiene {num_nans_before_fill} NaNs antes del rellenado.")
 
-    # Rellenar NaNs puntuales en ATR
+    # Rellenar NaNs puntuales en ATR (bfill y luego ffill para cubrir bordes)
     df[atr_col] = df[atr_col].fillna(method="bfill").fillna(method="ffill")
+
+    # Verificar si después del rellenado aún hay NaNs (esto podría ocurrir si toda la columna era NaN)
+    if df[atr_col].isnull().any():
+        print(f"Trial {trial.number}: ERROR - La columna ATR '{atr_col}' todavía contiene NaNs después de intentar rellenar. Esto indica que la columna podría haber estado completamente vacía o tener problemas estructurales. Saltando trial.")
+        return -1e9
+
+    print(f"Trial {trial.number}: INFO - Columna ATR '{atr_col}' validada y rellenada. NaNs restantes: {df[atr_col].isna().sum()}.")
     atr = df[atr_col].values / tick
+    # ▶▶▶ Fin de la corrección para TypeError en columna ATR ◀◀◀
 
     # Resto de variables necesarias
     clo = df.close.values
@@ -173,7 +187,7 @@ def objective(trial):
     diff = (fut - clo) / tick
     up   = np.maximum(diff, 0) / atr
     dn   = np.maximum(-diff, 0) / atr
-    mask = (~np.isnan(diff)) & (np.maximum(up, dn) >= 0)
+    mask = (~np.isnan(diff)) & (np.maximum(up, dn) >= 0) & (~np.isnan(atr)) # Añadida condición ~np.isnan(atr)
 
     # Columnas de features (excluyendo ATR y timestamp)
     features_for_model = [col for col in df.columns if col not in [atr_col, 'timestamp']]
@@ -192,21 +206,91 @@ def objective(trial):
     X_s = sc.fit_transform(X_raw_filtered)
 
     def seq(arr, w):
+        # Asegurar que haya suficientes datos para la primera secuencia
+        if len(arr) < w:
+            return np.array([]) # Retornar array vacío si no hay suficientes datos
         return np.stack([arr[i-w:i] for i in range(w, len(arr))]).astype(np.float32)
 
     X_seq = seq(X_s, pars["win"])
-    if len(X_seq) < 500:
-        print(f"Trial {trial.number}: Longitud de secuencia insuficiente ({len(X_seq)}). Saltando trial.")
-        return -1e6
+    
+    # Verificar si X_seq está vacío después de la creación de secuencias
+    if X_seq.shape[0] == 0:
+        print(f"Trial {trial.number}: No se pudieron crear secuencias (X_seq está vacío). Probablemente datos insuficientes después del enmascaramiento y antes de la secuenciación. Saltando trial.")
+        return -1e9 # Usar -1e9 para consistencia con otros errores de datos
 
-    up_s, dn_s = y_up[pars["win"]:], y_dn[pars["win"]:]
-    clo_s, atr_s = clo_m[pars["win"]:], atr_m[pars["win"]:]
+    if len(X_seq) < 500: # Este umbral podría ser ajustado
+        print(f"Trial {trial.number}: Longitud de secuencia insuficiente ({len(X_seq)} después de seq). Saltando trial.")
+        return -1e6 # Puede ser un valor diferente para distinguir de otros errores
+
+    # Ajustar los slices para que coincidan con la longitud de X_seq
+    # El slicing [pars["win"]:] original podría ser incorrecto si seq() ya manejó la ventana.
+    # La función seq ya crea secuencias a partir de la ventana 'w', por lo que los arrays 'y' deben alinearse con la salida de seq.
+    # Si seq devuelve N secuencias, y_up, y_dn, etc., deben tener N elementos correspondientes a la etiqueta de la *última* observación de cada secuencia.
+    # El primer índice válido después de seq(arr, w) es len(arr) - w.
+    # Los targets y_up, y_dn deben ser seleccionados desde el índice (pars["win"] -1) hasta (len(mask) -1), y luego tomar los primeros len(X_seq) elementos.
+    
+    # Correcta alineación de las etiquetas y datos auxiliares con X_seq
+    # y_up, y_dn, clo_m, atr_m son los datos después del enmascaramiento inicial.
+    # X_s es la versión escalada de X_raw_filtered (que ya está enmascarada).
+    # seq(X_s, pars["win"]) crea secuencias. Si X_s tiene M filas, seq crea M - pars["win"] + 1 secuencias.
+    # Las etiquetas deben corresponder al final de cada ventana.
+    # Entonces, si X_seq[0] usa X_s[0:pars["win"]], la etiqueta es y_up[pars["win"]-1] (si el target es para el último paso de la ventana)
+    # O y_up[pars["win"]] si el target es para el paso *siguiente* a la ventana.
+    # Dado que 'fut' se calcula con np.roll(clo, -pars["horizon"]), 'diff' y por ende 'up'/'dn' son targets *futuros*.
+    # El target para la secuencia X_s[i:i+pars["win"]] es y_up[i+pars["win"]-1] (asumiendo que y_up está alineado con X_s).
+    
+    # Si X_s tiene N_s filas, X_seq tendrá N_s - pars["win"] + 1 filas.
+    # Las etiquetas y_up, y_dn, etc., ya están enmascaradas y alineadas con X_s.
+    # Necesitamos tomar las etiquetas desde el final de la primera ventana hasta el final.
+    start_index_for_labels = pars["win"] - 1
+    end_index_for_labels = len(y_up) # o len(X_s)
+
+    # Esta es la forma más común: la etiqueta corresponde al paso *después* de la ventana
+    # up_s = y_up[pars["win"] -1 : len(X_seq) + pars["win"] -1]
+    # dn_s = y_dn[pars["win"] -1 : len(X_seq) + pars["win"] -1]
+    # clo_s = clo_m[pars["win"] -1 : len(X_seq) + pars["win"] -1]
+    # atr_s = atr_m[pars["win"] -1 : len(X_seq) + pars["win"] -1]
+
+    # Sin embargo, el código original usaba `up_s, dn_s = y_up[pars["win"]:], y_dn[pars["win"]:]`
+    # Esto implica que si X_seq tiene L elementos, los targets son y_up[pars["win"]:pars["win"]+L]
+    # Vamos a mantener la lógica original lo más posible, pero asegurando que los índices sean válidos.
+    
+    num_sequences = X_seq.shape[0]
+    if num_sequences == 0:
+        print(f"Trial {trial.number}: X_seq está vacío, no se pueden generar etiquetas. Saltando trial.")
+        return -1e9
+
+    # Las etiquetas y datos auxiliares deben tener la misma longitud que X_seq
+    # El primer target y_up[pars["win"]] corresponde a la secuencia X_s[0:pars["win"]]
+    # El último target y_up[pars["win"] + num_sequences - 1] corresponde a X_s[num_sequences-1 : num_sequences-1+pars["win"]]
+    
+    if len(y_up) < pars["win"] + num_sequences:
+        print(f"Trial {trial.number}: No hay suficientes datos en y_up para alinear con X_seq. y_up len: {len(y_up)}, required: {pars['win'] + num_sequences}. Saltando trial.")
+        return -1e9
+        
+    up_s = y_up[pars["win"] : pars["win"] + num_sequences]
+    dn_s = y_dn[pars["win"] : pars["win"] + num_sequences]
+    clo_s = clo_m[pars["win"] : pars["win"] + num_sequences]
+    atr_s = atr_m[pars["win"] : pars["win"] + num_sequences]
+
+
+    # Validación adicional de longitudes
+    if not (len(X_seq) == len(up_s) == len(dn_s) == len(clo_s) == len(atr_s)):
+        print(f"Trial {trial.number}: Desajuste de longitud después de crear secuencias y etiquetas.")
+        print(f"X_seq: {len(X_seq)}, up_s: {len(up_s)}, dn_s: {len(dn_s)}, clo_s: {len(clo_s)}, atr_s: {len(atr_s)}")
+        return -1e9
+
 
     X_tr, X_val, up_tr, up_val, dn_tr, dn_val, cl_tr, cl_val, at_tr, at_val = \
         train_test_split(
             X_seq, up_s, dn_s, clo_s, atr_s,
             test_size=0.2, shuffle=False
         )
+
+    if len(X_tr) == 0 or len(X_val) == 0:
+        print(f"Trial {trial.number}: Conjunto de entrenamiento o validación vacío después del split. X_tr: {len(X_tr)}, X_val: {len(X_val)}. Saltando trial.")
+        return -1e9
+
 
     m = make_model(
         X_tr.shape[1:], pars["lr"], pars["dr"],
@@ -240,7 +324,10 @@ study.optimize(objective, n_trials=args.n_trials, show_progress_bar=True)
 best = study.best_params
 
 # Guardar best_params.json en GCS
-output_gcs_path = f"{args.output}/best_params.json"
+# La ruta de salida ahora es directamente el archivo JSON, no un directorio.
+# args.output debe ser la ruta completa al archivo JSON, ej: gs://bucket/path/to/best_params.json
+output_gcs_path = args.output # Se asume que args.output ya es la ruta completa al archivo.
+
 best_params_content = json.dumps({
     **best,
     "pair": PAIR,
@@ -250,8 +337,12 @@ best_params_content = json.dumps({
 }, indent=2)
 
 with tempfile.TemporaryDirectory() as tmpdir:
-    local_tmp_file = Path(tmpdir) / "best_params.json"
+    # El nombre del archivo local es solo 'best_params.json' si output_gcs_path es el nombre del archivo.
+    # Si output_gcs_path es un directorio, entonces Path(output_gcs_path).name sería incorrecto.
+    # Asumimos que el nombre del archivo en GCS es el deseado.
+    local_tmp_file_name = Path(output_gcs_path).name # e.g., "best_params.json"
+    local_tmp_file = Path(tmpdir) / local_tmp_file_name
     local_tmp_file.write_text(best_params_content)
-    upload_gs(local_tmp_file, output_gcs_path)
+    upload_gs(local_tmp_file, output_gcs_path) # output_gcs_path es la URI completa del archivo
 
 print(f"✅ best_params.json guardado en {output_gcs_path}")
