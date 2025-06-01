@@ -843,7 +843,7 @@ def training_pipeline(
 ):
     # Obtener el ID del Pipeline Job y el enlace para notificaciones
     # Estas son variables de contexto de KFP que se resuelven en tiempo de ejecución
-    kfp_pipeline_name = dsl.PIPELINE_NAME_PLACEHOLDER
+    kfp_pipeline_name = dsl.PIPELINE_JOB_NAME_PLACEHOLDER
     kfp_run_id = dsl.PIPELINE_RUN_ID_PLACEHOLDER # Este es el ID corto del run
     # El job_id completo (resource name) puede ser más difícil de obtener directamente aquí para el link
     # Una aproximación para el link (puede necesitar ajuste según la URL de tu consola GCP)
