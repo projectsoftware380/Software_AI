@@ -101,27 +101,37 @@ def make_model(inp_sh, lr, dr, filt, units, heads):
     model.compile(optimizers.Adam(lr), loss="mae")
     return model
 
-def quick_bt(pred, closes, atr_pips, rr, up_thr, dn_thr, delta_min, smooth_win):
+# ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+# CORRECCIÓN APLICADA DENTRO DE ESTA FUNCIÓN:
+# Se reemplazaron 'tup', 'tdn', y 'dmin' con 'up_thr', 'dn_thr', y 'delta_min' respectivamente.
+# ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+def quick_bt(pred, closes, atr_pips, rr, up_thr, dn_thr, delta_min, smooth_win): # Parámetros de entrada
     net, pos = 0.0, False
     dq = deque(maxlen=smooth_win)
     for (u, d), price, atr in zip(pred, closes, atr_pips):
         mag, diff = max(u, d), abs(u - d)
         raw = 1 if u > d else -1
-        cond = ((raw==1 and mag>=tup) or (raw==-1 and mag>=tdn)) and diff>=dmin
+        # Usar los nombres de parámetros correctos: up_thr, dn_thr, delta_min
+        cond = ((raw==1 and mag>=up_thr) or (raw==-1 and mag>=dn_thr)) and diff>=delta_min
         dq.append(raw if cond else 0)
         buys, sells = dq.count(1), dq.count(-1)
         signal = 1 if buys>smooth_win//2 else -1 if sells>smooth_win//2 else 0
         if not pos and signal:
             pos, entry, ed = True, price, signal
-            sl = (tup if ed==1 else dn_thr)*atr; tp = rr*sl; continue
+            # Usar los nombres de parámetros correctos: up_thr
+            sl = (up_thr if ed==1 else dn_thr)*atr; tp = rr*sl; continue
         if pos and signal:
-            sl = min(sl, (tup if signal==1 else dn_thr)*atr)
+            # Usar los nombres de parámetros correctos: up_thr
+            sl = min(sl, (up_thr if signal==1 else dn_thr)*atr)
             tp = max(tp, rr*sl)
         if pos:
             pnl = (price-entry)/tick if ed==1 else (entry-price)/tick
             if pnl>=tp or pnl<=-sl:
                 net += tp if pnl>=tp else -sl; pos=False
     return net
+# ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+# FIN DE LA CORRECCIÓN
+# ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
 # ── Optuna objective ───────────────────────────────────────────
 def objective(trial):
