@@ -37,9 +37,8 @@ KFP_COMPONENT_ACCELERATOR_TYPE = "ACCELERATOR_TYPE_UNSPECIFIED" #
 KFP_COMPONENT_ACCELERATOR_COUNT = 0 #
 
 # --- Service Account for Vertex AI Custom Jobs ---
-DEFAULT_VERTEX_LSTM_SERVICE_ACCOUNT = (
-    f"vertex-custom-job-sa@{PROJECT_ID}.iam.gserviceaccount.com"
-) #
+DEFAULT_VERTEX_LSTM_SERVICE_ACCOUNT = "data-ingestion-agent@trading-ai-460823.iam.gserviceaccount.com"
+
 
 # --- Default Pipeline Hyperparameters ---
 DEFAULT_N_TRIALS = 2 #
