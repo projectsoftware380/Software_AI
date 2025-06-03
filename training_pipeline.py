@@ -298,21 +298,16 @@ def train_lstm_vertex_ai_op(
     current_accelerator_count = vertex_accelerator_count #
 
     worker_pool_specs = [{
-        "machine_spec": {
-            "machine_type": vertex_machine_type,
-        },
-        "replica_count": 1, #
-        "container_spec": {
-            "image_uri": vertex_training_image_uri, #
-            "args": training_script_args, #
-            # ¡No pongas "command"! Solo usa la imagen con ENTRYPOINT definido
+            "machine_spec": {
+                "machine_type": vertex_machine_type,
+            },
+            "replica_count": 1,
             "container_spec": {
-                "image_uri": VERTEX_LSTM_TRAINER_IMAGE_URI,
-                # No uses command aquí. El ENTRYPOINT ya es ./run.sh
-                "args": []  # o lo que necesites pasar como argumentos
-            }
-        },
-    }] #
+                "image_uri": vertex_training_image_uri,  # Usa el parámetro pasado a la función
+                "args": training_script_args,
+                # "command" se omite si la imagen runner-lstm tiene un ENTRYPOINT
+            },
+        }]
 
     if current_accelerator_count > 0 and current_accelerator_type != "ACCELERATOR_TYPE_UNSPECIFIED": #
         worker_pool_specs[0]["machine_spec"]["accelerator_type"] = current_accelerator_type #
