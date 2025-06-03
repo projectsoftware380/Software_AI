@@ -1,65 +1,60 @@
-# Imagen base ligera con Python 3.10
+############################
+#  Dockerfile.runner
+############################
+
+# ---------- 1. Imagen base ----------
 FROM python:3.10-slim
 
-# Variables de entorno
+# ---------- 2. Variables de entorno ----------
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    DEBIAN_FRONTEND=noninteractive \
-    APP_HOME=/app
+    DEBIAN_FRONTEND=noninteractive
 
-# Crear usuario no-root
+# APP_HOME separado para claridad
+ENV APP_HOME=/app
+ENV PATH="/usr/lib/google-cloud-sdk/bin:$PATH"
+
+# ---------- 3. Dependencias del sistema + Google Cloud CLI ----------
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl gnupg apt-transport-https ca-certificates && \
+    # añadir repo del SDK
+    echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
+      | tee /etc/apt/sources.list.d/google-cloud-sdk.list && \
+    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+      | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends google-cloud-cli && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# ---------- 4. Usuario no-root ----------
 ARG APP_USER=appuser
 ARG APP_GROUP=appgroup
 ARG UID=1000
 ARG GID=1000
 
 RUN groupadd -g ${GID} ${APP_GROUP} && \
-    useradd -u ${UID} -g ${APP_GROUP} -ms /bin/bash ${APP_USER}
+    useradd  -u ${UID} -g ${APP_GROUP} -ms /bin/bash ${APP_USER}
 
-# Instalar dependencias del sistema y Google Cloud SDK
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        git \
-        curl \
-        ca-certificates \
-        build-essential \
-        libgl1 \
-        gnupg \
-        unzip \
-        python3-pip \
-        python3-setuptools \
-        python3-dev && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* && \
-    # Instalar Google Cloud SDK
-    curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-469.0.0-linux-x86_64.tar.gz && \
-    tar -xf google-cloud-sdk-469.0.0-linux-x86_64.tar.gz && \
-    ./google-cloud-sdk/install.sh --quiet && \
-    rm google-cloud-sdk-469.0.0-linux-x86_64.tar.gz && \
-    echo 'export PATH=/google-cloud-sdk/bin:$PATH' >> /etc/profile
-
-# Asegurar PATH para todos los usuarios
-ENV PATH="/google-cloud-sdk/bin:$PATH"
-
-# Crear directorio de trabajo
+# ---------- 5. Directorio de trabajo ----------
+RUN mkdir -p ${APP_HOME}
 WORKDIR ${APP_HOME}
 
-# Copiar e instalar dependencias de Python
-COPY requirements.txt .
+# ---------- 6. Dependencias de Python ----------
+COPY requirements.txt ./
 
-# 🔧 Desinstalar versiones conflictivas de protobuf si existen
-RUN pip uninstall -y protobuf || true
+# (opcional) quita cualquier protobuf >3 antes de instalar
+RUN pip uninstall -y protobuf || true && \
+    pip install --no-cache-dir -r requirements.txt
 
-# 🔧 Instalar requirements con versiones compatibles
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copiar el script principal
+# ---------- 7. Copiar código / script de arranque ----------
 COPY run.sh .
 RUN chmod +x run.sh
 
-# Cambiar al usuario no-root
+# ---------- 8. Permisos y usuario final ----------
+RUN chown -R ${APP_USER}:${APP_GROUP} ${APP_HOME}
 USER ${APP_USER}
 
-# Ejecutar el script por defecto
+# ---------- 9. Entrada ----------
 ENTRYPOINT ["./run.sh"]
