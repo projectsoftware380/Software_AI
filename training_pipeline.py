@@ -305,7 +305,12 @@ def train_lstm_vertex_ai_op(
         "container_spec": {
             "image_uri": vertex_training_image_uri, #
             "args": training_script_args, #
-            "command": ["python", "train_lstm.py"], 
+            # ¡No pongas "command"! Solo usa la imagen con ENTRYPOINT definido
+            "container_spec": {
+                "image_uri": VERTEX_LSTM_TRAINER_IMAGE_URI,
+                # No uses command aquí. El ENTRYPOINT ya es ./run.sh
+                "args": []  # o lo que necesites pasar como argumentos
+            }
         },
     }] #
 
