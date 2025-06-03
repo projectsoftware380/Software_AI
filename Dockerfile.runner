@@ -1,0 +1,49 @@
+FROM python:3.10-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    APP_HOME=/app
+
+# Crear usuario no-root
+ARG APP_USER=appuser
+ARG APP_GROUP=appgroup
+ARG UID=1000
+ARG GID=1000
+
+RUN groupadd -g ${GID} ${APP_GROUP} && \
+    useradd -u ${UID} -g ${APP_GROUP} -ms /bin/bash ${APP_USER}
+
+# Instalar dependencias del sistema y gsutil
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        git \
+        curl \
+        ca-certificates \
+        build-essential \
+        libgl1 \
+        gnupg && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Instalar Google Cloud CLI (para usar gsutil)
+RUN curl -sSL https://sdk.cloud.google.com | bash && \
+    /root/google-cloud-sdk/install.sh --quiet
+
+ENV PATH="/root/google-cloud-sdk/bin:$PATH"
+
+# Crear directorio de trabajo
+WORKDIR ${APP_HOME}
+
+# Copiar requirements e instalar
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copiar script de ejecución
+COPY run.sh .
+RUN chmod +x run.sh
+
+USER ${APP_USER}
+
+ENTRYPOINT ["./run.sh"]

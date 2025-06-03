@@ -1503,12 +1503,12 @@
           "parameterType": "STRING"
         },
         "vertex_lstm_service_account": {
-          "defaultValue": "vertex-custom-job-sa@trading-ai-460823.iam.gserviceaccount.com",
+          "defaultValue": "data-ingestion-agent@trading-ai-460823.iam.gserviceaccount.com",
           "isOptional": true,
           "parameterType": "STRING"
         },
         "vertex_lstm_training_image": {
-          "defaultValue": "us-central1-docker.pkg.dev/trading-ai-460823/trading-images/trainer-cpu:latest",
+          "defaultValue": "us-central1-docker.pkg.dev/trading-ai-460823/trading-images/runner-lstm:latest",
           "isOptional": true,
           "parameterType": "STRING"
         }

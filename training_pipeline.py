@@ -21,12 +21,16 @@ GCS_BUCKET_NAME = "trading-ai-models-460823" #
 PIPELINE_ROOT = f"gs://{GCS_BUCKET_NAME}/pipeline_root_v2" #
 
 # --- Docker Image URIs ---
+
+# Imagen para los componentes de Kubeflow (data ingestion, etc.)
 KFP_COMPONENTS_IMAGE_URI = (
     f"europe-west1-docker.pkg.dev/{PROJECT_ID}/data-ingestion-repo/data-ingestion-agent:latest"
-) #
+)
+
+# Imagen para el entrenamiento del modelo LSTM en Vertex AI
 VERTEX_LSTM_TRAINER_IMAGE_URI = (
-    f"us-central1-docker.pkg.dev/{PROJECT_ID}/trading-images/trainer-cpu:latest"
-) #
+    f"us-central1-docker.pkg.dev/{PROJECT_ID}/trading-images/runner-lstm:latest"
+)
 
 # --- Machine Types and GPUs for Vertex AI ---
 DEFAULT_VERTEX_LSTM_MACHINE_TYPE = "n1-standard-4" #
