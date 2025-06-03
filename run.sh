@@ -1,8 +1,9 @@
 #!/bin/bash
-set -e
 
-echo "📥 Descargando código desde GCS..."
-gsutil -m cp gs://trading-ai-models-460823/code/*.py ./
+# Descargar el código desde GCS
+echo "Descargando scripts desde GCS..."
+gsutil -m cp gs://trading-ai-models-460823/code/*.py . || exit 1
 
-echo "🚀 Ejecutando script principal..."
+# Ejecutar el script principal (ya descargado)
+echo "Ejecutando el script..."
 python train_lstm.py

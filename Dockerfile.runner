@@ -15,7 +15,7 @@ ARG GID=1000
 RUN groupadd -g ${GID} ${APP_GROUP} && \
     useradd -u ${UID} -g ${APP_GROUP} -ms /bin/bash ${APP_USER}
 
-# Instalar dependencias del sistema y gsutil
+# Instalar dependencias del sistema
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         git \
@@ -23,20 +23,26 @@ RUN apt-get update && \
         ca-certificates \
         build-essential \
         libgl1 \
-        gnupg && \
+        gnupg \
+        unzip \
+        python3-pip \
+        python3-setuptools \
+        python3-dev && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Instalar Google Cloud CLI (para usar gsutil)
-RUN curl -sSL https://sdk.cloud.google.com | bash && \
-    /root/google-cloud-sdk/install.sh --quiet
+# Instalar Google Cloud SDK (para usar gsutil)
+RUN curl -O https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-469.0.0-linux-x86_64.tar.gz && \
+    tar -xf google-cloud-sdk-469.0.0-linux-x86_64.tar.gz && \
+    ./google-cloud-sdk/install.sh --quiet && \
+    rm google-cloud-sdk-469.0.0-linux-x86_64.tar.gz
 
-ENV PATH="/root/google-cloud-sdk/bin:$PATH"
+ENV PATH="/google-cloud-sdk/bin:$PATH"
 
 # Crear directorio de trabajo
 WORKDIR ${APP_HOME}
 
-# Copiar requirements e instalar
+# Copiar e instalar dependencias de Python
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -44,6 +50,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY run.sh .
 RUN chmod +x run.sh
 
+# Usar el usuario no-root
 USER ${APP_USER}
 
+# Ejecutar pipeline
 ENTRYPOINT ["./run.sh"]
