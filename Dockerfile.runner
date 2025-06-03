@@ -1,5 +1,7 @@
+# Imagen base ligera con Python 3.10
 FROM python:3.10-slim
 
+# Variables de entorno
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
@@ -15,7 +17,7 @@ ARG GID=1000
 RUN groupadd -g ${GID} ${APP_GROUP} && \
     useradd -u ${UID} -g ${APP_GROUP} -ms /bin/bash ${APP_USER}
 
-# Instalar dependencias del sistema y Google Cloud SDK (que incluye gsutil)
+# Instalar dependencias del sistema y Google Cloud SDK
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         git \
@@ -37,7 +39,7 @@ RUN apt-get update && \
     rm google-cloud-sdk-469.0.0-linux-x86_64.tar.gz && \
     echo 'export PATH=/google-cloud-sdk/bin:$PATH' >> /etc/profile
 
-# Asegurar PATH para todos los usuarios (incluyendo appuser)
+# Asegurar PATH para todos los usuarios
 ENV PATH="/google-cloud-sdk/bin:$PATH"
 
 # Crear directorio de trabajo
@@ -45,14 +47,19 @@ WORKDIR ${APP_HOME}
 
 # Copiar e instalar dependencias de Python
 COPY requirements.txt .
+
+# 🔧 Desinstalar versiones conflictivas de protobuf si existen
+RUN pip uninstall -y protobuf || true
+
+# 🔧 Instalar requirements con versiones compatibles
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar script de ejecución
+# Copiar el script principal
 COPY run.sh .
 RUN chmod +x run.sh
 
-# Usar el usuario no-root
+# Cambiar al usuario no-root
 USER ${APP_USER}
 
-# Ejecutar pipeline con gsutil + train_lstm.py
+# Ejecutar el script por defecto
 ENTRYPOINT ["./run.sh"]
