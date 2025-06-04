@@ -281,14 +281,7 @@ def train_lstm_vertex_ai_op(
     timestamp_for_job = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     job_display_name = f"lstm-training-{pair.lower()}-{timeframe.lower()}-{timestamp_for_job}"
 
-    training_script_args = [
-        "--params", params_path,
-        "--output-gcs-base-dir", output_gcs_prefix,
-        "--pair", pair,
-        "--timeframe", timeframe,
-        "--project-id", project_id,
-        "--gcs-bucket-name", gcs_bucket_name,
-    ]
+    training_script_args = ["--params", params_path]
 
     worker_pool_specs = [{
         "machine_spec": {
