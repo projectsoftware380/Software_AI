@@ -794,17 +794,16 @@ def training_pipeline(
     # pipeline_job_name_val = dsl.PIPELINE_JOB_NAME_PLACEHOLDER # Also available
     pipeline_ui_link_val = f"https://console.cloud.google.com/vertex-ai/pipelines/runs/{pipeline_job_id_val}?project={PROJECT_ID}"
     # For KFP v2, dsl.PIPELINE_STATUS_PLACEHOLDER holds the final status (SUCCEEDED, FAILED, CANCELLED)
-    pipeline_status_val = dsl.PIPELINE_STATUS_PLACEHOLDER
-
-    # Generic Exit Handler: always runs, sends FAILURE unless explicitly overridden by success notifications
+    
+        # Generic Exit Handler: always runs, sends FAILURE unless explicitly overridden by success notifications
     exit_notify_task = notify_pipeline_status_op(
         project_id=PROJECT_ID,
         pair=pair,
         timeframe=timeframe,
-        pipeline_run_status=pipeline_status_val, # Use the KFPv2 placeholder
+        pipeline_run_status="UNKNOWN_STATUS",  # valor de reserva si no se conoce
         pipeline_job_id=pipeline_job_id_val,
         pipeline_job_link=pipeline_ui_link_val,
-        model_promoted=False # Default to False, specific success paths will update this
+        model_promoted=False
     ).set_display_name("Notify_Pipeline_Final_Status_Exit_Handler")
     # Ensure this runs regardless of upstream failures if possible (though KFP handles this)
     exit_notify_task.set_cpu_limit("1").set_memory_limit("1G")
