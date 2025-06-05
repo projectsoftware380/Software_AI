@@ -704,10 +704,10 @@ def notify_pipeline_status_op(
     project_id: str,
     pair: str,
     timeframe: str,
-    pipeline_run_status: str, # This will be set by KFP ExitHandler or dsl.If conditions
+    pipeline_run_status: dsl.PipelineTaskFinalStatus,  # KFP will inject the final pipeline status
     pipeline_job_id: str,
     pipeline_job_link: str,
-    model_promoted: bool = False, # Default to False, set to True if promotion occurs
+    model_promoted: bool = False,
 ) -> bool:
     from google.cloud import pubsub_v1
     import logging
@@ -724,18 +724,20 @@ def notify_pipeline_status_op(
         publisher = pubsub_v1.PublisherClient()
         ts_utc_iso = datetime.now(timezone.utc).isoformat()
 
-        # Normalize status for KFP v2 values if needed
-        status_summary = pipeline_run_status.upper()
+        # Normalize status for KFP v2 values
+        status_summary = pipeline_run_status.state.upper()
         # KFP v2 uses "SUCCEEDED", "FAILED", "CANCELLED"
-        # The ExitHandler might pass dsl.PIPELINE_STATUS_PLACEHOLDER which resolves to these.
-        if status_summary not in ["SUCCEEDED", "FAILED", "CANCELLED", "UNKNOWN_STATUS"]: # UNKNOWN_STATUS is my placeholder for ExitHandler
-            logger.warning(f"Pipeline status '{pipeline_run_status}' is not one of the expected canonical KFP v2 statuses (SUCCEEDED, FAILED, CANCELLED) or UNKNOWN_STATUS. Will attempt to normalize.")
-            if "fail" in pipeline_run_status.lower() or "error" in pipeline_run_status.lower():
+        if status_summary not in ["SUCCEEDED", "FAILED", "CANCELLED", "UNKNOWN_STATUS"]:
+            logger.warning(
+                f"Pipeline status '{pipeline_run_status.state}' is not one of the expected canonical KFP v2 statuses (SUCCEEDED, FAILED, CANCELLED) or UNKNOWN_STATUS. Will attempt to normalize."
+            )
+            status_lower = pipeline_run_status.state.lower()
+            if "fail" in status_lower or "error" in status_lower:
                 status_summary = "FAILED"
-            elif "success" in pipeline_run_status.lower() or "succeeded" in pipeline_run_status.lower():
+            elif "success" in status_lower or "succeeded" in status_lower:
                 status_summary = "SUCCEEDED"
-            else: # If it's something else from a direct call, treat as unknown/failure for notification
-                status_summary = "UNKNOWN_STATUS" # This will route to failure topic
+            else:
+                status_summary = "UNKNOWN_STATUS"  # Route to failure topic
 
         details = {
             "pipeline_name": "algo-trading-mlops-gcp-pipeline-v2",
@@ -793,18 +795,15 @@ def training_pipeline(
     pipeline_job_id_val = dsl.PIPELINE_JOB_ID_PLACEHOLDER
     # pipeline_job_name_val = dsl.PIPELINE_JOB_NAME_PLACEHOLDER # Also available
     pipeline_ui_link_val = f"https://console.cloud.google.com/vertex-ai/pipelines/runs/{pipeline_job_id_val}?project={PROJECT_ID}"
-    # For KFP v2, dsl.PIPELINE_STATUS_PLACEHOLDER holds the final status (SUCCEEDED, FAILED, CANCELLED)
-    pipeline_status_val = dsl.PIPELINE_STATUS_PLACEHOLDER
 
     # Generic Exit Handler: always runs, sends FAILURE unless explicitly overridden by success notifications
     exit_notify_task = notify_pipeline_status_op(
         project_id=PROJECT_ID,
         pair=pair,
         timeframe=timeframe,
-        pipeline_run_status=pipeline_status_val, # Use the KFPv2 placeholder
         pipeline_job_id=pipeline_job_id_val,
         pipeline_job_link=pipeline_ui_link_val,
-        model_promoted=False # Default to False, specific success paths will update this
+        model_promoted=False,
     ).set_display_name("Notify_Pipeline_Final_Status_Exit_Handler")
     # Ensure this runs regardless of upstream failures if possible (though KFP handles this)
     exit_notify_task.set_cpu_limit("1").set_memory_limit("1G")
@@ -936,7 +935,6 @@ def training_pipeline(
                 project_id=PROJECT_ID,
                 pair=pair,
                 timeframe=timeframe,
-                pipeline_run_status="SUCCEEDED", # Explicitly SUCCEEDED
                 model_promoted=True,
                 pipeline_job_id=pipeline_job_id_val,
                 pipeline_job_link=pipeline_ui_link_val,
@@ -946,7 +944,8 @@ def training_pipeline(
             # The ExitHandler would have already caught that.
             # We need to ensure the ExitHandler's notification isn't sent if *this* success notification is.
             # KFP's ExitHandler runs *after* the main pipeline finishes (successfully or not).
-            # The `pipeline_status_val` in the exit handler will correctly reflect SUCCEEDED if we reach here.
+            # The exit handler will receive the final pipeline status injected by KFP and will
+            # correctly reflect SUCCEEDED if we reach here.
             # The `model_promoted` flag in the exit_notify_task needs to be updated.
             # This can be done by making the exit_notify_task depend on the output of decide_task,
             # but ExitHandlers cannot easily consume outputs from within the pipeline body directly for their parameters.
@@ -954,7 +953,7 @@ def training_pipeline(
             # If the pipeline succeeds AND this 'If_Model_Promoted' branch runs, then 'model_promoted' is true.
             # We can have the exit handler take `decide_task.output` if it's successful.
             # However, KFP v2 ExitHandler parameters are evaluated at pipeline compile time or must be placeholders.
-            # The current setup relies on the `pipeline_status_val` passed to the ExitHandler.
+            # The current setup relies on the PipelineTaskFinalStatus injected into the ExitHandler.
             # The `model_promoted` in the exit handler's call is set to False initially.
             # To solve this, the `exit_notify_task` can be redefined or updated after `decide_task`.
             # This is tricky with KFP SDK's ExitHandler.
@@ -973,7 +972,6 @@ def training_pipeline(
                 project_id=PROJECT_ID,
                 pair=pair,
                 timeframe=timeframe,
-                pipeline_run_status="SUCCEEDED", # Pipeline succeeded, model just not promoted
                 model_promoted=False,
                 pipeline_job_id=pipeline_job_id_val,
                 pipeline_job_link=pipeline_ui_link_val,
@@ -985,7 +983,8 @@ def training_pipeline(
     # If the pipeline succeeds and decide_task.output is True, we want the ExitHandler's notification
     # (if it's the one sending the "SUCCEEDED" message) to reflect model_promoted=True.
 
-    # KFP v2 behavior: The ExitHandler's `pipeline_status_val` will be "SUCCEEDED" if the main graph completes.
+    # KFP v2 behavior: The ExitHandler receives the final PipelineTaskFinalStatus and
+    # will report "SUCCEEDED" if the main graph completes successfully.
     # The separate `dsl.If` blocks will send their specific notifications.
     # The ExitHandler will ALSO send a notification. To avoid duplicate "SUCCEEDED" notifications,
     # one strategy is to make the ExitHandler's success notification conditional or have it fetch the promotion status.
