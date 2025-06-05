@@ -266,6 +266,7 @@ def train_lstm_vertex_ai_op(
 ) -> str:
     import logging
     import time
+    import json
     from datetime import datetime, timezone
     from google.cloud import aiplatform as gcp_aiplatform
     from google.cloud import storage as gcp_storage

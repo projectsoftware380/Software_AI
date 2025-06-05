@@ -2,51 +2,79 @@
 """
 data_fetcher_vertexai.py
 ────────────────────────
-Descarga velas históricas desde la API de Polygon.io y las guarda
-en formato Parquet (local o GCS).  
-✅ Cambios relevantes frente a la versión previa
------------------------------------------------------------------
-1.  **Renombrado consistente de columnas**  ➜  open, high, low, close,
-    volume y timestamp (ms, dtype int64).  
-2.  **Elimina filas con NAN en OHLC** antes de guardar; así los
-    indicadores nunca reciben datos vacíos.  
-3.  **Reintentos exponenciales** (tenacity) ante errores HTTP / rate-limit.  
-4.  **Orden cronológico** y `drop_duplicates` por timestamp.  
-5.  **Validaciones de entrada** (símbolos, timeframe, fechas).  
-6.  **Salida informativa** y código 0 aunque algún símbolo no devuelva
-    datos — no aborta todo el lote.  
+Descarga barras OHLC de Polygon.io y guarda un único Parquet
+(local o GCS) con **suficientes filas**.  
+Novedades (jun-2025)
+────────────────────
+•  Argumento `--min-rows` (def. 100 000).  
+   Si la descarga reúne menos filas ⇒ se lanza `RuntimeError`.  
+•  Si el Parquet de destino ya existe se borra antes de escribir
+   (para evitar mezclar descargas antiguas con incompletas).  
 """
 
 from __future__ import annotations
 
+import argparse
+import datetime as dt
+import logging
 import os
 import re
-import argparse
-import logging
-import datetime as dt
+import sys
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
-import requests
 import pandas as pd
-from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
+import requests
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
-# --- GCS opcional ----------------------------------------------------------
+# ────────────────────────────── logging ──────────────────────────────
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+log = logging.getLogger(__name__)
+
+# ─────────────────────── GCS helpers (opcionales) ────────────────────
 try:
     import gcsfs
-except ImportError:       # se instala en la imagen Docker
+    from google.cloud import storage
+except ImportError:  # se instala en la imagen Docker
     gcsfs = None  # type: ignore
+    storage = None  # type: ignore
 
-# ---------------------------------------------------------------------------
+def _remove_if_exists(uri: str) -> None:
+    """Borra un archivo local o GCS si existe."""
+    if uri.startswith("gs://"):
+        if storage is None:
+            raise RuntimeError("google-cloud-storage no disponible para borrar objetos.")
+        bucket_name, blob_name = uri[5:].split("/", 1)
+        client = storage.Client()
+        blob = client.bucket(bucket_name).blob(blob_name)
+        if blob.exists():
+            log.info(f"🗑️  Eliminando Parquet previo {uri}")
+            blob.delete()
+    else:
+        p = Path(uri)
+        if p.exists():
+            log.info(f"🗑️  Eliminando Parquet previo {p}")
+            p.unlink()
 
-LOG_FMT = "%(asctime)s | %(levelname)s | %(message)s"
-logging.basicConfig(level=logging.INFO, format=LOG_FMT)
-logger = logging.getLogger(__name__)
+def _save_parquet(df: pd.DataFrame, uri: str) -> None:
+    """Guarda el DataFrame en local o GCS."""
+    Path(uri).parent.mkdir(parents=True, exist_ok=True) if not uri.startswith("gs://") else None
+    opts: Dict[str, Any] = {"index": False, "engine": "pyarrow"}
+    if uri.startswith("gs://"):
+        if gcsfs is None:
+            raise RuntimeError("gcsfs no instalado → pip install gcsfs")
+        opts["storage_options"] = {"token": "cloud"}
+    df.to_parquet(uri, **opts)
+    log.info(f"☁️  Parquet guardado en {uri} ({len(df):,} filas)")
 
-POLYGON_MAX_LIMIT = 50_000       # Límite hard‐coded de la API
+# ───────────────────────── API helpers ───────────────────────────────
+POLYGON_MAX_LIMIT = 50_000
 
-
-# ═════════════════════════════════ helper de descarga ══════════════════════
 @retry(
     wait=wait_exponential(multiplier=1, min=2, max=60),
     stop=stop_after_attempt(5),
@@ -61,195 +89,93 @@ def _fetch_window(
     end_date: str,
     api_key: str,
 ) -> List[Dict[str, Any]]:
-    """
-    Descarga como máximo 50 000 barras de una ventana `start_date` → `end_date`.
-    Retorna la lista cruda de dicts “results” de Polygon.
-    """
     m = re.match(r"^(\d+)([a-zA-Z]+)$", timeframe)
     if not m:
-        raise ValueError(f"Timeframe inválido: {timeframe!r}")
-    multiplier, timespan = m.group(1), m.group(2)
-
-    url = (
-        f"https://api.polygon.io/v2/aggs/ticker/C:{symbol}/range/"
-        f"{multiplier}/{timespan}/{start_date}/{end_date}"
-    )
-
+        raise ValueError(f"Invalid timeframe {timeframe!r}")
+    mult, span = m.groups()
+    url = f"https://api.polygon.io/v2/aggs/ticker/C:{symbol}/range/{mult}/{span}/{start_date}/{end_date}"
     params = {
         "adjusted": "true",
         "sort": "asc",
         "limit": POLYGON_MAX_LIMIT,
         "apiKey": api_key,
     }
-    resp = session.get(url, params=params, timeout=30)
-    resp.raise_for_status()
-    return resp.json().get("results", [])
-
+    r = session.get(url, params=params, timeout=30)
+    r.raise_for_status()
+    return r.json().get("results", [])
 
 def _results_to_df(results: List[Dict[str, Any]]) -> pd.DataFrame:
-    """
-    Con-vierte la lista de dicts al DataFrame normalizado que usa el resto del
-    pipeline (open, high, low, close, volume, timestamp).
-    """
     if not results:
         return pd.DataFrame()
-
-    df = pd.DataFrame(results).rename(
-        columns={
-            "o": "open",
-            "h": "high",
-            "l": "low",
-            "c": "close",
-            "v": "volume",
-            "t": "timestamp",
-        }
+    df = (
+        pd.DataFrame(results)
+        .rename(columns={"o": "open", "h": "high", "l": "low", "c": "close", "v": "volume", "t": "timestamp"})
+        .dropna(subset=["open", "high", "low", "close"])
+        .assign(timestamp=lambda d: d["timestamp"].astype("int64"))
+        .sort_values("timestamp")
+        .drop_duplicates("timestamp")
+        .reset_index(drop=True)
     )
+    return df
 
-    # Timestamp a int64 (ms) y datetime para parquet
-    df["timestamp"] = df["timestamp"].astype("int64")
-    df = df.sort_values("timestamp").drop_duplicates("timestamp")
-
-    # Descarta filas con NAN en precios (mantiene integridad)
-    df = df.dropna(subset=["open", "high", "low", "close"])
-
-    return df.reset_index(drop=True)
-
-
-def _save_parquet(df: pd.DataFrame, path: str) -> None:
-    """
-    Guarda el DataFrame en `path`, admitiendo rutas locales o `gs://`.
-    """
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-
-    if path.startswith("gs://"):
-        if gcsfs is None:
-            raise ImportError(
-                "gcsfs no está instalado. Añádelo a requirements.txt o instala con pip."
-            )
-        df.to_parquet(path, index=False, engine="pyarrow", storage_options={"token": "cloud"})
-    else:
-        df.to_parquet(path, index=False, engine="pyarrow")
-
-
-# ═════════════════════════════════════ main ════════════════════════════════
+# ───────────────────────────── main ──────────────────────────────────
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Descarga datos OHLC de Polygon y los guarda en Parquet."
-    )
-    parser.add_argument(
-        "--data-dir",
-        required=True,
-        help="Directorio local o prefijo gs:// donde se guardarán los Parquet",
-    )
-    parser.add_argument(
-        "--symbols",
-        nargs="+",
-        required=True,
-        help="Lista de símbolos (ej: EURUSD GBPUSD)",
-    )
-    parser.add_argument(
-        "--timeframes",
-        nargs="+",
-        required=True,
-        help="Lista de timeframes (ej: 15minute 1hour)",
-    )
-    parser.add_argument(
-        "--polygon-key",
-        help="API-key de Polygon. Si se omite se tomará de POLYGON_API_KEY env var.",
-    )
-    parser.add_argument(
-        "--start-date",
-        default="2000-01-01",
-        help="Inicio YYYY-MM-DD (def. 2000-01-01)",
-    )
-    parser.add_argument(
-        "--end-date",
-        help="Fin YYYY-MM-DD (def. hoy)",
-    )
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser(description="Descarga OHLC de Polygon.io a Parquet.")
+    ap.add_argument("--data-dir", required=True)
+    ap.add_argument("--symbols", nargs="+", required=True)
+    ap.add_argument("--timeframes", nargs="+", required=True)
+    ap.add_argument("--polygon-key")
+    ap.add_argument("--start-date", default="2000-01-01")
+    ap.add_argument("--end-date")
+    ap.add_argument("--min-rows", type=int, default=100_000,
+                    help="Filas mínimas requeridas para considerar válida la descarga (def. 100 000)")
+    args = ap.parse_args()
 
     api_key = args.polygon_key or os.getenv("POLYGON_API_KEY")
     if not api_key:
-        parser.error(
-            "Polygon API-key no proporcionada; usa --polygon-key o variable POLYGON_API_KEY."
-        )
+        ap.error("Falta API-key de Polygon (--polygon-key o env POLYGON_API_KEY)")
 
-    try:
-        start_date = dt.date.fromisoformat(args.start_date)
-    except ValueError:
-        parser.error(f"--start-date inválido: {args.start_date}")
-
-    end_date: dt.date = (
-        dt.date.fromisoformat(args.end_date)
-        if args.end_date
-        else dt.date.today()
-    )
-    if end_date < start_date:
-        parser.error("--end-date no puede ser anterior a --start-date")
+    start = dt.date.fromisoformat(args.start_date)
+    end = dt.date.fromisoformat(args.end_date) if args.end_date else dt.date.today()
+    if end < start:
+        ap.error("--end-date anterior a --start-date")
 
     session = requests.Session()
-    errors = 0
-
     for sym in args.symbols:
         for tf in args.timeframes:
-            logger.info("📥 %s | %s | %s → %s", sym, tf, start_date, end_date)
+            log.info("📥 %s | %s | %s → %s", sym, tf, start, end)
             dfs: List[pd.DataFrame] = []
-            window_start = start_date
-
-            # Descarga en ventanas de 30 días calendario
-            while window_start <= end_date:
-                window_end = min(window_start + dt.timedelta(days=30), end_date)
+            win_start = start
+            while win_start <= end:
+                win_end = min(win_start + dt.timedelta(days=30), end)
                 try:
-                    results = _fetch_window(
-                        session,
-                        symbol=sym,
-                        timeframe=tf,
-                        start_date=window_start.isoformat(),
-                        end_date=window_end.isoformat(),
-                        api_key=api_key,
-                    )
-                    df_window = _results_to_df(results)
-                    if not df_window.empty:
-                        dfs.append(df_window)
-                    logger.debug(
-                        "   · ventana %s–%s ⇒ %s filas",
-                        window_start,
-                        window_end,
-                        len(df_window),
-                    )
-                except Exception as win_err:  # HTTPError ya re-intentado
-                    logger.warning(
-                        "   ⚠️  Error descargando %s %s (%s → %s): %s",
-                        sym,
-                        tf,
-                        window_start,
-                        window_end,
-                        win_err,
-                    )
-                window_start = window_end + dt.timedelta(days=1)
+                    res = _fetch_window(session, sym, tf, win_start.isoformat(), win_end.isoformat(), api_key)
+                    dfw = _results_to_df(res)
+                    dfs.append(dfw) if not dfw.empty else None
+                except Exception as e:
+                    log.warning("⚠️  Error ventana %s-%s: %s", win_start, win_end, e)
+                win_start = win_end + dt.timedelta(days=1)
 
-            # ——— guardar ———
-            if dfs:
-                df_all = pd.concat(dfs, ignore_index=True)
-                out_prefix = f"{args.data_dir.rstrip('/')}/{sym}/{tf}"
-                out_path = f"{out_prefix}/{sym}_{tf}.parquet"
-                try:
-                    _save_parquet(df_all, out_path)
-                    logger.info("✅  %s filas guardadas en %s", len(df_all), out_path)
-                except Exception as save_err:
-                    errors += 1
-                    logger.error("💥 Error guardando %s: %s", out_path, save_err)
-            else:
-                errors += 1
-                logger.warning("⚠️  Sin datos para %s %s en el rango indicado.", sym, tf)
+            df_all = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
-    if errors:
-        logger.warning("Proceso completado con %s avisos/errores.", errors)
-    else:
-        logger.info("Proceso completado sin errores.")
+            out_prefix = f"{args.data_dir.rstrip('/')}/{sym}/{tf}"
+            out_path = f"{out_prefix}/{sym}_{tf}.parquet"
+            _remove_if_exists(out_path)  # borra versión previa
+
+            if len(df_all) < args.min_rows:
+                raise RuntimeError(
+                    f"Descarga incompleta: {len(df_all):,} filas (< {args.min_rows:,})."
+                    " Se aborta para evitar Parquet vacío."
+                )
+
+            _save_parquet(df_all, out_path)
 
     session.close()
-
+    log.info("🏁 Descargas completas sin errores.")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        log.critical("❌  data_fetcher_vertexai terminó con error: %s", e, exc_info=True)
+        sys.exit(1)

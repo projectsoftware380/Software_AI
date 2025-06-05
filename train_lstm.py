@@ -2,22 +2,16 @@
 """
 train_lstm.py
 ─────────────
-Entrena el modelo LSTM “definitivo” con los hiperparámetros obtenidos en
-optimize_lstm.py y sube los artefactos (model.h5, scaler.pkl y params.json)
-a GCS usando un esquema  gs://<base>/<pair>/<tf>/<YYYYMMDD-HHMMSS>/.
+Entrena el modelo LSTM definitivo con los hiperparámetros optimizados
+y guarda los artefactos (model.h5, scaler.pkl y params.json) en GCS.
 
-Principales refuerzos de robustez
-─────────────────────────────────
-▸ Valida que no queden NaNs en los indicadores ni en las secuencias antes
-  de entrenar.  
-▸ Verifica que las columnas que recibe el scaler son EXACTAMENTE las mismas
-  con las que fue ajustado (evita el “feature drift”).  
-▸ Comprueba que el tamaño de ventana (`win`) sea < nº de filas útiles.  
-▸ Maneja la ausencia de GPU sin abortar y activa mixed-precision sólo
-  cuando es seguro.  
-▸ Todos los accesos a GCS pasan por helpers con detección automática de
-  credenciales (funciona en local y en Vertex AI).  
-▸ Mensajes de log claros para depuración en Cloud Logging.
+💡 Ajustes añadidos (jun-2025)
+─────────────────────────────
+▸ Verifica que, tras todos los filtros, queden suficientes filas
+  (> win) para escalar y crear secuencias; si no, lanza un error
+  explicativo y aborta antes de llegar a RobustScaler.
+▸ Mensajes de log adicionales con el número de filas restantes
+  después de cada paso clave (carga, filtrado, mask).
 """
 
 # ───────────────────────── imports estándar ─────────────────────────
@@ -34,11 +28,6 @@ from pathlib import Path
 from typing import Tuple, List
 
 import numpy as np
-
-# Parche NumPy ≥1.24 (elimina la vieja constante NaN)
-if not hasattr(np, "NaN"):
-    np.NaN = np.nan  # type: ignore
-
 import pandas as pd
 import joblib
 from google.cloud import storage
@@ -51,7 +40,7 @@ from indicators import build_indicators  # función centralizada de indicadores
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="pandas")
 
-# ────────────────────── determinismo y hardware ───────────────────────
+# ────────────────────── determinismo y hardware ──────────────────────
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
@@ -70,31 +59,25 @@ try:
 except Exception as e:  # pragma: no cover
     print(f"⚠️  No se pudo configurar GPU / mixed-precision: {e}")
 
-# ───────────────────── helpers de Cloud Storage ──────────────────────
+# ───────────────────── helpers de Cloud Storage ─────────────────────
 def _gcs_client() -> storage.Client:
-    """Devuelve un cliente de GCS respetando GOOGLE_APPLICATION_CREDENTIALS."""
     cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
     if cred_path and Path(cred_path).exists():
         creds = service_account.Credentials.from_service_account_file(cred_path)
         return storage.Client(credentials=creds)
     return storage.Client()
 
-
 def gcs_download(uri: str) -> Path:
-    """Descarga un fichero gs://… a un tmp local y devuelve el Path local."""
     bucket, blob = uri[5:].split("/", 1)
     local = Path(tempfile.mkdtemp()) / Path(blob).name
     _gcs_client().bucket(bucket).blob(blob).download_to_filename(local)
     return local
 
-
 def gcs_upload(local: Path, uri: str) -> None:
-    """Sube un Path local a gs://…"""
     bucket, blob = uri[5:].split("/", 1)
     _gcs_client().bucket(bucket).blob(blob).upload_from_filename(str(local))
 
-
-# ──────────────────────── lógica de secuencias ────────────────────────
+# ──────────────────────── lógica de secuencias ──────────────────────
 def to_sequences(
     mat: np.ndarray,
     up: np.ndarray,
@@ -115,8 +98,7 @@ def to_sequences(
         np.asarray(cl, np.float32),
     )
 
-
-# ─────────────────────────── modelo LSTM ──────────────────────────────
+# ─────────────────────────── modelo LSTM ────────────────────────────
 def make_model(
     inp_shape: Tuple[int, int],
     lr: float,
@@ -136,19 +118,18 @@ def make_model(
     model.compile(optimizers.Adam(lr), loss="mae")
     return model
 
-
-# ───────────────────────────── CLI ────────────────────────────────────
+# ───────────────────────────── CLI ──────────────────────────────────
 cli = argparse.ArgumentParser(description="Entrena el LSTM final y sube artefactos a GCS")
 cli.add_argument("--params", required=True, help="Ruta al JSON de hiperparámetros (local o gs://)")
-cli.add_argument("--output-gcs-base-dir", default="gs://trading-ai-models-460823/models/LSTM")
+cli.add_argument("--output-gcs-base-dir", default="gs://trading-ai-models-460823/models/LSTM_v2")
 cli.add_argument("--pair")
 cli.add_argument("--timeframe")
-# flags “extra” inofensivos que Vertex puede inyectar:
+# flags inocuos que Vertex puede inyectar:
 cli.add_argument("--project-id")
 cli.add_argument("--gcs-bucket-name")
 args, _unknown = cli.parse_known_args()
 
-# ────────────────────── leer hiperparámetros ──────────────────────────
+# ────────────────────── leer hiperparámetros ────────────────────────
 params_path = Path(args.params) if not args.params.startswith("gs://") else gcs_download(args.params)
 hp: dict = json.loads(params_path.read_text())
 
@@ -157,7 +138,7 @@ TF: str = args.timeframe or hp["timeframe"]
 TICK: float = 0.01 if PAIR.endswith("JPY") else 0.0001
 ATR_LEN: int = 14  # fijo para todos los scripts
 
-# ───────────────────── cargar y preparar datos ────────────────────────
+# ───────────────────── cargar y preparar datos ──────────────────────
 feat_uri = hp["features_path"]
 feat_local = Path(feat_uri) if not feat_uri.startswith("gs://") else gcs_download(feat_uri)
 
@@ -165,8 +146,11 @@ df_raw = pd.read_parquet(feat_local).reset_index(drop=True)
 if "timestamp" in df_raw.columns:
     df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"], unit="ms", errors="coerce")
 
+print(f"🔹 Datos cargados: {df_raw.shape[0]} filas")
+
 # Indicadores
 df_ind = build_indicators(df_raw.copy(), hp, ATR_LEN)
+print(f"🔹 Tras build_indicators(): {df_ind.shape[0]} filas")
 
 # Derivados para targets
 close = df_ind.close.values
@@ -180,39 +164,64 @@ up = np.maximum(diff, 0) / atr_pips
 dn = np.maximum(-diff, 0) / atr_pips
 
 mask = (~np.isnan(diff)) & (np.maximum(up, dn) >= 0)
+n_remaining = mask.sum()
+print(f"🔹 Filas restantes tras mask: {n_remaining}")
 
-feature_cols: List[str] = [c for c in df_ind.columns if c not in {f"atr_{ATR_LEN}", "timestamp"}]
+feature_cols: List[str] = [
+    c for c in df_ind.columns if c not in {f"atr_{ATR_LEN}", "timestamp"}
+]
 X_raw = df_ind.loc[mask, feature_cols]
+
+# Validación crítica antes de escalar
+win = int(hp["win"])
+if n_remaining <= win:
+    raise ValueError(
+        f"❌ Demasiados filtros: quedan {n_remaining} filas y win={win}. "
+        "Revisa horizon, win o la fuente de datos."
+    )
 
 # Seguridad extra: asegura que no haya NaNs numéricos
 if X_raw.isna().any().any():
-    raise ValueError("❌  Persisten NaNs en los features tras build_indicators(). Revisa la fuente de datos.")
+    raise ValueError(
+        "❌ Persisten NaNs en los features tras build_indicators(). "
+        "Revisa la fuente de datos."
+    )
 
 # Ajustar / transformar
 scaler = RobustScaler()
 X_scaled = scaler.fit_transform(X_raw)
 
 # Validar que el scaler conoce exactamente las mismas columnas
-assert list(scaler.feature_names_in_) == feature_cols, "Drift de columnas entre scaler y DataFrame"
+assert list(scaler.feature_names_in_) == feature_cols, (
+    "Drift de columnas entre scaler y DataFrame"
+)
 
 # Construir secuencias
-win = int(hp["win"])
 if len(X_scaled) <= win:
-    raise ValueError(f"❌  Muy pocos registros ({len(X_scaled)}) para win={win}")
+    raise ValueError(
+        f"❌ Muy pocos registros ({len(X_scaled)}) para win={win} "
+        "después de escalar."
+    )
 
-X_seq, y_up, y_dn, closes_seq = to_sequences(X_scaled, up[mask], dn[mask], close[mask], win)
+X_seq, y_up, y_dn, closes_seq = to_sequences(
+    X_scaled, up[mask], dn[mask], close[mask], win
+)
 
-# Double-check de NaNs antes de entrenar
+# Double-check de NaNs
 if np.isnan(X_seq).any() or np.isnan(y_up).any() or np.isnan(y_dn).any():
-    raise ValueError("❌  Se han detectado NaNs en las secuencias de entrenamiento – abortando.")
+    raise ValueError(
+        "❌ Se han detectado NaNs en las secuencias de entrenamiento – abortando."
+    )
 
-print(f"✅  Datos listos: X={X_seq.shape}, y={(y_up.shape, y_dn.shape)}")
+print(f"✅ Datos listos: X={X_seq.shape}, y={(y_up.shape, y_dn.shape)}")
 
-# ─────────────────────── entrenamiento LSTM ───────────────────────────
+# ─────────────────────── entrenamiento LSTM ──────────────────────────
 model = make_model(
     X_seq.shape[1:], hp["lr"], hp["dr"], hp["filt"], hp["units"], hp["heads"]
 )
-early_stop = callbacks.EarlyStopping(patience=5, restore_best_weights=True, verbose=1)
+early_stop = callbacks.EarlyStopping(
+    patience=5, restore_best_weights=True, verbose=1
+)
 
 model.fit(
     X_seq,
@@ -223,7 +232,7 @@ model.fit(
     verbose=1,
 )
 
-# ──────────────────── carga rápida de validación ──────────────────────
+# ──────────────────── carga rápida de validación ─────────────────────
 from collections import deque  # inline para mantener fichero autoconclusivo
 
 def quick_bt(pred, closes, atr_pips, hp: dict, tick: float) -> float:
@@ -234,10 +243,10 @@ def quick_bt(pred, closes, atr_pips, hp: dict, tick: float) -> float:
     pos = False
     dq: deque[int] = deque(maxlen=swin)
     for (u, d), price, atr in zip(pred, closes, atr_pips):
-        mag, diff = max(u, d), abs(u - d)
+        mag, diff_val = max(u, d), abs(u - d)
         raw = 1 if u > d else -1
         thr = up_thr if raw == 1 else dn_thr
-        dq.append(raw if (mag >= thr and diff >= delta_min) else 0)
+        dq.append(raw if (mag >= thr and diff_val >= delta_min) else 0)
         buys, sells = dq.count(1), dq.count(-1)
         sig = 1 if buys > swin // 2 else -1 if sells > swin // 2 else 0
         if not pos and sig:
@@ -263,7 +272,7 @@ bt_score = quick_bt(
 )
 print(f"⚡ Quick BT (sanity): {bt_score:.2f} ATR-pips")
 
-# ──────────────────── guardado de artefactos ──────────────────────────
+# ──────────────────── guardado de artefactos ─────────────────────────
 timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
 gcs_base = args.output_gcs_base_dir.rstrip("/")
 gcs_dir = f"{gcs_base}/{PAIR}/{TF}/{timestamp}/"
@@ -280,6 +289,6 @@ with tempfile.TemporaryDirectory() as tmp:
 
     for p in (model_path, scaler_path, params_out_path):
         gcs_upload(p, gcs_dir + p.name)
-        print(f"☁️  Subido {p.name} → {gcs_dir}{p.name}")
+        print(f"☁️ Subido {p.name} → {gcs_dir}{p.name}")
 
-print(f"🎉  Entrenamiento completado. Artefactos disponibles en:\n    {gcs_dir}")
+print(f"🎉 Entrenamiento completado. Artefactos disponibles en:\n    {gcs_dir}")
