@@ -1,41 +1,42 @@
-#!/bin/bash
+#!/usr/bin/env bash
+###############################################################################
+# run.sh – entrypoint para la imagen runner-lstm
+#
+# ▸ Descarga el código fuente (*.py) desde un bucket GCS
+# ▸ Ejecuta el script principal (por defecto train_lstm.py) con
+#   los argumentos que reciba el contenedor.
+#
+# Variables de entorno opcionales:
+#   CODE_GCS_URI   Prefijo GCS donde viven los *.py   (def: gs://trading-ai-models-460823/code)
+#   MAIN_PY        Script principal a ejecutar        (def: train_lstm.py)
+###############################################################################
 
-# Salir inmediatamente si un comando falla
-set -e
+set -euo pipefail
 
-TARGET_DIR="/tmp/code_execution" # Usar un subdirectorio en /tmp para mayor limpieza
+log() { printf '%(%F %T)T  %s\n' -1 "$*"; }
 
-echo "Creando directorio de destino en ${TARGET_DIR}..."
-mkdir -p "${TARGET_DIR}"
-cd "${TARGET_DIR}" # Cambiar al directorio de trabajo
+CODE_GCS_URI="${CODE_GCS_URI:-gs://trading-ai-models-460823/code}"
+MAIN_PY="${MAIN_PY:-train_lstm.py}"
 
-echo "Descargando scripts desde GCS a ${TARGET_DIR}..."
-# El flag -r es necesario si 'code' contiene subdirectorios, pero para *.py directamente en code/, no es estrictamente necesario.
-# Si solo son archivos .py en la raíz de 'code/', el siguiente comando es más simple:
-gsutil -m cp "gs://trading-ai-models-460823/code/*.py" .
-# Si 'code' tuviera estructura de directorios que quieres replicar, usarías:
-# gsutil -m cp -r "gs://trading-ai-models-460823/code/*" .
+TMP_DIR="$(mktemp -d -t code_exec_XXXXXX)"
+trap 'rm -rf "${TMP_DIR}"' EXIT
 
-# Verificar si se descargaron los archivos (opcional pero recomendado)
-if ! ls -1qA . | grep -q "."; then # Verifica si el directorio está vacío
-    echo "Error: No se descargaron archivos desde GCS o la carpeta de código está vacía."
-    exit 1
+log "Directorio de trabajo: ${TMP_DIR}"
+cd "${TMP_DIR}"
+
+log "Sincronizando código desde ${CODE_GCS_URI} ..."
+# -m == multithread; rsync replica jerarquía y actualiza solo cambios
+gsutil -m rsync -r "${CODE_GCS_URI}" .
+
+# Validación básica
+if [[ ! -f "${MAIN_PY}" ]]; then
+  log "❌  No se encontró ${MAIN_PY} tras la descarga."
+  ls -la
+  exit 1
 fi
 
-echo "Archivos descargados en ${TARGET_DIR}:"
+log "Contenido descargado:"
 ls -la
 
-# Pasar todos los argumentos recibidos por run.sh al script de Python
-# Esto permite que KFP/Vertex AI pase argumentos al script de Python a través del ENTRYPOINT.
-# Por ejemplo, si tu train_lstm.py acepta --params, --pair, etc.
-SCRIPT_TO_RUN="train_lstm.py" # Define el script principal aquí
-
-if [ -f "${SCRIPT_TO_RUN}" ]; then
-    echo "Ejecutando el script: python ${SCRIPT_TO_RUN} "$@""
-    python "${SCRIPT_TO_RUN}" "$@"
-else
-    echo "Error: El script principal ${SCRIPT_TO_RUN} no se encontró después de la descarga."
-    exit 1
-fi
-
-echo "Ejecución del script finalizada."
+log "Ejecutando: python ${MAIN_PY} $*"
+exec python "${MAIN_PY}" "$@"

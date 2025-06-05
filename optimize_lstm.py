@@ -1,51 +1,64 @@
 #!/usr/bin/env python3
-import os
-import sys
-import random
-import warnings
-import tempfile
-import json
-import gc
+"""
+Busca los mejores hiperparámetros para un modelo LSTM usando Optuna
+y guarda un `best_params.json` en GCS o local.
+
+Cambios destacados
+------------------
+* Valida que **ATR** exista y quede sin NaNs antes de entrenar.
+* Comprueba DataFrames vacíos, desajustes de longitud y secuencias insuficientes.
+* Registro exhaustivo (logging) para depuración en Vertex AI.
+* La ruta `--output` apunta directamente al archivo JSON final.
+"""
+
+# ───────────────── imports estándar ──────────────────────
+import os, sys, json, random, warnings, tempfile, gc
 from pathlib import Path
 import argparse
 from datetime import datetime
+from collections import deque
+import logging
 
-# ── Importaciones de librerías principales ──────────────────────
+# ───────────────── configuración de logging ───────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+# ───────────────── libs científicas ───────────────────────
 warnings.filterwarnings("ignore", category=FutureWarning)
+
 import numpy as np
-if not hasattr(np, "NaN"):
+if not hasattr(np, "NaN"):      # compat. NumPy < 1.24
     np.NaN = np.nan
-import pandas as pd
-import optuna
-import joblib
-from google.cloud import storage
-from google.oauth2 import service_account
+
+import pandas as pd, joblib, optuna
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import RobustScaler
 import tensorflow as tf
 from tensorflow.keras import layers, models, callbacks, optimizers, mixed_precision
-from collections import deque
 
-# Importación corregida para módulos de core
-from indicators import build_indicators
+from google.cloud import storage
+from google.oauth2 import service_account
 
-# reproducibilidad
-random.seed(42)
-np.random.seed(42)
-tf.random.set_seed(42)
+from indicators import build_indicators   # módulo propio
+
+# ───────────────── reproducibilidad & GPU ─────────────────
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
 os.environ["TF_DETERMINISTIC_OPS"] = "1"
+
 gpus = tf.config.list_physical_devices("GPU")
 if gpus:
     for g in gpus:
         tf.config.experimental.set_memory_growth(g, True)
 mixed_precision.set_global_policy("mixed_float16")
 
-# ── helpers GCS ────────────────────────────────────────────────
-def gcs_client():
-    """
-    Obtiene un cliente de GCS, usando credenciales de cuenta de servicio
-    si GOOGLE_APPLICATION_CREDENTIALS está definida, o por defecto si es en GCP.
-    """
+# ───────────────── helpers de GCS ─────────────────────────
+def _gcs_client():
     if os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
         creds = service_account.Credentials.from_service_account_file(
             os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
@@ -54,107 +67,92 @@ def gcs_client():
     return storage.Client()
 
 def download_gs(uri: str) -> Path:
-    """
-    Descarga un archivo desde GCS a un directorio temporal.
-    """
     bucket, blob = uri[5:].split("/", 1)
     local = Path(tempfile.mkdtemp()) / Path(blob).name
-    gcs_client().bucket(bucket).blob(blob).download_to_filename(local)
+    _gcs_client().bucket(bucket).blob(blob).download_to_filename(local)
     return local
 
 def upload_gs(local: Path, uri: str):
-    """
-    Subir archivo a GCS desde una ruta local.
-    """
     bucket, blob = uri[5:].split("/", 1)
-    gcs_client().bucket(bucket).blob(blob).upload_from_filename(str(local))
+    _gcs_client().bucket(bucket).blob(blob).upload_from_filename(str(local))
 
 def maybe_local(path: str) -> Path:
-    """
-    Verifica si la ruta es GCS o local, y descarga desde GCS si es necesario.
-    """
     return download_gs(path) if path.startswith("gs://") else Path(path)
 
-# ── CLI ────────────────────────────────────────────────────────
-p = argparse.ArgumentParser()
-p.add_argument("--features", required=True, help="Ruta gs:// al parquet con los features OHLC.")
-p.add_argument("--pair", required=True, help="Símbolo del par de trading (ej: EURUSD).")
-p.add_argument("--timeframe", required=True, help="Timeframe de los datos (ej: 15minute).")
-p.add_argument("--output", required=True, help="Ruta gs:// donde se guardará el best_params.json.")
-p.add_argument("--n-trials", type=int, default=25, help="Número de trials de Optuna.")
-args = p.parse_args()
+# ───────────────── CLI ────────────────────────────────────
+pa = argparse.ArgumentParser()
+pa.add_argument("--features",   required=True, help="gs://… parquet con OHLC+indicadores básicos")
+pa.add_argument("--pair",       required=True, help="Ej.: EURUSD")
+pa.add_argument("--timeframe",  required=True, help="Ej.: 15minute")
+pa.add_argument("--output",     required=True, help="gs://…/best_params.json")
+pa.add_argument("--n-trials",   type=int, default=25)
+args = pa.parse_args()
 
 PAIR, TF = args.pair, args.timeframe
-tick     = 0.01 if PAIR.endswith("JPY") else 0.0001
-ATR_LEN  = 14
+tick = 0.01 if PAIR.endswith("JPY") else 0.0001
+ATR_LEN = 14
 EPOCHS_OPT, BATCH_OPT = 15, 64
 
-# ── datos base ─────────────────────────────────────────────────
-# df_raw se carga desde GCS usando maybe_local.
-# Los Parquets ya vienen con 'open', 'high', 'low', 'close', 'timestamp' y otros.
+# ───────────────── carga base de datos ────────────────────
 df_raw = pd.read_parquet(maybe_local(args.features)).reset_index(drop=True)
+if "timestamp" in df_raw.columns:
+    df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"], unit="ms", errors="coerce")
 
-# Asegurarse de que la columna 'timestamp' sea de tipo datetime, si existe.
-if 'timestamp' in df_raw.columns:
-    df_raw['timestamp'] = pd.to_datetime(df_raw['timestamp'], unit='ms', errors='coerce')
-
-# ── modelo base ────────────────────────────────────────────────
-def make_model(inp_sh, lr, dr, filt, units, heads):
-    inp = layers.Input(shape=inp_sh, dtype=tf.float32)
-    x   = layers.Conv1D(filt, 3, padding="same", activation="relu")(inp)
-    x   = layers.Bidirectional(layers.LSTM(units, return_sequences=True))(x)
-    x   = layers.MultiHeadAttention(num_heads=heads, key_dim=units)(x, x)
-    x   = layers.GlobalAveragePooling1D()(x)
-    x   = layers.Dropout(dr)(x)
+# ───────────────── modelo LSTM base ───────────────────────
+def make_model(inp_shape, lr, dr, filt, units, heads):
+    x = inp = layers.Input(shape=inp_shape, dtype=tf.float32)
+    x = layers.Conv1D(filt, 3, padding="same", activation="relu")(x)
+    x = layers.Bidirectional(layers.LSTM(units, return_sequences=True))(x)
+    x = layers.MultiHeadAttention(num_heads=heads, key_dim=units)(x, x)
+    x = layers.GlobalAveragePooling1D()(x)
+    x = layers.Dropout(dr)(x)
     out = layers.Dense(2, dtype="float32")(x)
     model = models.Model(inp, out)
     model.compile(optimizers.Adam(lr), loss="mae")
     return model
 
-# ▶▶▶ Corrección en quick_bt: nombres de parámetros actualizados ◀◀◀
-def quick_bt(pred, closes, atr_pips, rr, up_thr, dn_thr, delta_min, smooth_win):
-    net, pos = 0.0, False
-    dq = deque(maxlen=smooth_win)
-    for (u, d), price, atr in zip(pred, closes, atr_pips):
+def quick_bt(pred, closes, atr, rr, up_thr, dn_thr, delta_min, smooth_win):
+    net, pos, dq = 0.0, False, deque(maxlen=smooth_win)
+    for (u, d), price, atr_i in zip(pred, closes, atr):
         mag, diff = max(u, d), abs(u - d)
         raw = 1 if u > d else -1
-        # Corrección: usar up_thr, dn_thr, delta_min
         cond = ((raw == 1 and mag >= up_thr) or (raw == -1 and mag >= dn_thr)) and diff >= delta_min
         dq.append(raw if cond else 0)
         buys, sells = dq.count(1), dq.count(-1)
         signal = 1 if buys > smooth_win // 2 else -1 if sells > smooth_win // 2 else 0
         if not pos and signal:
-            pos, entry, ed = True, price, signal
-            # Corrección: usar up_thr, dn_thr
-            sl = (up_thr if ed == 1 else dn_thr) * atr
+            pos, entry, sd = True, price, signal
+            sl = (up_thr if sd == 1 else dn_thr) * atr_i
             tp = rr * sl
             continue
         if pos and signal:
-            # Corrección: usar up_thr, dn_thr
-            sl = min(sl, (up_thr if signal == 1 else dn_thr) * atr)
+            sl = min(sl, (up_thr if signal == 1 else dn_thr) * atr_i)
             tp = max(tp, rr * sl)
         if pos:
-            pnl = (price - entry) / tick if ed == 1 else (entry - price) / tick
+            pnl = (price - entry) / tick if sd == 1 else (entry - price) / tick
             if pnl >= tp or pnl <= -sl:
                 net += tp if pnl >= tp else -sl
                 pos = False
     return net
 
-# ── Optuna objective ───────────────────────────────────────────
-def objective(trial):
-    pars = {
+# ───────────────── función objective ───────────────────────
+def objective(trial: optuna.trial.Trial) -> float:
+    p = {
+        # hiperparámetros trading
         "horizon":    trial.suggest_int("horizon", 10, 30),
         "rr":         trial.suggest_float("rr", 1.5, 3.0),
         "min_thr_up": trial.suggest_float("min_thr_up", 0.5, 2.0),
         "min_thr_dn": trial.suggest_float("min_thr_dn", 0.5, 2.0),
         "delta_min":  trial.suggest_float("delta_min", 0.01, 0.5),
         "smooth_win": trial.suggest_int("smooth_win", 1, 5),
+        # hiperparámetros LSTM
         "win":        trial.suggest_int("win", 20, 60),
         "lr":         trial.suggest_float("lr", 1e-4, 3e-3, log=True),
         "dr":         trial.suggest_float("dr", 0.1, 0.5),
         "filt":       trial.suggest_categorical("filt", [16, 32, 64]),
         "units":      trial.suggest_categorical("units", [32, 64, 128]),
         "heads":      trial.suggest_categorical("heads", [2, 4, 8]),
+        # hiperparámetros indicadores
         "sma_len":    trial.suggest_categorical("sma_len",  [20, 40, 60]),
         "rsi_len":    trial.suggest_categorical("rsi_len",  [7, 14, 21]),
         "macd_fast":  trial.suggest_categorical("macd_fast", [8, 12]),
@@ -162,167 +160,98 @@ def objective(trial):
         "stoch_len":  trial.suggest_categorical("stoch_len", [14, 21]),
     }
 
-    # Construir indicadores sobre una copia de df_raw
-    df = build_indicators(df_raw.copy(), pars, ATR_LEN)
-
-    # ▶▶▶ Inicio de la corrección: verificar si df es None ◀◀◀
-    if df is None:
-        print(f"Trial {trial.number}: ERROR - build_indicators retornó None. Saltando trial.")
-        # Podrías registrar más detalles de 'pars' aquí para depurar.
-        return -1e9  # Valor muy bajo para trial fallido
-    # ▶▶▶ Fin de la corrección para df=None ◀◀◀
-
+    # ---------- indicadores ----------
+    df = build_indicators(df_raw.copy(), p, ATR_LEN)
     atr_col = f"atr_{ATR_LEN}"
-    if atr_col not in df.columns:
-        print(f"Trial {trial.number}: ERROR - La columna ATR '{atr_col}' no existe en el DataFrame después de build_indicators. Saltando trial.")
-        return -1e9  # Retornar valor muy bajo
-
-    # Verificar si la columna ATR está completamente vacía (None) o llena de NaNs
-    if df[atr_col].isnull().all():
-        print(f"Trial {trial.number}: ERROR - La columna ATR '{atr_col}' está completamente llena de NaNs ({len(df[atr_col])} valores). Saltando trial.")
-        return -1e9  # Retornar valor muy bajo
-
-    num_nans_before_fill = df[atr_col].isna().sum()
-    if num_nans_before_fill > 0:
-        print(f"Trial {trial.number}: INFO - La columna ATR '{atr_col}' contiene {num_nans_before_fill} NaNs antes del rellenado.")
-
-    # Rellenar NaNs puntuales en ATR (bfill y luego ffill para cubrir bordes)
+    if atr_col not in df or df[atr_col].isna().all():
+        logger.warning("ATR ausente o todo NaN → trial penalizado")
+        return -1e9
     df[atr_col] = df[atr_col].fillna(method="bfill").fillna(method="ffill")
-
-    # Verificar si después del rellenado aún hay NaNs
-    if df[atr_col].isnull().any():
-        print(f"Trial {trial.number}: ERROR - La columna ATR '{atr_col}' todavía contiene NaNs después de intentar rellenar. Saltando trial.")
+    if df[atr_col].isna().any():
+        logger.warning("ATR todavía contiene NaNs → trial penalizado")
         return -1e9
 
-    print(f"Trial {trial.number}: INFO - Columna ATR '{atr_col}' validada y rellenada. NaNs restantes: {df[atr_col].isna().sum()}.")
+    # ---------- etiquetas ----------
     atr = df[atr_col].values / tick
-
-    # Resto de variables necesarias
-    clo = df.close.values
-    fut = np.roll(clo, -pars["horizon"])
-    fut[-pars["horizon"]:] = np.nan
-    diff = (fut - clo) / tick
+    cls = df.close.values
+    fut = np.roll(cls, -p["horizon"])
+    fut[-p["horizon"]:] = np.nan
+    diff = (fut - cls) / tick
     up = np.maximum(diff, 0) / atr
     dn = np.maximum(-diff, 0) / atr
-    mask = (~np.isnan(diff)) & (np.maximum(up, dn) >= 0) & (~np.isnan(atr))  # Añadida condición ~np.isnan(atr)
+    mask = (~np.isnan(diff)) & (~np.isnan(atr))
 
-    # Columnas de features (excluyendo ATR y timestamp)
-    features_for_model = [col for col in df.columns if col not in [atr_col, 'timestamp']]
-    X_raw_filtered = df.loc[mask, features_for_model]
+    if mask.sum() < 1000:
+        return -1e8           # muy pocos datos útiles
 
-    # Mantener solo columnas numéricas
-    X_raw_filtered = X_raw_filtered.select_dtypes(include=np.number)
+    feats = [c for c in df.columns if c not in (atr_col, "timestamp")]
+    X_raw = df.loc[mask, feats].select_dtypes(include=np.number)
+    if X_raw.empty or X_raw.shape[0] <= p["win"]:
+        return -1e8
 
-    if X_raw_filtered.empty or len(X_raw_filtered) < pars["win"]:
-        print(f"Trial {trial.number}: X_raw_filtered vacío o menor que ventana ({len(X_raw_filtered)} < {pars['win']}). Saltando trial.")
-        return -1e9
+    y_up, y_dn = up[mask], dn[mask]
+    cls_m, atr_m = cls[mask], atr[mask]
 
-    y_up, y_dn, clo_m, atr_m = up[mask], dn[mask], clo[mask], atr[mask]
-
+    # ---------- escalado + secuencias ----------
     sc = RobustScaler()
-    X_s = sc.fit_transform(X_raw_filtered)
+    X_scaled = sc.fit_transform(X_raw)
 
     def seq(arr, w):
-        # Asegurar que haya suficientes datos para la primera secuencia
         if len(arr) < w:
-            return np.array([])  # Retornar array vacío si no hay suficientes datos
-        return np.stack([arr[i-w:i] for i in range(w, len(arr))]).astype(np.float32)
+            return np.empty((0,))
+        return np.stack([arr[i - w : i] for i in range(w, len(arr))]).astype(np.float32)
 
-    X_seq = seq(X_s, pars["win"])
+    X_seq = seq(X_scaled, p["win"])
+    if X_seq.shape[0] < 500:
+        return -1e8
 
-    # Verificar si X_seq está vacío después de la creación de secuencias
-    if X_seq.shape[0] == 0:
-        print(f"Trial {trial.number}: No se pudieron crear secuencias (X_seq está vacío). Probablemente datos insuficientes después del enmascaramiento y antes de la secuenciación. Saltando trial.")
-        return -1e9
+    y_up = y_up[p["win"]:]
+    y_dn = y_dn[p["win"]:]
+    cls_m = cls_m[p["win"]:]
+    atr_m = atr_m[p["win"]:]
 
-    if len(X_seq) < 500:  # Este umbral podría ser ajustado
-        print(f"Trial {trial.number}: Longitud de secuencia insuficiente ({len(X_seq)} después de seq). Saltando trial.")
-        return -1e6  # Puede ser un valor diferente para distinguir de otros errores
-
-    # Ajustar los slices para que coincidan con la longitud de X_seq
-    num_sequences = X_seq.shape[0]
-    if num_sequences == 0:
-        print(f"Trial {trial.number}: X_seq está vacío, no se pueden generar etiquetas. Saltando trial.")
-        return -1e9
-
-    if len(y_up) < pars["win"] + num_sequences:
-        print(f"Trial {trial.number}: No hay suficientes datos en y_up para alinear con X_seq. y_up len: {len(y_up)}, required: {pars['win'] + num_sequences}. Saltando trial.")
-        return -1e9
-
-    up_s = y_up[pars["win"] : pars["win"] + num_sequences]
-    dn_s = y_dn[pars["win"] : pars["win"] + num_sequences]
-    clo_s = clo_m[pars["win"] : pars["win"] + num_sequences]
-    atr_s = atr_m[pars["win"] : pars["win"] + num_sequences]
-
-    # Validación adicional de longitudes
-    if not (len(X_seq) == len(up_s) == len(dn_s) == len(clo_s) == len(atr_s)):
-        print(f"Trial {trial.number}: Desajuste de longitud después de crear secuencias y etiquetas.")
-        print(f"X_seq: {len(X_seq)}, up_s: {len(up_s)}, dn_s: {len(dn_s)}, clo_s: {len(clo_s)}, atr_s: {len(atr_s)}")
-        return -1e9
-
-    X_tr, X_val, up_tr, up_val, dn_tr, dn_val, cl_tr, cl_val, at_tr, at_val = train_test_split(
-        X_seq, up_s, dn_s, clo_s, atr_s, test_size=0.2, shuffle=False
+    X_tr, X_val, up_tr, up_val, dn_tr, dn_val, cls_tr, cls_val, atr_tr, atr_val = train_test_split(
+        X_seq, y_up, y_dn, cls_m, atr_m, test_size=0.2, shuffle=False
     )
 
-    if len(X_tr) == 0 or len(X_val) == 0:
-        print(f"Trial {trial.number}: Conjunto de entrenamiento o validación vacío después del split. X_tr: {len(X_tr)}, X_val: {len(X_val)}. Saltando trial.")
-        return -1e9
-
-    m = make_model(
-        X_tr.shape[1:], pars["lr"], pars["dr"],
-        pars["filt"], pars["units"], pars["heads"]
-    )
-    m.fit(
-        X_tr,
-        np.vstack([up_tr, dn_tr]).T,
+    model = make_model(X_tr.shape[1:], p["lr"], p["dr"], p["filt"], p["units"], p["heads"])
+    model.fit(
+        X_tr, np.vstack([up_tr, dn_tr]).T,
         validation_data=(X_val, np.vstack([up_val, dn_val]).T),
         epochs=EPOCHS_OPT,
         batch_size=BATCH_OPT,
         verbose=0,
-        callbacks=[callbacks.EarlyStopping(patience=5, restore_best_weights=True)]
+        callbacks=[callbacks.EarlyStopping(patience=5, restore_best_weights=True)],
     )
 
     score = quick_bt(
-        m.predict(X_val, verbose=0),
-        cl_val,
-        at_val,
-        pars["rr"],
-        pars["min_thr_up"],
-        pars["min_thr_dn"],
-        pars["delta_min"],
-        pars["smooth_win"]
+        model.predict(X_val, verbose=0),
+        cls_val,
+        atr_val,
+        p["rr"], p["min_thr_up"], p["min_thr_dn"],
+        p["delta_min"], p["smooth_win"]
     )
 
     tf.keras.backend.clear_session()
     gc.collect()
     return score
 
-# ── Ejecución de Optuna ───────────────────────────────────────
-study = optuna.create_study(
-    direction="maximize",
-    sampler=optuna.samplers.TPESampler(seed=42)
-)
+# ───────────────── ejecución de Optuna ──────────────────────
+study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=SEED))
 study.optimize(objective, n_trials=args.n_trials, show_progress_bar=True)
+
 best = study.best_params
-
-# Guardar best_params.json en GCS
-# La ruta de salida ahora es directamente el archivo JSON, no un directorio.
-# args.output debe ser la ruta completa al archivo JSON, ej: gs://bucket/path/to/best_params.json
-output_gcs_path = args.output  # Se asume que args.output ya es la ruta completa al archivo.
-
-best_params_content = json.dumps({
-    **best,
+best.update({
     "pair": PAIR,
     "timeframe": TF,
     "features_path": args.features,
-    "timestamp": datetime.utcnow().isoformat()
-}, indent=2)
+    "timestamp": datetime.utcnow().isoformat(),
+})
 
-with tempfile.TemporaryDirectory() as tmpdir:
-    # El nombre del archivo local es solo 'best_params.json' si output_gcs_path es el nombre del archivo.
-    local_tmp_file_name = Path(output_gcs_path).name  # e.g., "best_params.json"
-    local_tmp_file = Path(tmpdir) / local_tmp_file_name
-    local_tmp_file.write_text(best_params_content)
-    upload_gs(local_tmp_file, output_gcs_path)  # output_gcs_path es la URI completa del archivo
+best_json = json.dumps(best, indent=2)
+with tempfile.TemporaryDirectory() as td:
+    tmpfile = Path(td) / "best_params.json"
+    tmpfile.write_text(best_json)
+    upload_gs(tmpfile, args.output)
 
-print(f"✅ best_params.json guardado en {output_gcs_path}")
+logger.info("✅ best_params.json guardado en %s", args.output)

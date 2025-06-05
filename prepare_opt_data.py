@@ -2,169 +2,169 @@
 """
 prepare_opt_data.py
 ────────────────────
-Prepara el subset de datos históricos para la optimización de hiperparámetros.
-Carga el parquet completo desde GCS, lo filtra para los últimos 5 años
-y guarda el resultado en una nueva ubicación en GCS.
+Genera el subconjunto de datos históricos que se usará para la búsqueda de
+hiperparámetros (“optimización”) de los modelos LSTM.
 
-Uso:
-    python prepare_opt_data.py --input_path gs://bucket/data/SYMBOL_TIMEFRAME.parquet \
-                               --output_path gs://bucket/data_filtered_for_opt/SYMBOL_TIMEFRAME_recent.parquet
+• Lee un Parquet OHLC completo ―local o gs://―.
+• Garantiza que las columnas esenciales se llamen: open, high, low, close,
+  volume (opcional) y timestamp (datetime UTC).
+• Elimina filas con NaNs en OHLC.
+• Filtra los últimos N años (por defecto 5).
+• Guarda el resultado en la ruta de salida (local o gs://).
+
+Ejemplo CLI
+-----------
+python prepare_opt_data.py \
+  --input_path  gs://bucket/data/EURUSD_15minute.parquet \
+  --output_path gs://bucket/data_filtered_for_opt/EURUSD_15minute_recent.parquet \
+  --years 5
 """
 
-import os
-import sys # Asegúrate de que sys esté importado si lo usas en el try-except de abajo
+from __future__ import annotations
 import argparse
-from datetime import datetime, timedelta
-from pathlib import Path
 import logging
-import pandas as pd
-import tempfile # <--- AÑADIDO IMPORT tempfile
+import os
+import sys
+import tempfile
+from datetime import datetime
+from pathlib import Path
 
-# Importaciones para GCS
+import pandas as pd
+
+# ─────────────── Config logging ────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(message)s",
+)
+log = logging.getLogger(__name__)
+
+# ─────────────── GCS helpers ───────────────────
 try:
     import gcsfs
     from google.cloud import storage
-    # from google.oauth2 import service_account # No se usa directamente si usas credenciales por defecto o gcsfs con token cloud
     from google.auth.exceptions import DefaultCredentialsError
-except ImportError:
-    # Esto es una medida de seguridad, en el Dockerfile ya deberían estar instalados
+except ImportError:  # fallback defensivo si faltan deps (no debería ocurrir en la imagen)
     import subprocess
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "gcsfs", "google-cloud-storage"])
+
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", "-q", "gcsfs", "google-cloud-storage"]
+    )
     import gcsfs
     from google.cloud import storage
-    # from google.oauth2 import service_account
     from google.auth.exceptions import DefaultCredentialsError
 
 
-# Configuración de Logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
-
-# --- Constantes de Configuración ---
-OPTIMIZATION_WINDOW_YEARS = 5
-
-# --- Helpers GCS ---
-def get_gcs_client():
-    # Para entornos de GCP como Vertex AI, Cloud Run, etc., el cliente
-    # de storage.Client() tomará las credenciales del entorno automáticamente.
-    # No es necesario especificar credenciales si la cuenta de servicio del entorno
-    # tiene los permisos adecuados.
+def _gcs_client() -> storage.Client:
     try:
-        return storage.Client()
+        return storage.Client()  # usa ADC (cuenta de servicio) o cred locales
     except DefaultCredentialsError as e:
-        logger.error(f"No se pudieron obtener credenciales predeterminadas de GCP: {e}.")
-        logger.error("Asegúrate de que el entorno de ejecución (VM, pod, etc.) tenga una cuenta de servicio con permisos para GCS, o que GOOGLE_APPLICATION_CREDENTIALS esté configurado si se ejecuta localmente con una SA específica.")
-        raise
+        log.critical(
+            "❌ No fue posible obtener credenciales de GCP. "
+            "Asegúrate de que GOOGLE_APPLICATION_CREDENTIALS esté definida "
+            "o de ejecutar `gcloud auth application-default login` en local."
+        )
+        raise e
 
-def download_gs(uri: str) -> Path:
-    client = get_gcs_client()
+
+def _download_gs(uri: str) -> Path:
     if not uri.startswith("gs://"):
-        raise ValueError(f"La URI proporcionada no es una ruta GCS válida: {uri}")
-    
-    try:
-        bucket_name, blob_name = uri[5:].split("/", 1)
-    except ValueError:
-        raise ValueError(f"Formato de URI GCS inválido: {uri}. Debe ser gs://bucket-name/path/to/blob")
-
-    # Crear un nombre de archivo local único en el directorio temporal
-    local_file_path = Path(tempfile.mkdtemp()) / Path(blob_name).name
-    
-    try:
-        blob = client.bucket(bucket_name).blob(blob_name)
-        blob.download_to_filename(local_file_path)
-        logger.info(f"Archivo descargado de {uri} a {local_file_path}")
-    except Exception as e:
-        logger.error(f"Fallo al descargar {uri} a {local_file_path}: {e}")
-        raise
-    return local_file_path
-
-def upload_gs(local_path: Path, gcs_uri: str):
-    client = get_gcs_client()
-    if not gcs_uri.startswith("gs://"):
-        raise ValueError(f"La URI GCS proporcionada no es una ruta válida: {gcs_uri}")
-
-    try:
-        bucket_name, blob_name = gcs_uri[5:].split("/", 1)
-    except ValueError:
-        raise ValueError(f"Formato de URI GCS inválido: {gcs_uri}. Debe ser gs://bucket-name/path/to/blob")
-    
-    try:
-        blob = client.bucket(bucket_name).blob(blob_name)
-        blob.upload_from_filename(str(local_path))
-        logger.info(f"Archivo subido de {local_path} a {gcs_uri}")
-    except Exception as e:
-        logger.error(f"Fallo al subir {local_path} a {gcs_uri}: {e}")
-        raise
-
-def save_dataframe_to_gcs(df: pd.DataFrame, gcs_path: str):
-    if not gcs_path.startswith("gs://"):
-        raise ValueError("La ruta de salida debe ser una ruta gs://")
-    logger.info(f"Intentando guardar DataFrame en GCS: {gcs_path} usando gcsfs y token cloud.")
-    try:
-        # gcsfs usa las credenciales del entorno ("cloud")
-        df.to_parquet(gcs_path, index=False, engine="pyarrow", storage_options={"token": "cloud"})
-        logger.info(f"DataFrame guardado en GCS: {gcs_path} usando gcsfs.")
-    except Exception as e:
-        logger.error(f"Error guardando DataFrame a GCS con gcsfs: {e}", exc_info=True)
-        raise
+        raise ValueError("Sólo se aceptan URIs que empiecen con gs://")
+    bucket_name, blob_name = uri[5:].split("/", 1)
+    local = Path(tempfile.mkdtemp()) / Path(blob_name).name
+    _gcs_client().bucket(bucket_name).blob(blob_name).download_to_filename(local)
+    log.info(f"📥  Descargado {uri}  →  {local}")
+    return local
 
 
-# --- Lógica Principal ---
+def _upload_gs(local: Path, uri: str):
+    if not uri.startswith("gs://"):
+        raise ValueError("La ruta de salida debe empezar por gs://")
+    bucket_name, blob_name = uri[5:].split("/", 1)
+    _gcs_client().bucket(bucket_name).blob(blob_name).upload_from_filename(str(local))
+    log.info(f"☁️  Subido {local}  →  {uri}")
+
+
+def _read_parquet(path: str) -> pd.DataFrame:
+    """Lee un Parquet desde local o GCS con pyarrow."""
+    if path.startswith("gs://"):
+        # gcsfs usa ‘token="cloud"’ para ADC / cred. de la VM
+        return pd.read_parquet(path, engine="pyarrow", storage_options={"token": "cloud"})
+    return pd.read_parquet(path, engine="pyarrow")
+
+
+def _write_parquet(df: pd.DataFrame, path: str):
+    """Guarda Parquet a local o GCS (mantiene compresión por defecto)."""
+    if path.startswith("gs://"):
+        df.to_parquet(path, index=False, engine="pyarrow", storage_options={"token": "cloud"})
+    else:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(path, index=False, engine="pyarrow")
+
+
+# ─────────────── Main logic ────────────────────
+ESSENTIAL = ["open", "high", "low", "close", "timestamp"]  # volume opcional
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Prepara datos para la optimización de hiperparámetros.")
-    parser.add_argument("--input_path", required=True,
-                        help="Ruta gs:// al archivo Parquet completo de datos históricos.")
-    parser.add_argument("--output_path", required=True,
-                        help="Ruta gs:// donde se guardará el archivo Parquet filtrado para la optimización.")
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser(description="Filtra últimos N años de datos OHLC.")
+    ap.add_argument("--input_path", required=True, help="Parquet completo (.parquet o gs://)")
+    ap.add_argument("--output_path", required=True, help="Ruta destino (.parquet o gs://)")
+    ap.add_argument("--years", type=int, default=5, help="Ventana de años a conservar (default 5)")
+    args = ap.parse_args()
 
-    logger.info(f"[{datetime.utcnow().isoformat()} UTC] Iniciando preparación de datos para optimización.")
-    logger.info(f"Input: {args.input_path}")
-    logger.info(f"Output: {args.output_path}")
-    logger.info(f"Ventana de optimización: últimos {OPTIMIZATION_WINDOW_YEARS} años.")
+    log.info(f"⚙️  Iniciando prepare_opt_data (window {args.years} años)")
 
-    try:
-        logger.info(f"Intentando leer Parquet directamente desde GCS: {args.input_path}")
-        df_full = pd.read_parquet(args.input_path, engine="pyarrow", storage_options={"token": "cloud"})
-        logger.info(f"Datos completos cargados: {len(df_full):,} filas.")
+    # 1) Carga
+    df = _read_parquet(args.input_path)
+    log.info(f"✔  Dataset cargado: {len(df):,} filas, {df.columns.tolist()} columnas")
 
-        if 'timestamp' not in df_full.columns:
-            raise ValueError("La columna 'timestamp' no se encontró en el DataFrame de entrada.")
-        
-        # Asegurarse de que el timestamp sea datetime y esté localizado en UTC o sea naive
-        # Si ya es datetime[ns, UTC], no se hace nada. Si es solo datetime[ns], se asume UTC.
-        if not pd.api.types.is_datetime64_any_dtype(df_full['timestamp']):
-            df_full['timestamp'] = pd.to_datetime(df_full['timestamp'], unit='ms', errors='coerce')
-        
-        if df_full['timestamp'].dt.tz is None:
-            df_full['timestamp'] = df_full['timestamp'].dt.tz_localize('UTC')
-        else:
-            df_full['timestamp'] = df_full['timestamp'].dt.tz_convert('UTC')
+    # 2) Asegurar nombres estándar
+    rename_map = {"o": "open", "h": "high", "l": "low", "c": "close", "t": "timestamp"}
+    missing = []
+    for old, new in rename_map.items():
+        if old in df.columns and new not in df.columns:
+            df = df.rename(columns={old: new})
+    for col in ESSENTIAL:
+        if col not in df.columns:
+            missing.append(col)
+    if missing:
+        raise ValueError(f"Columnas esenciales ausentes después del rename: {missing}")
 
+    # 3) Timestamp → datetime UTC
+    if not pd.api.types.is_datetime64_any_dtype(df["timestamp"]):
+        # Polygon entrega milisegundos → unit="ms"
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", errors="coerce")
+    # uniformizar a UTC
+    if df["timestamp"].dt.tz is None:
+        df["timestamp"] = df["timestamp"].dt.tz_localize("UTC")
+    else:
+        df["timestamp"] = df["timestamp"].dt.tz_convert("UTC")
 
-        end_date_for_filter = df_full['timestamp'].max()
-        # Para restar años, es más seguro usar relativedelta si los datos son muy extensos,
-        # pero para 5 años, timedelta es generalmente aceptable.
-        start_date_for_filter = end_date_for_filter - pd.DateOffset(years=OPTIMIZATION_WINDOW_YEARS)
-        
-        logger.info(f"Fecha máxima en datos: {end_date_for_filter}")
-        logger.info(f"Fecha de inicio calculada para el filtro: {start_date_for_filter}")
+    # 4) Drop NaNs en OHLC
+    df = df.dropna(subset=["open", "high", "low", "close"])
+    if df.empty:
+        raise ValueError("Todos los registros contienen NaNs en OHLC; abortando.")
 
-        df_filtered = df_full[df_full['timestamp'] >= start_date_for_filter].copy()
-        
-        if df_filtered.empty:
-            logger.warning(f"DataFrame filtrado vacío para el período de {OPTIMIZATION_WINDOW_YEARS} años. Esto puede indicar falta de datos recientes o un rango incorrecto.")
-            # Decide si quieres que esto sea un error fatal o no
-            # raise ValueError("El DataFrame filtrado resultó vacío.")
+    # 5) Filtro temporal
+    end_ts = df["timestamp"].max()
+    start_ts = end_ts - pd.DateOffset(years=args.years)
+    df_filtered = df[df["timestamp"] >= start_ts].copy()
+    log.info(
+        f"🗂  Filtrado desde {start_ts.date()} hasta {end_ts.date()} ⇒ "
+        f"{len(df_filtered):,}/{len(df):,} filas"
+    )
 
-        logger.info(f"Datos filtrados para optimización: {len(df_filtered):,} filas (desde {df_filtered['timestamp'].min()} hasta {df_filtered['timestamp'].max()}).")
+    if df_filtered.empty:
+        raise ValueError("El filtro temporal devolvió 0 filas. Revisa las fechas / datos.")
 
-        save_dataframe_to_gcs(df_filtered, args.output_path)
-        logger.info(f"✅ Preparación de datos para optimización completada y guardada en {args.output_path}")
+    # 6) Guardar
+    _write_parquet(df_filtered, args.output_path)
+    log.info(f"✅  Parquet filtrado guardado en {args.output_path}")
 
-    except Exception as e:
-        logger.critical(f"❌ Error durante la preparación de datos para optimización: {e}", exc_info=True)
-        raise
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        log.critical(f"❌  prepare_opt_data terminó con error: {e}", exc_info=True)
+        sys.exit(1)

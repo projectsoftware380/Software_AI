@@ -2,333 +2,348 @@
 """
 evaluation.backtest
 ────────────────────
-Compara estrategia base (LSTM) vs. filtrada (LSTM + PPO) y guarda:
+Compara la estrategia base (solo LSTM) frente a la filtrada
+(LSTM + PPO) y guarda:
+
     • trades_base.csv / trades_filtered.csv
     • metrics.json
 
-Diseñado para ejecutarse en entornos de GCP (Vertex AI Custom Training).
-Las rutas de entrada y salida son compatibles con gs://.
+Preparado para Vertex AI Custom Training (rutas gs:// o locales).
 """
 
-import os
-import sys
-import json
+from __future__ import annotations
+
 import argparse
-from pathlib import Path
-from datetime import datetime
-import warnings
-import tempfile # Importado para manejo de archivos temporales
-
-# ---------------- imports principales ------------------------------------
-import numpy as np
-# Parche NumPy ≥1.24
-if not hasattr(np, "NaN"):
-    np.NaN = np.nan
-
-import pandas as pd
-import pandas_ta as ta
-import joblib
-import tensorflow as tf
-from stable_baselines3 import PPO
+import json
+import os
+import shutil
+import sys
+import tempfile
 from collections import deque
+from datetime import datetime
+from pathlib import Path
+from typing import Tuple
 
-# Importar funciones de GCS y el cliente de Google Cloud Storage
+import joblib
+import numpy as np
+import pandas as pd
+import tensorflow as tf
 from google.cloud import storage
 from google.oauth2 import service_account
+from stable_baselines3 import PPO
 
-# Importa build_indicators (asumiendo que core.indicators está disponible en la imagen Docker)
-from core.indicators import build_indicators
-
-warnings.filterwarnings("ignore", category=FutureWarning)
-
-# ---------------- reproducibilidad ---------------------------------------
+# ---------- Configuración global ------------------------------------------------
 np.random.seed(42)
 tf.random.set_seed(42)
 
-# ---------------- constantes ---------------------------------------------
-ATR_LEN = 14
-COST_PIPS = 0.8  # comisiones/spread estimado
+ATR_LEN   = 14
+COST_PIPS = 0.8                 # comisión + spread estimado
+NAN_TOL   = 0                   # no toleramos NaNs
 
-# ---------------- helpers GCS para el backtest ----------------------------
+# ---------- Indicadores ---------------------------------------------------------
+from indicators import build_indicators  # mismo módulo que usa el resto del proyecto
 
-def gcs_client():
-    """
-    Si GOOGLE_APPLICATION_CREDENTIALS está definida, utiliza esas credenciales
-    para acceder a Google Cloud Storage.
-    """
-    if os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-        creds = service_account.Credentials.from_service_account_file(
-            os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        )
+# ---------- utilidades GCS ------------------------------------------------------
+def _gcs_client() -> storage.Client:
+    creds_file = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if creds_file and Path(creds_file).exists():
+        creds = service_account.Credentials.from_service_account_file(creds_file)
         return storage.Client(credentials=creds)
     return storage.Client()
 
-def download_gs(uri: str) -> Path:
-    """
-    Descarga un archivo desde GCS a un directorio temporal.
-    """
-    bucket, blob = uri[5:].split("/", 1)
-    local = Path(tempfile.mkdtemp()) / Path(blob).name
-    gcs_client().bucket(bucket).blob(blob).download_to_filename(local)
-    return local
+def _download_gs(uri: str) -> Path:
+    bucket_name, blob_name = uri[5:].split("/", 1)
+    local_path = Path(tempfile.mkdtemp()) / Path(blob_name).name
+    _gcs_client().bucket(bucket_name).blob(blob_name).download_to_filename(local_path)
+    return local_path
 
-def upload_gs(local: Path, uri: str):
-    """
-    Sube un archivo desde una ruta local a GCS.
-    """
-    bucket, blob = uri[5:].split("/", 1)
-    gcs_client().bucket(bucket).blob(blob).upload_from_filename(str(local))
+def _upload_gs(local: Path, uri: str) -> None:
+    bucket_name, blob_name = uri[5:].split("/", 1)
+    _gcs_client().bucket(bucket_name).blob(blob_name).upload_from_filename(str(local))
 
-def maybe_local(path_or_uri: str) -> Path:
-    """
-    Verifica si la ruta es GCS o local, y descarga desde GCS si es necesario.
-    """
-    return download_gs(path_or_uri) if path_or_uri.startswith("gs://") else Path(path_or_uri)
+def _maybe_local(path_or_uri: str) -> Path:
+    return _download_gs(path_or_uri) if path_or_uri.startswith("gs://") else Path(path_or_uri)
 
-# ---------------- helpers de carga de artefactos -------------------------
-
-def load_artifacts(lstm_model_path: str, lstm_scaler_path: str, lstm_params_path: str, rl_model_path: str):
-    """
-    Carga los artefactos del modelo LSTM y el modelo PPO desde rutas (locales o GCS).
-    """
-    model = tf.keras.models.load_model(maybe_local(lstm_model_path), compile=False)
-    scaler = joblib.load(maybe_local(lstm_scaler_path))
-    hp = json.loads(maybe_local(lstm_params_path).read_text())
-    ppo = PPO.load(maybe_local(rl_model_path))
+# ---------- helpers de carga ----------------------------------------------------
+def load_artifacts(
+    lstm_model_path: str,
+    lstm_scaler_path: str,
+    lstm_params_path: str,
+    rl_model_path: str,
+) -> Tuple[tf.keras.Model, joblib, dict, PPO]:
+    model   = tf.keras.models.load_model(_maybe_local(lstm_model_path), compile=False)
+    scaler  = joblib.load(_maybe_local(lstm_scaler_path))
+    hp      = json.loads(_maybe_local(lstm_params_path).read_text())
+    ppo     = PPO.load(_maybe_local(rl_model_path))
     return model, scaler, hp, ppo
 
-def prepare_df(features_path: str, hp: dict):
-    """
-    Carga el DataFrame de features y calcula los indicadores.
-    """
-    raw = pd.read_parquet(maybe_local(features_path)).reset_index(drop=True)
-    ind = build_indicators(raw, hp, ATR_LEN)
-    ind.bfill(inplace=True)
-    return ind
+def prepare_df(features_path: str, hp: dict) -> pd.DataFrame:
+    """Carga el parquet → calcula indicadores → elimina todos los NaN."""
+    raw = pd.read_parquet(_maybe_local(features_path)).reset_index(drop=True)
+    df  = build_indicators(raw, hp, ATR_LEN)
+    df.bfill(inplace=True)
+    df.dropna(inplace=True)
+    if df.isna().sum().sum() > NAN_TOL:
+        raise ValueError("Persisten NaNs tras bfill/dropna; abortando entrenamiento.")
+    return df
 
-def sequences(df: pd.DataFrame, model, scaler, hp: dict, tick: float):
-    X_raw = df[scaler.feature_names_in_].values
-    X = scaler.transform(X_raw)
-    win = hp["win"]
-    X_seq = np.stack([X[i-win:i] for i in range(win, len(X))]).astype(np.float32)
+# ---------- generación de secuencias -------------------------------------------
+def make_sequences(
+    df: pd.DataFrame,
+    model: tf.keras.Model,
+    scaler,
+    hp: dict,
+    tick: float,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    cols_needed = list(scaler.feature_names_in_)
+    missing = [c for c in cols_needed if c not in df.columns]
+    if missing:
+        raise KeyError(f"Columnas faltantes en el DataFrame para el scaler: {missing}")
 
-    pred = model.predict(X_seq, verbose=0).astype(np.float32)
-    up, dn = pred[:,0], pred[:,1]
+    X_raw  = df[cols_needed].to_numpy(dtype=np.float32)
+    X_scl  = scaler.transform(X_raw)
+    win    = hp["win"]
+    if len(X_scl) <= win:
+        raise ValueError(f"No hay suficientes filas ({len(X_scl)}) para ventanas de tamaño {win}.")
+    X_seq  = np.stack([X_scl[i - win : i] for i in range(win, len(X_scl))]).astype(np.float32)
 
-    emb = tf.keras.Model(model.input, model.layers[-2].output) \
-            .predict(X_seq, verbose=0).astype(np.float32)
+    pred   = model.predict(X_seq, verbose=0).astype(np.float32)
+    up, dn = pred[:, 0], pred[:, 1]
 
-    closes  = df.close.values[win:]
-    atr_arr = df[f"atr_{ATR_LEN}"].values[win:] / tick
-    return up, dn, emb, closes, atr_arr
+    emb_model = tf.keras.Model(model.input, model.layers[-2].output)
+    emb       = emb_model.predict(X_seq, verbose=0).astype(np.float32)
 
-def to_obs(pred, emb, obs_dim):
+    closes = df.close.values[win:].astype(np.float32)
+    atr    = df[f"atr_{ATR_LEN}"].values[win:].astype(np.float32) / tick
+    return up, dn, emb, closes, atr
+
+def to_obs(pred: np.ndarray, emb: np.ndarray, obs_dim: int) -> np.ndarray:
     need = obs_dim - pred.shape[1]
-    emb_pad = np.hstack([emb, np.zeros((len(emb), max(0, need)), dtype=np.float32)])
+    if need <= 0:
+        return pred[:, :obs_dim]          # recorte defensivo
+    emb_pad = np.hstack([emb, np.zeros((len(emb), need), dtype=np.float32)])
     return np.hstack([pred, emb_pad[:, :need]])
 
-# ---------------- back-test logic ------------------------------------------
-def backtest(up, dn, closes, atr, mask, hp, tick, use_filter):
+# ---------- back-test -----------------------------------------------------------
+def backtest(
+    up: np.ndarray,
+    dn: np.ndarray,
+    closes: np.ndarray,
+    atr: np.ndarray,
+    accept_mask: np.ndarray,
+    hp: dict,
+    tick: float,
+    use_filter: bool,
+) -> pd.DataFrame:
     dmin, swin = hp["delta_min"], hp["smooth_win"]
     tup, tdn, rr = hp["min_thr_up"], hp["min_thr_dn"], hp["rr"]
 
-    trades, eq, pos = [], 0.0, False
-    dq = deque(maxlen=swin)
-    for i,(u,d,p,atr_i,acc) in enumerate(zip(up,dn,closes,atr,mask)):
-        mag, diff = max(u,d), abs(u-d)
-        raw = 1 if u>d else -1
-        cond = ((raw==1 and mag>=tup) or (raw==-1 and mag>=tdn)) and diff>=dmin
-        dq.append(raw if cond else 0)
+    trades, equity = [], 0.0
+    in_position   = False
+    dq            = deque(maxlen=swin)
+
+    # variables del trade abierto
+    entry_price = direction = sl = tp = mfe = mae = 0.0
+
+    for i, (u, d, price, atr_i, acc) in enumerate(zip(up, dn, closes, atr, accept_mask)):
+        mag, diff = (u, d)[u < d], abs(u - d)
+        raw_signal = 1 if u > d else -1
+        min_thr    = tup if raw_signal == 1 else tdn
+        cond       = (mag >= min_thr) and (diff >= dmin)
+        dq.append(raw_signal if cond else 0)
+
         buys, sells = dq.count(1), dq.count(-1)
-        sig = 1 if buys>swin//2 else -1 if sells>swin//2 else 0
+        signal = 1 if buys > swin // 2 else -1 if sells > swin // 2 else 0
 
-        if pos:  # gestionar trade abierto
-            pnl = (p-entry)/tick if dir=="BUY" else (entry-p)/tick
-            mfe = max(mfe, pnl) # Max Favorable Excursion
-            mae = min(mae, pnl) # Max Adverse Excursion
-            if pnl>=tp or pnl<=-sl:
-                net = (tp if pnl>=tp else -sl) - COST_PIPS
-                eq += net
-                trades[-1].update({"exit":i,"pips":net,"eq":eq,
-                               "MFE_atr":mfe/atr_i,"MAE_atr":-mae/atr_i,
-                               "result":"TP" if pnl>=tp else "SL"})
-                pos = False
+        # -- gestión de posición abierta -------------------------------------
+        if in_position:
+            pnl = (price - entry_price) / tick if direction == 1 else (entry_price - price) / tick
+            mfe = max(mfe, pnl)
+            mae = min(mae, pnl)
+            if pnl >= tp or pnl <= -sl:
+                net = (tp if pnl >= tp else -sl) - COST_PIPS
+                equity += net
+                trades[-1].update(
+                    exit=i,
+                    pips=net,
+                    eq=equity,
+                    MFE_atr=mfe / atr_i,
+                    MAE_atr=-mae / atr_i,
+                    result="TP" if pnl >= tp else "SL",
+                )
+                in_position = False
             continue
 
-        if sig==0 or (use_filter and not acc):  # sin apertura
+        # -- apertura de nueva posición --------------------------------------
+        if signal == 0 or (use_filter and not acc):
             continue
-        # abrir trade
-        pos, entry, dir = True, p, "BUY" if sig==1 else "SELL"
-        sl = (tup if sig==1 else tdn)*atr_i
-        tp = rr*sl
-        mfe = mae = 0.0
-        trades.append({"entry":i,"dir":dir,"SL_atr":sl/atr_i,"TP_atr":rr,
-                       "pips":0.0,"eq":eq,"result":"OPEN"})
 
-    # cierre al final (si hay un trade abierto al final de los datos)
-    if pos:
-        pnl = (closes[-1]-entry)/tick if dir=="BUY" else (entry-closes[-1])/tick
-        net = pnl - COST_PIPS
-        eq += net
-        trades[-1].update({"exit":len(closes)-1,"pips":net,"eq":eq,
-                           "MFE_atr":mfe/atr[-1],"MAE_atr":-mae/atr[-1],
-                           "result":"TP" if pnl>=0 else "SL"})
+        in_position  = True
+        entry_price  = price
+        direction    = 1 if signal == 1 else -1
+        sl           = (tup if direction == 1 else tdn) * atr_i
+        tp           = rr * sl
+        mfe = mae    = 0.0
+        trades.append(
+            dict(
+                entry=i,
+                dir="BUY" if direction == 1 else "SELL",
+                SL_atr=sl / atr_i,
+                TP_atr=rr,
+                pips=0.0,
+                eq=equity,
+                result="OPEN",
+            )
+        )
 
-    out = pd.DataFrame(trades)
-    if not out.empty: out.eq = out.eq.ffill() # Asegura que la curva de equity no tenga NaNs
-    return out
+    # cierre forzado al final
+    if in_position:
+        pnl  = (closes[-1] - entry_price) / tick if direction == 1 else (entry_price - closes[-1]) / tick
+        net  = pnl - COST_PIPS
+        equity += net
+        trades[-1].update(
+            exit=len(closes) - 1,
+            pips=net,
+            eq=equity,
+            MFE_atr=mfe / atr[-1],
+            MAE_atr=-mae / atr[-1],
+            result="TP" if pnl >= 0 else "SL",
+        )
 
-def metrics(df: pd.DataFrame):
+    df_trades = pd.DataFrame(trades)
+    if not df_trades.empty:
+        df_trades.eq.ffill(inplace=True)
+    return df_trades
+
+# ---------- métricas ------------------------------------------------------------
+def calc_metrics(df: pd.DataFrame) -> dict:
     if df.empty:
-        return {
-            "trades": 0, "win_rate": 0.0, "profit_factor": 0.0,
-            "expectancy": 0.0, "net_pips": 0.0, "sharpe": 0.0,
-            "sortino": 0.0, "max_drawdown": 0.0, "avg_mfe": 0.0,
-            "avg_mae": 0.0
-        }
-    
-    wins = df[df.result=="TP"]
-    losses = df[df.result=="SL"]
-    
-    total_trades = len(df)
-    win_rate = len(wins) / total_trades if total_trades > 0 else 0.0
-    
-    total_pips_wins = wins.pips.sum()
-    total_pips_losses = abs(losses.pips.sum())
-    
-    profit_factor = total_pips_wins / total_pips_losses if total_pips_losses > 0 else np.inf
-    
-    avg_win = wins.pips.mean() if len(wins) > 0 else 0.0
-    avg_loss = abs(losses.pips.mean()) if len(losses) > 0 else 0.0
-    
-    expectancy = (win_rate * avg_win) - ((1 - win_rate) * avg_loss)
-    
-    net_pips = float(df.pips.sum())
-    
-    # Cálculos para Sharpe y Sortino Ratio (ajuste para series vacías o std dev 0)
-    sharpe = df.pips.mean() / (df.pips.std() + 1e-9) * np.sqrt(252 * 24 * 4) # Asumiendo datos de 15min (4 barras por hora, 24h, 252 días de trading)
-    
-    negative_returns = df[df.pips < 0].pips
-    sortino = df.pips.mean() / (negative_returns.std() + 1e-9) * np.sqrt(252 * 24 * 4) if len(negative_returns) > 0 else 0.0
+        return dict.fromkeys(
+            [
+                "trades",
+                "win_rate",
+                "profit_factor",
+                "expectancy",
+                "net_pips",
+                "sharpe",
+                "sortino",
+                "max_drawdown",
+                "avg_mfe",
+                "avg_mae",
+            ],
+            0.0,
+        ) | {"trades": 0}
 
-    dd = (df.eq - df.eq.cummax()).min() if not df.empty else 0.0
-    
-    avg_mfe = df.MFE_atr.mean() if not df.empty else 0.0
-    avg_mae = df.MAE_atr.mean() if not df.empty else 0.0
-    
+    wins   = df[df.result == "TP"]
+    losses = df[df.result == "SL"]
+
+    trades_total = len(df)
+    win_rate     = len(wins) / trades_total
+
+    total_win_pips  = wins.pips.sum()
+    total_loss_pips = abs(losses.pips.sum())
+    profit_factor   = total_win_pips / total_loss_pips if total_loss_pips > 0 else np.inf
+
+    avg_win  = wins.pips.mean()  if not wins.empty   else 0.0
+    avg_loss = abs(losses.pips.mean()) if not losses.empty else 0.0
+    expectancy = (win_rate * avg_win) - ((1 - win_rate) * avg_loss)
+
+    net_pips = float(df.pips.sum())
+
+    annualizer = np.sqrt(252 * 24 * 4)  # 15-min data → 4 barras/hora
+    sharpe  = df.pips.mean() / (df.pips.std() + 1e-9) * annualizer
+    neg_ret = df[df.pips < 0].pips
+    sortino = (
+        df.pips.mean() / (neg_ret.std() + 1e-9) * annualizer
+        if not neg_ret.empty
+        else 0.0
+    )
+
+    max_dd = (df.eq - df.eq.cummax()).min() if "eq" in df.columns else 0.0
+
     return dict(
-        trades=total_trades,
+        trades=trades_total,
         win_rate=win_rate,
         profit_factor=profit_factor,
         expectancy=expectancy,
         net_pips=net_pips,
         sharpe=sharpe,
         sortino=sortino,
-        max_drawdown=dd,
-        avg_mfe=avg_mfe,
-        avg_mae=avg_mae
+        max_drawdown=max_dd,
+        avg_mfe=df.MFE_atr.mean(),
+        avg_mae=df.MAE_atr.mean(),
     )
 
-
-# ---------------- main ----------------------------------------------------
-def main():
-    ap = argparse.ArgumentParser(description="Realiza backtesting de una estrategia de trading (LSTM + PPO).")
-    ap.add_argument("--pair", required=True, help="Símbolo del par de trading (ej: EURUSD)")
-    ap.add_argument("--timeframe", required=True, help="Timeframe de los datos (ej: 15minute)")
-    ap.add_argument("--lstm-model-path", required=True, help="Ruta (gs:// o local) al archivo .h5 del modelo LSTM.")
-    ap.add_argument("--lstm-scaler-path", required=True, help="Ruta (gs:// o local) al archivo .pkl del scaler del LSTM.")
-    ap.add_argument("--lstm-params-path", required=True, help="Ruta (gs:// o local) al archivo .json de hiperparámetros del LSTM.")
-    ap.add_argument("--rl-model-path", required=True, help="Ruta (gs:// o local) al archivo .zip del modelo PPO (RL).")
-    ap.add_argument("--features-path", required=True, help="Ruta (gs:// o local) al archivo .parquet con los features para backtesting.")
-    ap.add_argument("--output-dir", required=True, help="Carpeta (gs:// o local) donde guardar los resultados del backtesting.")
-    args = ap.parse_args()
+# ---------- pipeline principal ---------------------------------------------------
+def main() -> None:
+    parser = argparse.ArgumentParser("Back-tester LSTM + PPO")
+    parser.add_argument("--pair", required=True)
+    parser.add_argument("--timeframe", required=True)
+    parser.add_argument("--lstm-model-path", required=True)
+    parser.add_argument("--lstm-scaler-path", required=True)
+    parser.add_argument("--lstm-params-path", required=True)
+    parser.add_argument("--rl-model-path", required=True)
+    parser.add_argument("--features-path", required=True)
+    parser.add_argument("--output-dir", required=True)
+    args, unknown = parser.parse_known_args()
+    if unknown:
+        print(f"[WARN] argumentos ignorados: {unknown}")
 
     tick = 0.01 if args.pair.endswith("JPY") else 0.0001
 
-    # 1. Cargar artefactos y datos
-    print(f"[{datetime.utcnow().isoformat()} UTC] Cargando artefactos y datos...")
+    ts = datetime.utcnow().isoformat()
+    print(f"[{ts} UTC] ➜ Cargando artefactos…")
     model, scaler, hp, ppo = load_artifacts(
         args.lstm_model_path,
         args.lstm_scaler_path,
         args.lstm_params_path,
-        args.rl_model_path
+        args.rl_model_path,
     )
+
+    print(f"[{ts} UTC] ➜ Preparando DataFrame…")
     df = prepare_df(args.features_path, hp)
 
-    # 2. Generar secuencias y observaciones para el backtest
-    up, dn, emb, closes, atr = sequences(df, model, scaler, hp, tick)
+    print(f"[{ts} UTC] ➜ Generando secuencias…")
+    up, dn, emb, closes, atr = make_sequences(df, model, scaler, hp, tick)
     obs = to_obs(np.column_stack([up, dn]), emb, ppo.observation_space.shape[0])
-    actions, _ = ppo.predict(obs, deterministic=True)
-    accept = actions.astype(bool)
+    accept_mask, _ = ppo.predict(obs, deterministic=True)
+    accept_mask = accept_mask.astype(bool)
 
-    # 3. Realizar back-tests
-    print(f"[{datetime.utcnow().isoformat()} UTC] Realizando backtests...")
-    base_tr = backtest(up, dn, closes, atr, accept, hp, tick, False)
-    filt_tr = backtest(up, dn, closes, atr, accept, hp, tick, True)
+    print(f"[{ts} UTC] ➜ Ejecutando back-tests…")
+    base_trades = backtest(up, dn, closes, atr, accept_mask, hp, tick, use_filter=False)
+    filt_trades = backtest(up, dn, closes, atr, accept_mask, hp, tick, use_filter=True)
 
-    # 4. Calcular métricas
-    m_base = metrics(base_tr)
-    m_filt = metrics(filt_tr)
+    metrics_base = calc_metrics(base_trades)
+    metrics_filt = calc_metrics(filt_trades)
 
-    # 5. Imprimir métricas (para logs en GCP)
-    print(f"[{datetime.utcnow().isoformat()} UTC] Métricas de Backtest:")
-    # print_metrics("BASE", m_base) # No es necesario en producción, solo para depuración
-    # print_metrics("FILTRADA", m_filt) # No es necesario en producción, solo para depuración
-    print(json.dumps({"base_metrics": m_base, "filtered_metrics": m_filt}, indent=2))
+    # -------- persistir resultados ----------------------------------------
+    out_dir_local = Path(tempfile.mkdtemp())
+    paths = {}
+    if not base_trades.empty:
+        paths["trades_base.csv"] = out_dir_local / "trades_base.csv"
+        base_trades.to_csv(paths["trades_base.csv"], index=False)
+    if not filt_trades.empty:
+        paths["trades_filtered.csv"] = out_dir_local / "trades_filtered.csv"
+        filt_trades.to_csv(paths["trades_filtered.csv"], index=False)
+    paths["metrics.json"] = out_dir_local / "metrics.json"
+    json.dump({"base": metrics_base, "filtered": metrics_filt}, open(paths["metrics.json"], "w"), indent=2)
 
-
-    # 6. Guardar resultados
-    print(f"[{datetime.utcnow().isoformat()} UTC] Guardando resultados...")
-    
-    # Crear un directorio temporal para guardar los archivos antes de subirlos a GCS
-    temp_local_dir = Path(tempfile.mkdtemp())
-    
-    # Rutas locales temporales
-    trades_base_path = temp_local_dir / "trades_base.csv"
-    trades_filtered_path = temp_local_dir / "trades_filtered.csv"
-    metrics_json_path = temp_local_dir / "metrics.json"
-
-    # Guardar localmente los DataFrames y JSON
-    if not base_tr.empty:
-        base_tr.to_csv(trades_base_path, index=False)
-    else:
-        print("Advertencia: No se generaron trades para la estrategia BASE.")
-        trades_base_path = None # Marcar como no disponible
-
-    if not filt_tr.empty:
-        filt_tr.to_csv(trades_filtered_path, index=False)
-    else:
-        print("Advertencia: No se generaron trades para la estrategia FILTRADA.")
-        trades_filtered_path = None # Marcar como no disponible
-
-    json.dump({"base": m_base, "filtered": m_filt},
-              open(metrics_json_path, "w"), indent=2)
-
-    # Determinar si la salida es local o GCS
+    # subir o mover
     if args.output_dir.startswith("gs://"):
-        gcs_output_prefix = args.output_dir.rstrip('/') + '/'
-        if trades_base_path:
-            upload_gs(trades_base_path, gcs_output_prefix + "trades_base.csv")
-        if trades_filtered_path:
-            upload_gs(trades_filtered_path, gcs_output_prefix + "trades_filtered.csv")
-        upload_gs(metrics_json_path, gcs_output_prefix + "metrics.json")
-        print(f"[{datetime.utcnow().isoformat()} UTC] Resultados subidos a {gcs_output_prefix}")
+        prefix = args.output_dir.rstrip("/") + "/"
+        for fname, lpath in paths.items():
+            _upload_gs(lpath, prefix + fname)
+        print(f"[{ts} UTC] ✔ Resultados subidos a {prefix}")
     else:
-        local_output_dir = Path(args.output_dir)
-        local_output_dir.mkdir(parents=True, exist_ok=True)
-        if trades_base_path:
-            trades_base_path.replace(local_output_dir / "trades_base.csv")
-        if trades_filtered_path:
-            trades_filtered_path.replace(local_output_dir / "trades_filtered.csv")
-        metrics_json_path.replace(local_output_dir / "metrics.json")
-        print(f"[{datetime.utcnow().isoformat()} UTC] Resultados guardados localmente en {local_output_dir}")
+        dest = Path(args.output_dir)
+        dest.mkdir(parents=True, exist_ok=True)
+        for fname, lpath in paths.items():
+            shutil.move(lpath, dest / fname)
+        print(f"[{ts} UTC] ✔ Resultados guardados en {dest}")
 
-    # Limpiar el directorio temporal
-    import shutil
-    shutil.rmtree(temp_local_dir)
+    shutil.rmtree(out_dir_local, ignore_errors=True)
+    print(f"[{datetime.utcnow().isoformat()} UTC] ✅ Back-test completado sin errores.")
 
-
-    print(f"[{datetime.utcnow().isoformat()} UTC] ✅ Back-test finalizado.")
-
+# -------------------------------------------------------------------------------
 if __name__ == "__main__":
     main()
