@@ -25,7 +25,6 @@ outputs:
     type: Metrics
     description: 'Metrics related to the optimization process, like the best trial score.'
 
-# --- SECCIÓN IMPLEMENTATION CORREGIDA ---
 implementation:
   container:
     image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
@@ -37,6 +36,10 @@ implementation:
       # su salida estándar (la ruta GCS al archivo .json) en el archivo de salida de KFP.
       - |
         set -e
+        # CORRECCIÓN: Crear el directorio padre para el archivo de salida antes de usar tee.
+        # Esto soluciona el error "No such file or directory".
+        mkdir -p "$(dirname "$4")"
+
         python -m src.components.hyperparam_tuning.task \
           --features-path "$0" \
           --pair "$1" \
