@@ -1,0 +1,57 @@
+# src/components/model_promotion/component.yaml
+name: Decide Model Promotion
+description: Evaluates backtest metrics against production metrics and promotion thresholds. If the new model is approved, it copies its artifacts to the production GCS directory.
+
+# Parámetros de entrada que la pipeline le pasará a este componente.
+inputs:
+  - name: new_metrics_dir
+    type: String
+    description: 'The GCS path to the directory containing the new candidate model''s metrics.json.'
+  - name: new_lstm_artifacts_dir
+    type: String
+    description: 'The GCS path to the directory of the new LSTM model to be promoted.'
+  - name: new_rl_model_path
+    type: String
+    description: 'The GCS path to the new RL model .zip file to be promoted.'
+  - name: pair
+    type: String
+    description: 'The trading pair being evaluated.'
+  - name: timeframe
+    type: String
+    description: 'The timeframe of the model being evaluated.'
+  - name: production_base_dir
+    type: String
+    description: 'The base GCS directory for all production models.'
+
+# Parámetros de salida que este componente producirá.
+outputs:
+  - name: model_promoted
+    type: Boolean
+    description: 'A boolean value indicating if the model was promoted to production (true) or not (false).'
+
+# Define cómo se ejecuta el componente.
+implementation:
+  container:
+    # Esta tarea no es computacionalmente intensiva, pero necesita las librerías de GCS.
+    image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
+    
+    command:
+      - sh
+      - -c
+      # Ejecuta el script de decisión y captura su salida estándar (un string "true" o "false")
+      - |
+        python -m src.components.model_promotion.task \
+          --new-metrics-dir "$0" \
+          --new-lstm-artifacts-dir "$1" \
+          --new-rl-model-path "$2" \
+          --pair "$3" \
+          --timeframe "$4" \
+          --production-base-dir "$5" \
+          | tee "$6"
+      - {inputValue: new_metrics_dir}
+      - {inputValue: new_lstm_artifacts_dir}
+      - {inputValue: new_rl_model_path}
+      - {inputValue: pair}
+      - {inputValue: timeframe}
+      - {inputValue: production_base_dir}
+      - {outputPath: model_promoted}

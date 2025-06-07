@@ -1,0 +1,60 @@
+# src/components/backtest/component.yaml
+name: Execute Full Backtesting
+description: Runs a full backtest comparing the base (LSTM) and filtered (LSTM+PPO) strategies on unseen data and generates performance metrics.
+
+# Parámetros de entrada que la pipeline le pasará a este componente.
+inputs:
+  - name: lstm_model_dir
+    type: String
+    description: 'The GCS path to the versioned directory of the trained LSTM model.'
+  - name: rl_model_path
+    type: String
+    description: 'The GCS path to the trained PPO model .zip file.'
+  - name: features_path
+    type: String
+    description: 'The GCS path to the unseen features Parquet file for backtesting.'
+  - name: pair
+    type: String
+    description: 'The trading pair being backtested.'
+  - name: timeframe
+    type: String
+    description: 'The timeframe of the data being backtested.'
+
+# Parámetros de salida que este componente producirá.
+outputs:
+  - name: output_gcs_dir
+    type: String
+    description: 'The GCS path to the versioned directory containing all backtest results (CSVs, JSON).'
+  - name: backtest_metrics
+    type: Metrics
+    description: 'A KFP Metrics artifact for visualizing key performance indicators in the Vertex AI UI.'
+
+# Define cómo se ejecuta el componente.
+implementation:
+  container:
+    # Esta tarea necesita todas las librerías de ML para cargar los modelos y procesar los datos.
+    image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
+    
+    command:
+      - sh
+      - -c
+      # El script de Python (`task.py`) ha sido modificado para aceptar un argumento
+      # `--kfp-metrics-path` donde escribirá un JSON formateado para el artefacto de Métricas.
+      # La salida estándar del script (stdout) sigue siendo la ruta al directorio de GCS,
+      # que se captura con `tee`.
+      - |
+        python -m src.components.backtest.task \
+          --lstm-model-dir "$0" \
+          --rl-model-path "$1" \
+          --features-path "$2" \
+          --pair "$3" \
+          --timeframe "$4" \
+          --kfp-metrics-path "$5" \
+          | tee "$6"
+      - {inputValue: lstm_model_dir}
+      - {inputValue: rl_model_path}
+      - {inputValue: features_path}
+      - {inputValue: pair}
+      - {inputValue: timeframe}
+      - {outputPath: backtest_metrics}
+      - {outputPath: output_gcs_dir}

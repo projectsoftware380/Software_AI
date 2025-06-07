@@ -1,0 +1,78 @@
+# src/components/data_ingestion/component.yaml
+name: Ingest Market Data
+description: Fetches and updates raw OHLC market data from Polygon.io and stores it in GCS as a Parquet file.
+
+# Parámetros de entrada que la pipeline le pasará a este componente.
+inputs:
+  - name: pair
+    type: String
+    description: 'The trading pair to ingest, e.g., EURUSD.'
+  - name: timeframe
+    type: String
+    description: 'The timeframe for the data, e.g., 15minute.'
+  - name: project_id
+    type: String
+    description: 'The Google Cloud Project ID where the component is running.'
+  - name: polygon_secret_name
+    type: String
+    description: 'Name of the secret in Secret Manager containing the Polygon API key.'
+  - name: start_date
+    type: String
+    description: 'Start date for data fetching in YYYY-MM-DD format.'
+    default: '2010-01-01'
+  - name: end_date
+    type: String
+    description: 'End date for data fetching in YYYY-MM-DD format. Defaults to today.'
+  - name: min_rows
+    type: Integer
+    description: 'Minimum number of rows required for the download to be considered successful.'
+    default: 100000
+
+# Parámetros de salida que este componente producirá.
+outputs:
+  - name: completion_message
+    type: String
+    description: 'A message indicating the result of the ingestion task.'
+
+# Define cómo se ejecuta el componente.
+implementation:
+  container:
+    # La imagen Docker que contiene todas las dependencias y el código fuente.
+    # Esta URI se importa desde src/shared/constants.py en la pipeline principal.
+    image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
+    
+    # El comando para ejecutar la tarea. Usamos `python -m` para tratar el script
+    # como un módulo, lo que funciona bien con la estructura de directorios de `src`.
+    command:
+      - python
+      - -m
+      - src.components.data_ingestion.task
+    
+    # Los argumentos que se pasan al comando. KFP reemplazará los placeholders
+    # `{inputValue: <name>}` con los valores reales en tiempo de ejecución.
+    args:
+      - --pair
+      - {inputValue: pair}
+      - --timeframe
+      - {inputValue: timeframe}
+      - --project-id
+      - {inputValue: project_id}
+      - --polygon-secret-name
+      - {inputValue: polygon_secret_name}
+      - --start-date
+      - {inputValue: start_date}
+      - --end-date
+      - {inputValue: end_date}
+      - --min-rows
+      - {inputValue: min_rows}
+      # El script task.py debe imprimir el mensaje de finalización en la salida
+      # estándar. KFP lo captura automáticamente y lo dirige al archivo de salida
+      # especificado por este placeholder.
+      - '&&'
+      - echo
+      - "Data ingestion completed successfully for pair "
+      - {inputValue: pair}
+      - " and timeframe "
+      - {inputValue: timeframe}
+      - " > "
+      - {outputPath: completion_message}

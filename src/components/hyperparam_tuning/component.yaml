@@ -1,0 +1,53 @@
+# src/components/hyperparam_tuning/component.yaml
+name: Optimize LSTM Hyperparameters
+description: Uses Optuna to search for the best hyperparameters for the LSTM model, including trading logic and feature engineering parameters.
+
+# Parámetros de entrada que la pipeline le pasará a este componente.
+inputs:
+  - name: features_path
+    type: String
+    description: 'The GCS path to the Parquet file prepared for optimization.'
+  - name: pair
+    type: String
+    description: 'The trading pair to optimize for, e.g., EURUSD.'
+  - name: timeframe
+    type: String
+    description: 'The timeframe of the data, e.g., 15minute.'
+  - name: n_trials
+    type: Integer
+    description: 'The number of optimization trials to run in Optuna.'
+    default: 25
+
+# Parámetros de salida que este componente producirá.
+outputs:
+  - name: best_params_path
+    type: String
+    description: 'The GCS path to the output best_params.json file.'
+  - name: optimization_metrics
+    type: Metrics
+    description: 'Metrics related to the optimization process, like the best trial score.'
+
+# Define cómo se ejecuta el componente.
+implementation:
+  container:
+    # Este componente es intensivo en cómputo y necesita todas las librerías de ML.
+    image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
+    
+    # El comando para ejecutar la tarea de optimización.
+    command:
+      - sh
+      - -c
+      # Se ejecuta el script y se redirige su salida estándar (la ruta GCS del JSON)
+      # a un archivo que KFP puede leer para obtener el valor del output 'best_params_path'.
+      - |
+        python -m src.components.hyperparam_tuning.task \
+          --features-path "$0" \
+          --pair "$1" \
+          --timeframe "$2" \
+          --n-trials "$3" \
+          | tee "$4"
+      - {inputValue: features_path}
+      - {inputValue: pair}
+      - {inputValue: timeframe}
+      - {inputValue: n_trials}
+      - {outputPath: best_params_path}

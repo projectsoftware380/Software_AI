@@ -1,0 +1,52 @@
+# src/components/data_preparation/component.yaml
+name: Prepare Optimization Data
+description: Loads raw data, computes indicators, filters for the last N years, and saves the result to be used for hyperparameter optimization.
+
+# Parámetros de entrada que la pipeline le pasará a este componente.
+inputs:
+  - name: pair
+    type: String
+    description: 'The trading pair to process, e.g., EURUSD.'
+  - name: timeframe
+    type: String
+    description: 'The timeframe of the data, e.g., 15minute.'
+  - name: years_to_keep
+    type: Integer
+    description: 'Number of recent years of data to keep for the optimization set.'
+    default: 5
+  - name: cleanup_old_versions
+    type: Boolean
+    description: 'If true, old versioned directories will be removed to save space.'
+    default: true
+
+# Parámetros de salida que este componente producirá.
+outputs:
+  - name: prepared_data_path
+    type: String
+    description: 'The GCS path to the resulting Parquet file, ready for optimization.'
+
+# Define cómo se ejecuta el componente.
+implementation:
+  container:
+    # Se utiliza la misma imagen base que contiene las dependencias de pandas, gcsfs, etc.
+    image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
+    
+    # El comando para ejecutar la tarea.
+    command:
+      - sh
+      - -c
+      # Se ejecuta el script y se redirige su salida estándar (que es la ruta del archivo final)
+      # a un archivo que KFP puede leer para obtener el valor del output.
+      - |
+        python -m src.components.data_preparation.task \
+          --pair "$0" \
+          -
+          - --timeframe "$1" \
+          --years-to-keep "$2" \
+          --cleanup "$3" \
+          | tee "$4"
+      - {inputValue: pair}
+      - {inputValue: timeframe}
+      - {inputValue: years_to_keep}
+      - {inputValue: cleanup_old_versions}
+      - {outputPath: prepared_data_path}
