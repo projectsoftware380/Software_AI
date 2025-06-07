@@ -1,21 +1,6 @@
-# src/components/backtest/task.py
+# src/components/backtest/task.py (CORREGIDO)
 """
 Tarea del componente de backtesting y evaluación de modelos.
-
-Responsabilidades:
-1.  Cargar todos los artefactos necesarios:
-    - El modelo LSTM, el escalador y los parámetros.
-    - El modelo de filtro PPO entrenado.
-    - Los datos de backtesting (un Parquet con datos no vistos).
-2.  Preparar los datos de backtesting calculando los indicadores requeridos.
-3.  Generar las predicciones y embeddings del LSTM sobre los datos de backtesting.
-4.  Usar el agente PPO para generar una máscara de aceptación de trades.
-5.  Ejecutar dos backtests:
-    - Uno con la estrategia base (solo LSTM).
-    - Otro con la estrategia filtrada por el agente PPO.
-6.  Calcular un conjunto completo de métricas de rendimiento para ambas estrategias.
-7.  Guardar los resultados (archivos CSV de trades y JSON de métricas) en una
-    nueva carpeta versionada por timestamp en GCS.
 """
 
 from __future__ import annotations
@@ -23,8 +8,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import shutil
-import sys
 import tempfile
 from collections import deque
 from datetime import datetime
@@ -37,19 +20,40 @@ import pandas as pd
 import tensorflow as tf
 from stable_baselines3 import PPO
 
-# Importar los módulos compartidos
 from src.shared import constants, gcs_utils, indicators
 
-# --- Configuración de Logging y Entorno ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# --- Constantes y Configuración de Backtest ---
 ATR_LEN = 14
-COST_PIPS = 0.8  # Comisión + spread estimado por operación
+COST_PIPS = 0.8
 
+def _log_kfp_metrics(metrics_path: Path, metrics_data: dict):
+    """Escribe las métricas en un archivo JSON para que KFP las visualice."""
+    kfp_metrics = {"metrics": []}
+    
+    # Usamos las métricas del modelo filtrado (LSTM+PPO) para el reporte principal
+    filtered_metrics = metrics_data.get("filtered", {})
 
-# --- Funciones de Lógica de Negocio ---
+    for key, value in filtered_metrics.items():
+        # Asegurarse de que el valor sea un número
+        if not isinstance(value, (int, float)):
+            continue
+            
+        # Determinar el formato
+        metric_format = "PERCENTAGE" if "rate" in key else "RAW"
+        
+        kfp_metrics["metrics"].append({
+            "name": key.replace("_", "-"),  # KFP prefiere nombres con guiones
+            "numberValue": round(value, 5),
+            "format": metric_format,
+        })
+    
+    metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(metrics_path, "w") as f:
+        json.dump(kfp_metrics, f)
+    logger.info(f"Métricas de KFP guardadas en: {metrics_path}")
+
 
 def _load_artifacts(
     lstm_model_dir: str, rl_model_path: str
@@ -59,15 +63,11 @@ def _load_artifacts(
         tmp_path = Path(tmpdir)
         logger.info(f"Descargando artefactos a directorio temporal: {tmp_path}")
         
-        # Descargar artefactos LSTM
         model_path = gcs_utils.download_gcs_file(f"{lstm_model_dir}/model.h5", tmp_path)
         scaler_path = gcs_utils.download_gcs_file(f"{lstm_model_dir}/scaler.pkl", tmp_path)
         params_path = gcs_utils.download_gcs_file(f"{lstm_model_dir}/params.json", tmp_path)
-        
-        # Descargar modelo RL
         ppo_model_path = gcs_utils.download_gcs_file(rl_model_path, tmp_path)
         
-        # Cargar en memoria
         model = tf.keras.models.load_model(model_path, compile=False)
         scaler = joblib.load(scaler_path)
         hp = json.loads(params_path.read_text())
@@ -96,7 +96,7 @@ def _prepare_backtest_data(features_path: str, hp: dict) -> pd.DataFrame:
 def _generate_predictions(
     df: pd.DataFrame, model: tf.keras.Model, scaler, hp: dict, tick: float
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Genera predicciones, embeddings y otros arrays necesarios para el backtest."""
+    """Genera predicciones y otros arrays necesarios para el backtest."""
     cols_needed = list(scaler.feature_names_in_)
     X_raw = df[cols_needed].to_numpy(dtype=np.float32)
     X_scl = scaler.transform(X_raw)
@@ -153,26 +153,22 @@ def _run_backtest_simulation(
             sl, tp, mfe, mae = min_thr * atr_i, rr * (min_thr * atr_i), 0.0, 0.0
             trades.append(dict(entry=i, dir="BUY" if direction == 1 else "SELL", SL_atr=sl / atr_i, TP_atr=rr, pips=0.0, eq=equity, result="OPEN"))
 
-    if in_position: # Forzar cierre al final
+    if in_position:
         pnl = ((closes[-1] - entry_price) / tick) * direction - COST_PIPS
         equity += pnl
         trades[-1].update(exit=len(closes) - 1, pips=pnl, eq=equity, MFE_atr=mfe/atr[-1], MAE_atr=-mae/atr[-1], result="CLOSE")
         
-    df_trades = pd.DataFrame(trades)
-    if not df_trades.empty: df_trades.eq.ffill(inplace=True)
-    return df_trades
+    return pd.DataFrame(trades)
 
 
 def _calculate_metrics(df: pd.DataFrame) -> dict:
     """Calcula las métricas de rendimiento a partir de un DataFrame de trades."""
     if df.empty or len(df[df.result != 'OPEN']) == 0:
-        return {k: 0 for k in ["trades", "win_rate", "profit_factor", "expectancy", "net_pips", "sharpe", "sortino", "max_drawdown", "avg_mfe", "avg_mae"]}
+        return {k: 0.0 for k in ["trades", "win_rate", "profit_factor", "expectancy", "net_pips", "sharpe", "sortino", "max_drawdown", "avg_mfe", "avg_mae"]}
 
     df_closed = df[df.result.isin(["TP", "SL", "CLOSE"])].copy()
     wins = df_closed[df_closed.pips > 0]
     losses = df_closed[df_closed.pips <= 0]
-
-    if len(wins) == 0: return {k: 0 for k in ["trades", "win_rate", "profit_factor", "expectancy", "net_pips", "sharpe", "sortino", "max_drawdown", "avg_mfe", "avg_mae"]}
     
     total_win_pips = wins.pips.sum()
     total_loss_pips = abs(losses.pips.sum())
@@ -180,84 +176,74 @@ def _calculate_metrics(df: pd.DataFrame) -> dict:
     annualizer = np.sqrt(252 * 24 * 4)  # Para datos de 15min
     
     return {
-        "trades": len(df_closed),
-        "win_rate": len(wins) / len(df_closed),
-        "profit_factor": total_win_pips / total_loss_pips if total_loss_pips > 0 else np.inf,
-        "expectancy": df_closed.pips.mean(),
-        "net_pips": df_closed.pips.sum(),
-        "sharpe": (df_closed.pips.mean() / (df_closed.pips.std() + 1e-9)) * annualizer,
-        "sortino": (df_closed.pips.mean() / (df_closed[df_closed.pips < 0].pips.std() + 1e-9)) * annualizer if len(losses) > 0 else np.inf,
-        "max_drawdown": (df_closed.eq - df_closed.eq.cummax()).min(),
-        "avg_mfe": df_closed.MFE_atr.mean(),
-        "avg_mae": df_closed.MAE_atr.mean(),
+        "trades": float(len(df_closed)),
+        "win_rate": float(len(wins) / len(df_closed)) if len(df_closed) > 0 else 0.0,
+        "profit_factor": float(total_win_pips / total_loss_pips) if total_loss_pips > 0 else np.inf,
+        "expectancy": float(df_closed.pips.mean()),
+        "net_pips": float(df_closed.pips.sum()),
+        "sharpe": float(df_closed.pips.mean() / (df_closed.pips.std() + 1e-9)) * annualizer,
+        "sortino": float(df_closed.pips.mean() / (df_closed[df_closed.pips < 0].pips.std() + 1e-9)) * annualizer if len(losses) > 0 else np.inf,
+        "max_drawdown": float((df_closed.eq - df_closed.eq.cummax()).min()) if not df_closed.eq.empty else 0.0,
+        "avg_mfe": float(df_closed.MFE_atr.mean()),
+        "avg_mae": float(df_closed.MAE_atr.mean()),
     }
 
-
-# --- Orquestación Principal de la Tarea ---
 def run_backtest(
-    lstm_model_dir: str, rl_model_path: str, features_path: str, pair: str, output_gcs_dir: str
+    lstm_model_dir: str, rl_model_path: str, features_path: str, pair: str, output_gcs_dir: str, kfp_metrics_path: Path
 ) -> None:
     """Orquesta el proceso completo de backtesting."""
-    try:
-        tick = 0.01 if pair.endswith("JPY") else 0.0001
+    tick = 0.01 if pair.endswith("JPY") else 0.0001
+    model, scaler, hp, ppo = _load_artifacts(lstm_model_dir, rl_model_path)
+    df_backtest = _prepare_backtest_data(features_path, hp)
+    
+    up, dn, emb, closes, atr = _generate_predictions(df_backtest, model, scaler, hp, tick)
+    obs = np.hstack([np.column_stack([up, dn]), emb])
+    accept_mask, _ = ppo.predict(obs, deterministic=True)
+    
+    logger.info("Ejecutando simulación para la estrategia BASE (solo LSTM)...")
+    trades_base = _run_backtest_simulation(up, dn, closes, atr, accept_mask, hp, tick, use_filter=False)
+    
+    logger.info("Ejecutando simulación para la estrategia FILTRADA (LSTM + PPO)...")
+    trades_filtered = _run_backtest_simulation(up, dn, closes, atr, accept_mask, hp, tick, use_filter=True)
+    
+    metrics_base = _calculate_metrics(trades_base)
+    metrics_filtered = _calculate_metrics(trades_filtered)
+    
+    all_metrics = {"base": metrics_base, "filtered": metrics_filtered}
+    logger.info(f"Métricas Filtradas: {json.dumps(metrics_filtered, indent=2)}")
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        if not trades_base.empty:
+            trades_base.to_csv(tmp_path / "trades_base.csv", index=False)
+            gcs_utils.upload_gcs_file(tmp_path / "trades_base.csv", f"{output_gcs_dir}/trades_base.csv")
+        if not trades_filtered.empty:
+            trades_filtered.to_csv(tmp_path / "trades_filtered.csv", index=False)
+            gcs_utils.upload_gcs_file(tmp_path / "trades_filtered.csv", f"{output_gcs_dir}/trades_filtered.csv")
         
-        # 1. Cargar artefactos y datos
-        model, scaler, hp, ppo = _load_artifacts(lstm_model_dir, rl_model_path)
-        df_backtest = _prepare_backtest_data(features_path, hp)
+        metrics_path = tmp_path / "metrics.json"
+        with open(metrics_path, "w") as f:
+            json.dump(all_metrics, f, indent=2)
+        gcs_utils.upload_gcs_file(metrics_path, f"{output_gcs_dir}/metrics.json")
+    
+    # Escribir las métricas para KFP
+    _log_kfp_metrics(kfp_metrics_path, all_metrics)
         
-        # 2. Generar predicciones y máscara de aceptación
-        up, dn, emb, closes, atr = _generate_predictions(df_backtest, model, scaler, hp, tick)
-        obs = np.hstack([np.column_stack([up, dn]), emb])
-        accept_mask, _ = ppo.predict(obs, deterministic=True)
-        
-        # 3. Ejecutar simulaciones
-        logger.info("Ejecutando simulación para la estrategia BASE (solo LSTM)...")
-        trades_base = _run_backtest_simulation(up, dn, closes, atr, accept_mask, hp, tick, use_filter=False)
-        
-        logger.info("Ejecutando simulación para la estrategia FILTRADA (LSTM + PPO)...")
-        trades_filtered = _run_backtest_simulation(up, dn, closes, atr, accept_mask, hp, tick, use_filter=True)
-        
-        # 4. Calcular métricas
-        metrics_base = _calculate_metrics(trades_base)
-        metrics_filtered = _calculate_metrics(trades_filtered)
-        
-        logger.info(f"Métricas Base: Trades={metrics_base.get('trades')}, PF={metrics_base.get('profit_factor', 0):.2f}, Sharpe={metrics_base.get('sharpe', 0):.2f}")
-        logger.info(f"Métricas Filtradas: Trades={metrics_filtered.get('trades')}, PF={metrics_filtered.get('profit_factor', 0):.2f}, Sharpe={metrics_filtered.get('sharpe', 0):.2f}")
-        
-        # 5. Guardar resultados
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp_path = Path(tmpdir)
-            if not trades_base.empty:
-                trades_base.to_csv(tmp_path / "trades_base.csv", index=False)
-                gcs_utils.upload_gcs_file(tmp_path / "trades_base.csv", f"{output_gcs_dir}/trades_base.csv")
-            if not trades_filtered.empty:
-                trades_filtered.to_csv(tmp_path / "trades_filtered.csv", index=False)
-                gcs_utils.upload_gcs_file(tmp_path / "trades_filtered.csv", f"{output_gcs_dir}/trades_filtered.csv")
-            
-            metrics_path = tmp_path / "metrics.json"
-            with open(metrics_path, "w") as f:
-                json.dump({"base": metrics_base, "filtered": metrics_filtered}, f, indent=2)
-            gcs_utils.upload_gcs_file(metrics_path, f"{output_gcs_dir}/metrics.json")
-            
-        logger.info(f"🎉 Tarea completada. Resultados de backtest disponibles en: {output_gcs_dir}")
+    logger.info(f"🎉 Tarea completada. Resultados de backtest disponibles en: {output_gcs_dir}")
 
-    except Exception as e:
-        logger.critical(f"❌ Fallo crítico en el backtest: {e}", exc_info=True)
-        raise
 
-# --- Punto de Entrada para Ejecución como Script ---
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Task de Backtesting de Estrategias.")
-    
     parser.add_argument("--lstm-model-dir", required=True)
     parser.add_argument("--rl-model-path", required=True)
     parser.add_argument("--features-path", required=True)
     parser.add_argument("--pair", required=True)
     parser.add_argument("--timeframe", required=True)
-
+    # Argumento AÑADIDO para recibir la ruta del artefacto de métricas de KFP
+    parser.add_argument("--kfp-metrics-path", type=Path, required=True, help="Path to write the KFP Metrics artifact.")
+    
     args = parser.parse_args()
 
-    # Construir ruta de salida versionada
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     output_directory = f"{constants.BACKTEST_RESULTS_PATH}/{args.pair}/{args.timeframe}/{timestamp}"
     
@@ -267,7 +253,7 @@ if __name__ == "__main__":
         features_path=args.features_path,
         pair=args.pair,
         output_gcs_dir=output_directory,
+        kfp_metrics_path=args.kfp_metrics_path,
     )
     
-    # Imprimir la ruta del directorio de salida para que KFP la capture
     print(output_directory)
