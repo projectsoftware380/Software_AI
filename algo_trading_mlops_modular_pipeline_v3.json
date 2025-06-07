@@ -301,10 +301,7 @@
       },
       "exec-execute-full-backtesting": {
         "container": {
-          "command": [
-            "sh",
-            "-c",
-            "python -m src.components.backtest.task \\\n  --lstm-model-dir \"$0\" \\\n  --rl-model-path \"$1\" \\\n  --features-path \"$2\" \\\n  --pair \"$3\" \\\n  --timeframe \"$4\" \\\n  --kfp-metrics-path \"$5\" \\\n  | tee \"$6\"\n",
+          "args": [
             "{{$.inputs.parameters['lstm_model_dir']}}",
             "{{$.inputs.parameters['rl_model_path']}}",
             "{{$.inputs.parameters['features_path']}}",
@@ -312,6 +309,11 @@
             "{{$.inputs.parameters['timeframe']}}",
             "{{$.outputs.artifacts['backtest_metrics'].path}}",
             "{{$.outputs.parameters['output_gcs_dir'].output_file}}"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "set -e\n# CORRECCI\u00c3\u201cN: Crear directorios para AMBOS archivos de salida.\nmkdir -p \"$(dirname \"$5\")\"\nmkdir -p \"$(dirname \"$6\")\"\n\n# El script ahora acepta --kfp-metrics-path y lo recibe como argumento $5.\n# La salida est\u00c3\u00a1ndar (la ruta GCS) se sigue capturando con tee en $6.\npython -m src.components.backtest.task \\\n  --lstm-model-dir \"$0\" \\\n  --rl-model-path \"$1\" \\\n  --features-path \"$2\" \\\n  --pair \"$3\" \\\n  --timeframe \"$4\" \\\n  --kfp-metrics-path \"$5\" \\\n  | tee \"$6\"\n"
           ],
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }
