@@ -1,45 +1,22 @@
-# src/components/hyperparam_tuning/component.yaml (CORREGIDO)
 name: Optimize LSTM Hyperparameters
-description: Uses Optuna to search for the best hyperparameters for the LSTM model, including trading logic and feature engineering parameters.
-
+description: Uses Optuna to search for the best hyperparameters for the LSTM model.
 inputs:
-  - name: features_path
-    type: String
-    description: 'The GCS path to the Parquet file prepared for optimization.'
-  - name: pair
-    type: String
-    description: 'The trading pair to optimize for, e.g., EURUSD.'
-  - name: timeframe
-    type: String
-    description: 'The timeframe of the data, e.g., 15minute.'
-  - name: n_trials
-    type: Integer
-    description: 'The number of optimization trials to run in Optuna.'
-    default: 25
-
+  - {name: features_path, type: String}
+  - {name: pair, type: String}
+  - {name: timeframe, type: String}
+  - {name: n_trials, type: Integer, default: 25}
 outputs:
-  - name: best_params_path
-    type: String
-    description: 'The GCS path to the output best_params.json file.'
-  - name: optimization_metrics
-    type: Metrics
-    description: 'Metrics related to the optimization process, like the best trial score.'
-
+  - {name: best_params_path, type: String}
+  - {name: optimization_metrics, type: Metrics}
 implementation:
   container:
     image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
-    
     command:
       - sh
       - -c
-      # Se usa sh -c con | tee para ejecutar el script y capturar de forma segura
-      # su salida estándar (la ruta GCS al archivo .json) en el archivo de salida de KFP.
       - |
         set -e
-        # CORRECCIÓN: Crear el directorio padre para el archivo de salida antes de usar tee.
-        # Esto soluciona el error "No such file or directory".
         mkdir -p "$(dirname "$4")"
-
         python -m src.components.hyperparam_tuning.task \
           --features-path "$0" \
           --pair "$1" \

@@ -344,10 +344,7 @@
       },
       "exec-launch-vertex-ai-lstm-training-job": {
         "container": {
-          "command": [
-            "sh",
-            "-c",
-            "python -m src.components.train_lstm_launcher.task \\\n  --project-id \"$0\" \\\n  --region \"$1\" \\\n  --pair \"$2\" \\\n  --timeframe \"$3\" \\\n  --params-path \"$4\" \\\n  --output-gcs-base-dir \"$5\" \\\n  --vertex-training-image-uri \"$6\" \\\n  --vertex-machine-type \"$7\" \\\n  --vertex-accelerator-type \"$8\" \\\n  --vertex-accelerator-count \"$9\" \\\n  --vertex-service-account \"${10}\" \\\n  | tee \"${11}\"\n",
+          "args": [
             "{{$.inputs.parameters['project_id']}}",
             "{{$.inputs.parameters['region']}}",
             "{{$.inputs.parameters['pair']}}",
@@ -360,6 +357,11 @@
             "{{$.inputs.parameters['vertex_accelerator_count']}}",
             "{{$.inputs.parameters['vertex_service_account']}}",
             "{{$.outputs.parameters['trained_lstm_dir_path'].output_file}}"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "set -e\n# CORRECCI\u00c3\u201cN: Crear el directorio padre para el archivo de salida antes de usar tee.\n# El \u00c3\u00adndice ${11} corresponde al und\u00c3\u00a9cimo argumento, que es outputPath.\nmkdir -p \"$(dirname \"${11}\")\"\n\npython -m src.components.train_lstm_launcher.task \\\n  --project-id \"$0\" \\\n  --region \"$1\" \\\n  --pair \"$2\" \\\n  --timeframe \"$3\" \\\n  --params-path \"$4\" \\\n  --output-gcs-base-dir \"$5\" \\\n  --vertex-training-image-uri \"$6\" \\\n  --vertex-machine-type \"$7\" \\\n  --vertex-accelerator-type \"$8\" \\\n  --vertex-accelerator-count \"$9\" \\\n  --vertex-service-account \"${10}\" \\\n  | tee \"${11}\"\n"
           ],
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }
@@ -539,7 +541,7 @@
             "parameters": {
               "end_date": {
                 "runtimeValue": {
-                  "constant": "2025-06-06"
+                  "constant": "2025-06-07"
                 }
               },
               "min_rows": {
