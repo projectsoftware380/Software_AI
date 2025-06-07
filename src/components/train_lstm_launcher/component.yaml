@@ -1,28 +1,35 @@
+# src/components/train_lstm_launcher/component.yaml (VERSIÓN COMPLETA Y CORREGIDA)
 name: Launch Vertex AI LSTM Training Job
-description: Submits and monitors a Vertex AI Custom Job to train the final LSTM model.
+description: Submits and monitors a Vertex AI Custom Job to train the final LSTM model on dedicated hardware.
+
 inputs:
-  - {name: project_id, type: String}
-  - {name: region, type: String}
-  - {name: pair, type: String}
-  - {name: timeframe, type: String}
-  - {name: params_path, type: String}
-  - {name: output_gcs_base_dir, type: String}
-  - {name: vertex_training_image_uri, type: String}
+  - {name: project_id, type: String, description: 'The GCP Project ID.'}
+  - {name: region, type: String, description: 'The GCP region for the Vertex AI Custom Job.'}
+  - {name: pair, type: String, description: 'The trading pair.'}
+  - {name: timeframe, type: String, description: 'The timeframe of the data.'}
+  - {name: params_path, type: String, description: 'GCS path to the best_params.json file.'}
+  - {name: output_gcs_base_dir, type: String, description: 'Base GCS directory for artifacts.'}
+  - {name: vertex_training_image_uri, type: String, description: 'The URI of the runner Docker image.'}
   - {name: vertex_machine_type, type: String, default: 'n1-standard-4'}
   - {name: vertex_accelerator_type, type: String, default: 'ACCELERATOR_TYPE_UNSPECIFIED'}
   - {name: vertex_accelerator_count, type: Integer, default: 0}
-  - {name: vertex_service_account, type: String}
+  - {name: vertex_service_account, type: String, description: 'The service account for the job.'}
+
 outputs:
-  - {name: trained_lstm_dir_path, type: String}
+  - {name: trained_lstm_dir_path, type: String, description: 'The full GCS path to the trained model directory.'}
+
 implementation:
   container:
     image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
     command:
       - sh
       - -c
+      # La barra invertida al final de cada línea indica continuación de comando.
       - |
         set -e
+        # CORRECCIÓN: Crear el directorio padre para el archivo de salida antes de usar tee.
         mkdir -p "$(dirname "${11}")"
+        
         python -m src.components.train_lstm_launcher.task \
           --project-id "$0" \
           --region "$1" \

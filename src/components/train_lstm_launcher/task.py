@@ -1,6 +1,7 @@
 # src/components/train_lstm_launcher/task.py (VERSIÓN COMPLETA Y CORREGIDA)
 """
 Tarea del componente lanzador del entrenamiento en Vertex AI.
+Este script se ejecuta en KFP para crear y monitorear un CustomJob en Vertex AI.
 """
 from __future__ import annotations
 
@@ -12,6 +13,8 @@ from datetime import datetime, timezone
 
 from google.cloud import aiplatform as gcp_aiplatform
 from google.cloud import storage as gcp_storage
+
+# Es importante que este script pueda importar 'constants' si se ejecuta con 'python -m'
 from src.shared import constants
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
@@ -42,6 +45,7 @@ def run_vertex_job(
     timestamp_for_job = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     job_display_name = f"lstm-training-{pair.lower()}-{timeframe.lower()}-{timestamp_for_job}"
 
+    # Argumentos que se pasarán al script DE ENTRENAMIENTO dentro del contenedor del Custom Job
     training_script_args = [
         "--params", params_path,
         "--output-gcs-base-dir", output_gcs_base_dir,
@@ -84,6 +88,7 @@ def run_vertex_job(
         logger.error(f"❌ Vertex AI Custom Job {job_display_name} falló: {e}", exc_info=True)
         raise RuntimeError(f"Fallo en el entrenamiento LSTM en Vertex AI: {e}")
 
+    # Sondeo para encontrar la ruta de salida exacta creada por el job
     prefix_parts = output_gcs_base_dir.replace("gs://", "").split("/")
     gcs_listing_prefix = f"{'/'.join(prefix_parts[1:])}/{pair}/{timeframe}/"
     
