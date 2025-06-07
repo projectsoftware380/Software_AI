@@ -361,7 +361,7 @@
           "command": [
             "sh",
             "-c",
-            "set -e\n# CORRECCI\u00c3\u201cN: Crear el directorio padre para el archivo de salida antes de usar tee.\n# El \u00c3\u00adndice ${11} corresponde al und\u00c3\u00a9cimo argumento, que es outputPath.\nmkdir -p \"$(dirname \"${11}\")\"\n\npython -m src.components.train_lstm_launcher.task \\\n  --project-id \"$0\" \\\n  --region \"$1\" \\\n  --pair \"$2\" \\\n  --timeframe \"$3\" \\\n  --params-path \"$4\" \\\n  --output-gcs-base-dir \"$5\" \\\n  --vertex-training-image-uri \"$6\" \\\n  --vertex-machine-type \"$7\" \\\n  --vertex-accelerator-type \"$8\" \\\n  --vertex-accelerator-count \"$9\" \\\n  --vertex-service-account \"${10}\" \\\n  | tee \"${11}\"\n"
+            "set -e\n# CORRECCI\u00c3\u201cN: Crear el directorio padre para el archivo de salida antes de usar tee.\nmkdir -p \"$(dirname \"${11}\")\"\n\npython -m src.components.train_lstm_launcher.task \\\n  --project-id \"$0\" \\\n  --region \"$1\" \\\n  --pair \"$2\" \\\n  --timeframe \"$3\" \\\n  --params-path \"$4\" \\\n  --output-gcs-base-dir \"$5\" \\\n  --vertex-training-image-uri \"$6\" \\\n  --vertex-machine-type \"$7\" \\\n  --vertex-accelerator-type \"$8\" \\\n  --vertex-accelerator-count \"$9\" \\\n  --vertex-service-account \"${10}\" \\\n  | tee \"${11}\"\n"
           ],
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }
@@ -378,7 +378,7 @@
           "command": [
             "sh",
             "-c",
-            "set -e\n# CORRECCI\u00c3\u201cN: Crear el directorio padre para el archivo de salida antes de usar tee.\n# Esto soluciona el error \"No such file or directory\".\nmkdir -p \"$(dirname \"$4\")\"\n\npython -m src.components.hyperparam_tuning.task \\\n  --features-path \"$0\" \\\n  --pair \"$1\" \\\n  --timeframe \"$2\" \\\n  --n-trials \"$3\" \\\n| tee \"$4\"\n"
+            "set -e\nmkdir -p \"$(dirname \"$4\")\"\npython -m src.components.hyperparam_tuning.task \\\n  --features-path \"$0\" \\\n  --pair \"$1\" \\\n  --timeframe \"$2\" \\\n  --n-trials \"$3\" \\\n| tee \"$4\"\n"
           ],
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }
@@ -402,25 +402,24 @@
       },
       "exec-prepare-reinforcement-learning-data": {
         "container": {
-          "command": [
-            "sh",
-            "-c",
-            "python -m src.components.prepare_rl_data.task \\\n  --lstm-model-dir \"$0\" \\\n  --pair \"$1\" \\\n  --timeframe \"$2\" \\\n  --output-gcs-base-dir \"$3\" \\\n  | tee \"$4\"\n",
+          "args": [
             "{{$.inputs.parameters['lstm_model_dir']}}",
             "{{$.inputs.parameters['pair']}}",
             "{{$.inputs.parameters['timeframe']}}",
             "{{$.inputs.parameters['output_gcs_base_dir']}}",
             "{{$.outputs.parameters['rl_data_path'].output_file}}"
           ],
+          "command": [
+            "sh",
+            "-c",
+            "set -e\nmkdir -p \"$(dirname \"$4\")\"\npython -m src.components.prepare_rl_data.task \\\n  --lstm-model-dir \"$0\" \\\n  --pair \"$1\" \\\n  --timeframe \"$2\" \\\n  --output-gcs-base-dir \"$3\" \\\n  | tee \"$4\"\n"
+          ],
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }
       },
       "exec-train-reinforcement-learning-agent-ppo": {
         "container": {
-          "command": [
-            "sh",
-            "-c",
-            "python -m src.components.train_rl.task \\\n  --params-path \"$0\" \\\n  --rl-data-path \"$1\" \\\n  --pair \"$2\" \\\n  --timeframe \"$3\" \\\n  --output-gcs-base-dir \"$4\" \\\n  --tensorboard-logs-base-dir \"$5\" \\\n  | tee \"$6\"\n",
+          "args": [
             "{{$.inputs.parameters['params_path']}}",
             "{{$.inputs.parameters['rl_data_path']}}",
             "{{$.inputs.parameters['pair']}}",
@@ -428,6 +427,11 @@
             "{{$.inputs.parameters['output_gcs_base_dir']}}",
             "{{$.inputs.parameters['tensorboard_logs_base_dir']}}",
             "{{$.outputs.parameters['trained_rl_model_path'].output_file}}"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "set -e\nmkdir -p \"$(dirname \"$6\")\"\npython -m src.components.train_rl.task \\\n  --params-path \"$0\" \\\n  --rl-data-path \"$1\" \\\n  --pair \"$2\" \\\n  --timeframe \"$3\" \\\n  --output-gcs-base-dir \"$4\" \\\n  --tensorboard-logs-base-dir \"$5\" \\\n  | tee \"$6\"\n"
           ],
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }
