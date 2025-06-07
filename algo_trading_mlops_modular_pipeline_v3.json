@@ -99,13 +99,6 @@
             "parameterType": "STRING"
           }
         }
-      },
-      "outputDefinitions": {
-        "parameters": {
-          "completion_message": {
-            "parameterType": "STRING"
-          }
-        }
       }
     },
     "comp-launch-vertex-ai-lstm-training-job": {
@@ -339,15 +332,7 @@
             "--end-date",
             "{{$.inputs.parameters['end_date']}}",
             "--min-rows",
-            "{{$.inputs.parameters['min_rows']}}",
-            "&&",
-            "echo",
-            "Data ingestion completed successfully for pair ",
-            "{{$.inputs.parameters['pair']}}",
-            " and timeframe ",
-            "{{$.inputs.parameters['timeframe']}}",
-            " > ",
-            "{{$.outputs.parameters['completion_message'].output_file}}"
+            "{{$.inputs.parameters['min_rows']}}"
           ],
           "command": [
             "python",
@@ -396,15 +381,17 @@
       },
       "exec-prepare-optimization-data": {
         "container": {
-          "command": [
-            "sh",
-            "-c",
-            "python -m src.components.data_preparation.task \\\n  --pair \"$0\" \\\n  -\n  - --timeframe \"$1\" \\\n  --years-to-keep \"$2\" \\\n  --cleanup \"$3\" \\\n  | tee \"$4\"\n",
+          "args": [
             "{{$.inputs.parameters['pair']}}",
             "{{$.inputs.parameters['timeframe']}}",
             "{{$.inputs.parameters['years_to_keep']}}",
             "{{$.inputs.parameters['cleanup_old_versions']}}",
             "{{$.outputs.parameters['prepared_data_path'].output_file}}"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "set -e\npython -m src.components.data_preparation.task \\\n  --pair \"$0\" \\\n  --timeframe \"$1\" \\\n  --years-to-keep \"$2\" \\\n  --cleanup \"$3\" \\\n| tee \"$4\"\n"
           ],
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }

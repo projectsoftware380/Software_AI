@@ -31,20 +31,21 @@ implementation:
     # Se utiliza la misma imagen base que contiene las dependencias de pandas, gcsfs, etc.
     image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
     
-    # El comando para ejecutar la tarea.
     command:
       - sh
       - -c
-      # Se ejecuta el script y se redirige su salida estándar (que es la ruta del archivo final)
-      # a un archivo que KFP puede leer para obtener el valor del output.
+      # SECCIÓN CORREGIDA: Se eliminó el guion suelto y se aseguró que el formato
+      # del script multilínea sea correcto. El comando 'tee' captura la salida
+      # estándar del script (la ruta) y la guarda en el archivo de salida de KFP.
       - |
+        set -e
         python -m src.components.data_preparation.task \
           --pair "$0" \
-          -
-          - --timeframe "$1" \
+          --timeframe "$1" \
           --years-to-keep "$2" \
           --cleanup "$3" \
-          | tee "$4"
+        | tee "$4"
+    args:
       - {inputValue: pair}
       - {inputValue: timeframe}
       - {inputValue: years_to_keep}
