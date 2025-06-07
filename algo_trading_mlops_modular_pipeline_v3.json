@@ -366,15 +366,17 @@
       },
       "exec-optimize-lstm-hyperparameters": {
         "container": {
-          "command": [
-            "sh",
-            "-c",
-            "python -m src.components.hyperparam_tuning.task \\\n  --features-path \"$0\" \\\n  --pair \"$1\" \\\n  --timeframe \"$2\" \\\n  --n-trials \"$3\" \\\n  | tee \"$4\"\n",
+          "args": [
             "{{$.inputs.parameters['features_path']}}",
             "{{$.inputs.parameters['pair']}}",
             "{{$.inputs.parameters['timeframe']}}",
             "{{$.inputs.parameters['n_trials']}}",
             "{{$.outputs.parameters['best_params_path'].output_file}}"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "set -e\npython -m src.components.hyperparam_tuning.task \\\n  --features-path \"$0\" \\\n  --pair \"$1\" \\\n  --timeframe \"$2\" \\\n  --n-trials \"$3\" \\\n| tee \"$4\"\n"
           ],
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }
@@ -391,7 +393,7 @@
           "command": [
             "sh",
             "-c",
-            "set -e\npython -m src.components.data_preparation.task \\\n  --pair \"$0\" \\\n  --timeframe \"$1\" \\\n  --years-to-keep \"$2\" \\\n  --cleanup \"$3\" \\\n| tee \"$4\"\n"
+            "set -e\n# 1. Crear el directorio padre para el archivo de salida ($4)\n# Esto soluciona el error \"No such file or directory\".\nmkdir -p \"$(dirname \"$4\")\"\n\n# 2. Ejecutar el script y redirigir su salida al archivo de KFP.\npython -m src.components.data_preparation.task \\\n  --pair \"$0\" \\\n  --timeframe \"$1\" \\\n  --years-to-keep \"$2\" \\\n  --cleanup \"$3\" \\\n| tee \"$4\"\n"
           ],
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }

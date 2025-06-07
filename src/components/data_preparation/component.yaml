@@ -1,8 +1,7 @@
-# src/components/data_preparation/component.yaml
+# src/components/data_preparation/component.yaml (CORRECCIÓN FINAL)
 name: Prepare Optimization Data
 description: Loads raw data, computes indicators, filters for the last N years, and saves the result to be used for hyperparameter optimization.
 
-# Parámetros de entrada que la pipeline le pasará a este componente.
 inputs:
   - name: pair
     type: String
@@ -19,26 +18,26 @@ inputs:
     description: 'If true, old versioned directories will be removed to save space.'
     default: true
 
-# Parámetros de salida que este componente producirá.
 outputs:
   - name: prepared_data_path
     type: String
     description: 'The GCS path to the resulting Parquet file, ready for optimization.'
 
-# Define cómo se ejecuta el componente.
+# --- SECCIÓN IMPLEMENTATION (CON TU SOLUCIÓN INTEGRADA) ---
 implementation:
   container:
-    # Se utiliza la misma imagen base que contiene las dependencias de pandas, gcsfs, etc.
     image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
     
     command:
       - sh
       - -c
-      # SECCIÓN CORREGIDA: Se eliminó el guion suelto y se aseguró que el formato
-      # del script multilínea sea correcto. El comando 'tee' captura la salida
-      # estándar del script (la ruta) y la guarda en el archivo de salida de KFP.
       - |
         set -e
+        # 1. Crear el directorio padre para el archivo de salida ($4)
+        # Esto soluciona el error "No such file or directory".
+        mkdir -p "$(dirname "$4")"
+
+        # 2. Ejecutar el script y redirigir su salida al archivo de KFP.
         python -m src.components.data_preparation.task \
           --pair "$0" \
           --timeframe "$1" \
