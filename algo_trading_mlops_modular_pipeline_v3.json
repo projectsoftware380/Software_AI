@@ -703,7 +703,7 @@
               },
               "region": {
                 "runtimeValue": {
-                  "constant": "us-central1"
+                  "constant": "europe-west1"
                 }
               },
               "timeframe": {
@@ -725,7 +725,7 @@
               },
               "vertex_training_image_uri": {
                 "runtimeValue": {
-                  "constant": "us-central1-docker.pkg.dev/trading-ai-460823/trading-images/runner-lstm:latest"
+                  "constant": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
                 }
               }
             }
