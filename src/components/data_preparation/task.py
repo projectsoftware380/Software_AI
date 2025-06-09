@@ -151,8 +151,11 @@ if __name__ == "__main__":
     parser.add_argument("--pair", required=True)
     parser.add_argument("--timeframe", required=True)
     parser.add_argument("--years-to-keep", type=int, default=5)
-    parser.add_argument("--cleanup", type=bool, default=True)
-
+    parser.add_argument("--cleanup", type=lambda x: (str(x).lower() == 'true'))
+    
+    # Argumento para el archivo de salida
+    parser.add_argument("--prepared-data-path-output", type=Path, required=True, help="Ruta de archivo local donde se escribirá la ruta GCS de salida.")
+    
     args = parser.parse_args()
     
     # Construir las rutas de entrada y salida usando las constantes
@@ -172,7 +175,7 @@ if __name__ == "__main__":
         cleanup_old_versions=args.cleanup,
     )
 
-    # KFP necesita una forma de pasar la ruta de salida al siguiente componente
-    # Imprimir la ruta de salida es una forma simple de hacerlo.
-    # El `component.yaml` capturará esta salida estándar.
-    print(output_path)
+    # Escribir la ruta de salida al archivo que KFP espera
+    logger.info(f"Escribiendo ruta de salida '{output_path}' a '{args.prepared_data_path_output}'")
+    args.prepared_data_path_output.parent.mkdir(parents=True, exist_ok=True)
+    args.prepared_data_path_output.write_text(output_path)

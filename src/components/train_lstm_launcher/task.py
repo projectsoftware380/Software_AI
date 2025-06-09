@@ -1,244 +1,179 @@
-# src/components/train_lstm/task.py
+# src/components/train_lstm_launcher/task.py
 """
-Tarea del componente de entrenamiento del modelo LSTM.
+Tarea del componente LANZADOR de entrenamiento del modelo LSTM.
 
 Responsabilidades:
-1.  Cargar los mejores hiperparámetros desde un archivo `best_params.json`.
-2.  Cargar los datos de features correspondientes.
-3.  Preparar los datos para el entrenamiento:
-    - Calcular indicadores con los parámetros óptimos.
-    - Crear las secuencias de entrenamiento.
-    - Escalar los datos.
-4.  Construir y entrenar el modelo LSTM final con la configuración óptima.
-5.  Realizar un sanity-check con un backtest rápido.
-6.  Guardar los artefactos de entrenamiento (modelo .h5, scaler .pkl, y una
-    copia de los parámetros .json) en una nueva carpeta versionada por
-    timestamp en GCS.
+1.  Configurar y lanzar un Vertex AI Custom Job para el entrenamiento.
+2.  Pasar todos los parámetros necesarios (rutas, hiperparámetros, configuración
+    de hardware) al Custom Job.
+3.  El Custom Job ejecutará un script de entrenamiento separado (contenido en la
+    imagen `runner-lstm`) en hardware dedicado (potencialmente con GPUs).
+4.  Esperar a que el Custom Job termine.
+5.  Una vez terminado, buscar en GCS el directorio de salida versionado que
+    el job de entrenamiento ha creado.
+6.  Devolver la ruta GCS a este directorio para que los siguientes pasos de la
+    pipeline puedan usar los artefactos del modelo (modelo, scaler, params).
 
-Este script está diseñado para ser ejecutado como un Vertex AI Custom Job.
+Este script se ejecuta en un pod normal de KFP, NO en el hardware de entrenamiento.
 """
-
 from __future__ import annotations
 
 import argparse
 import json
 import logging
-import os
-import random
-import sys
-import tempfile
-import warnings
-from collections import deque
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Tuple
 
-import joblib
-import numpy as np
-import pandas as pd
-import tensorflow as tf
-from sklearn.preprocessing import RobustScaler
-from tensorflow.keras import callbacks, layers, models, optimizers
+from google.cloud import aiplatform as gcp_aiplatform
+from google.cloud import storage as gcp_storage
 
-# Importar los módulos compartidos
-from src.shared import constants, gcs_utils, indicators
+from src.shared import constants
 
-# --- Configuración de Logging y Entorno ---
-warnings.filterwarnings("ignore", category=FutureWarning, module="pandas")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+# --- Configuración del Logging ---
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s [%(funcName)s]: %(message)s",
+)
 logger = logging.getLogger(__name__)
 
-# --- Reproducibilidad y Hardware ---
-SEED = 42
-random.seed(SEED)
-np.random.seed(SEED)
-tf.random.set_seed(SEED)
-os.environ.setdefault("TF_DETERMINISTIC_OPS", "1")
-
-try:
-    gpus = tf.config.list_physical_devices("GPU")
-    if gpus:
-        for g in gpus:
-            tf.config.experimental.set_memory_growth(g, True)
-        tf.keras.mixed_precision.set_global_policy("mixed_float16")
-        logger.info("🚀 GPU(s) detectadas y configuradas.")
-    else:
-        logger.info("ℹ️ No se detectaron GPUs. Se ejecutará en CPU.")
-except Exception as e:
-    logger.warning(f"⚠️ No se pudo configurar la GPU: {e}")
-
-
-# --- Funciones de Lógica de Negocio ---
-
-def to_sequences(
-    mat: np.ndarray, up: np.ndarray, dn: np.ndarray, closes: np.ndarray, win: int
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Convierte datos tabulares en secuencias para el LSTM."""
-    X, y_up, y_dn, cl = [], [], [], []
-    for i in range(win, len(mat)):
-        X.append(mat[i - win : i])
-        y_up.append(up[i])
-        y_dn.append(dn[i])
-        cl.append(closes[i])
-    return (
-        np.asarray(X, np.float32), np.asarray(y_up, np.float32),
-        np.asarray(y_dn, np.float32), np.asarray(cl, np.float32),
-    )
-
-def make_model(
-    inp_shape: Tuple[int, int], lr: float, dr: float, filt: int, units: int, heads: int
-) -> tf.keras.Model:
-    """Crea y compila el modelo Keras con los hiperparámetros finales."""
-    inp = layers.Input(shape=inp_shape, dtype=tf.float32)
-    x = layers.Conv1D(filt, 3, padding="same", activation="relu")(inp)
-    x = layers.Bidirectional(layers.LSTM(units, return_sequences=True))(x)
-    x = layers.MultiHeadAttention(num_heads=heads, key_dim=units)(x, x)
-    x = layers.GlobalAveragePooling1D()(x)
-    x = layers.Dropout(dr)(x)
-    out = layers.Dense(2, dtype="float32")(x)
-    model = models.Model(inp, out)
-    model.compile(optimizers.Adam(lr), loss="mae")
-    return model
-
-def quick_bt(pred, closes, atr_pips, hp: dict, tick: float) -> float:
-    """Back-test mínimo para sanity-check (sin comisiones)."""
-    rr, up_thr, dn_thr = hp["rr"], hp["min_thr_up"], hp["min_thr_dn"]
-    delta_min, swin = hp["delta_min"], hp["smooth_win"]
-    net, pos, dq = 0.0, False, deque(maxlen=swin)
-    entry, sl, tp, direction = 0.0, 0.0, 0.0, 0
-
-    for (u, d), price, atr in zip(pred, closes, atr_pips):
-        mag, diff_val = max(u, d), abs(u - d)
-        raw = 1 if u > d else -1
-        thr = up_thr if raw == 1 else dn_thr
-        dq.append(raw if (mag >= thr and diff_val >= delta_min) else 0)
-        buys, sells = dq.count(1), dq.count(-1)
-        sig = 1 if buys > swin // 2 else -1 if sells > swin // 2 else 0
-        if not pos and sig:
-            pos, entry, sl, tp, direction = True, price, thr * atr, rr * (thr * atr), sig
-            continue
-        if pos:
-            pnl = ((price - entry) if direction == 1 else (entry - price)) / tick
-            if pnl >= tp or pnl <= -sl:
-                net += (tp if pnl >= tp else -sl)
-                pos = False
-    return net
-
-# --- Orquestación Principal de la Tarea ---
-
-def run_training(
-    params_path: str,
-    output_gcs_base_dir: str,
+def run_launcher(
+    project_id: str,
+    region: str,
     pair: str,
     timeframe: str,
-) -> None:
-    """Orquesta el proceso completo de entrenamiento del modelo LSTM."""
+    params_path: str,
+    output_gcs_base_dir: str,
+    vertex_training_image_uri: str,
+    vertex_machine_type: str,
+    vertex_accelerator_type: str,
+    vertex_accelerator_count: int,
+    vertex_service_account: str,
+) -> str:
+    """Orquesta el lanzamiento y monitoreo del Vertex AI Custom Job."""
+    
+    # 1. Inicializar Vertex AI SDK
+    staging_gcs_path = constants.STAGING_PATH
+    gcp_aiplatform.init(
+        project=project_id, location=region, staging_bucket=staging_gcs_path
+    )
+    logger.info(f"Vertex AI SDK inicializado. Staging en: {staging_gcs_path}")
+
+    # 2. Configurar el Custom Job
+    timestamp_for_job = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    job_display_name = f"lstm-train-v3-{pair.lower()}-{timeframe.lower()}-{timestamp_for_job}"
+
+    # Argumentos que se pasarán al script *dentro* del contenedor del Custom Job
+    training_script_args = [
+        "--params", params_path,
+        "--output-gcs-base-dir", output_gcs_base_dir,
+        "--pair", pair,
+        "--timeframe", timeframe,
+    ]
+
+    worker_pool_specs = [{
+        "machine_spec": { "machine_type": vertex_machine_type },
+        "replica_count": 1,
+        "container_spec": {
+            "image_uri": vertex_training_image_uri,
+            "args": training_script_args,
+        },
+    }]
+
+    if vertex_accelerator_count > 0 and vertex_accelerator_type != "ACCELERATOR_TYPE_UNSPECIFIED":
+        worker_pool_specs[0]["machine_spec"]["accelerator_type"] = vertex_accelerator_type
+        worker_pool_specs[0]["machine_spec"]["accelerator_count"] = vertex_accelerator_count
+        logger.info(f"Configurando Custom Job con GPU: {vertex_accelerator_count}x{vertex_accelerator_type}")
+
+    # 3. Lanzar el job
+    logger.info(f"Enviando Vertex AI Custom Job: {job_display_name}")
+    logger.info(f"  Worker pool specs: {json.dumps(worker_pool_specs)}")
+
+    custom_job = gcp_aiplatform.CustomJob(
+        display_name=job_display_name,
+        worker_pool_specs=worker_pool_specs,
+        project=project_id,
+        location=region,
+    )
+    
+    # Se usa .run() para una ejecución síncrona. La pipeline esperará aquí.
     try:
-        # 1. Cargar hiperparámetros
-        logger.info(f"Cargando hiperparámetros desde: {params_path}")
-        local_params_path = gcs_utils.ensure_gcs_path_and_get_local(params_path)
-        with open(local_params_path) as f:
-            hp = json.load(f)
-
-        # 2. Cargar datos de features
-        features_gcs_path = hp["features_path"]
-        logger.info(f"Cargando datos de features desde: {features_gcs_path}")
-        local_features_path = gcs_utils.ensure_gcs_path_and_get_local(features_gcs_path)
-        df_raw = pd.read_parquet(local_features_path)
-        df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"], errors="coerce")
-
-        # 3. Preparar datos
-        logger.info("Preparando datos para el entrenamiento...")
-        tick = 0.01 if pair.endswith("JPY") else 0.0001
-        atr_len = 14
-        df_ind = indicators.build_indicators(df_raw, hp, atr_len=atr_len)
-        
-        close = df_ind.close.values
-        atr_pips = df_ind[f"atr_{atr_len}"].values / tick
-        horizon = int(hp["horizon"])
-        future_close = np.roll(close, -horizon)
-        future_close[-horizon:] = np.nan
-        diff = (future_close - close) / tick
-
-        up = np.maximum(diff, 0) / atr_pips
-        dn = np.maximum(-diff, 0) / atr_pips
-        mask = (~np.isnan(diff)) & (~np.isnan(atr_pips))
-
-        win = int(hp["win"])
-        if mask.sum() <= win:
-            raise ValueError(f"No hay suficientes datos ({mask.sum()}) para el tamaño de ventana ({win}).")
-
-        feature_cols: List[str] = [c for c in df_ind.columns if c not in {f"atr_{atr_len}", "timestamp"}]
-        X_raw = df_ind.loc[mask, feature_cols]
-
-        scaler = RobustScaler()
-        X_scaled = scaler.fit_transform(X_raw)
-
-        X_seq, y_up_seq, y_dn_seq, closes_seq = to_sequences(
-            X_scaled, up[mask], dn[mask], close[mask], win
-        )
-        logger.info(f"✅ Datos listos: X={X_seq.shape}, y=({y_up_seq.shape}, {y_dn_seq.shape})")
-        
-        # 4. Entrenar modelo
-        logger.info("Iniciando entrenamiento del modelo LSTM...")
-        model = make_model(X_seq.shape[1:], hp["lr"], hp["dr"], hp["filt"], hp["units"], hp["heads"])
-        early_stop = callbacks.EarlyStopping(patience=5, restore_best_weights=True, verbose=1)
-        
-        model.fit(
-            X_seq, np.vstack([y_up_seq, y_dn_seq]).T,
-            epochs=60, batch_size=128, callbacks=[early_stop], verbose=1
-        )
-        logger.info("✅ Entrenamiento finalizado.")
-        
-        # 5. Sanity-check
-        bt_score = quick_bt(model.predict(X_seq, verbose=0), closes_seq, atr_pips[win:], hp, tick)
-        logger.info(f"⚡ Quick BT (sanity check): {bt_score:.2f} ATR-pips")
-
-        # 6. Guardar artefactos en GCS
-        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-        final_gcs_dir = f"{output_gcs_base_dir.rstrip('/')}/{pair}/{timeframe}/{timestamp}/"
-        logger.info(f"Guardando artefactos en: {final_gcs_dir}")
-        
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp_path = Path(tmpdir)
-            model_path = tmp_path / "model.h5"
-            scaler_path = tmp_path / "scaler.pkl"
-            params_out_path = tmp_path / "params.json" # Guardamos una copia de los params usados
-
-            model.save(model_path)
-            joblib.dump(scaler, scaler_path)
-            with open(params_out_path, "w") as f:
-                json.dump(hp, f, indent=2)
-
-            gcs_utils.upload_gcs_file(model_path, final_gcs_dir + model_path.name)
-            gcs_utils.upload_gcs_file(scaler_path, final_gcs_dir + scaler_path.name)
-            gcs_utils.upload_gcs_file(params_out_path, final_gcs_dir + params_out_path.name)
-        
-        logger.info(f"🎉 Tarea completada. Artefactos disponibles en: {final_gcs_dir}")
-
+        custom_job.run(service_account=vertex_service_account, sync=True, timeout=10800) # 3 horas timeout
+        logger.info(f"✅ Vertex AI Custom Job {custom_job.display_name} completado.")
     except Exception as e:
-        logger.critical(f"❌ Fallo crítico en el entrenamiento LSTM: {e}", exc_info=True)
-        raise
+        logger.error(f"❌ Vertex AI Custom Job {job_display_name} falló: {e}")
+        if custom_job and custom_job.resource_name:
+            logger.error(f"  Detalles del Job: {custom_job.resource_name}, estado: {custom_job.state}")
+        raise RuntimeError(f"Vertex AI Custom Job para entrenamiento LSTM falló: {e}")
+
+    # 4. Encontrar el directorio de salida del modelo
+    # El script de entrenamiento crea un subdirectorio con timestamp.
+    # Necesitamos encontrarlo para pasarlo al siguiente paso.
+    bucket_name, _ = constants.GCS_BUCKET_NAME, constants.LSTM_MODELS_PATH.split(f"gs://{constants.GCS_BUCKET_NAME}/")[1]
+    gcs_listing_prefix = f"{output_gcs_base_dir.replace(f'gs://{bucket_name}/', '')}/{pair}/{timeframe}/"
+
+    logger.info(f"Buscando directorio de salida del modelo en gs://{bucket_name}/{gcs_listing_prefix}...")
+
+    storage_client = gcp_storage.Client(project=project_id)
+    bucket = storage_client.bucket(bucket_name)
+    
+    # Esperar un poco por si hay latencia en GCS
+    time.sleep(10) 
+    
+    blobs = bucket.list_blobs(prefix=gcs_listing_prefix, delimiter="/")
+    candidate_dirs = []
+    for page in blobs.pages:
+        # page.prefixes contiene los "directorios"
+        if hasattr(page, 'prefixes') and page.prefixes:
+            for dir_prefix in page.prefixes:
+                # Verificar si contiene el archivo model.h5 para confirmar que es un dir de modelo
+                model_blob_path = f"{dir_prefix.rstrip('/')}/model.h5"
+                if bucket.blob(model_blob_path).exists():
+                    candidate_dirs.append(f"gs://{bucket_name}/{dir_prefix.rstrip('/')}")
+    
+    if not candidate_dirs:
+        err_msg = f"No se encontró el directorio de salida del modelo LSTM en gs://{bucket_name}/{gcs_listing_prefix}."
+        logger.error(err_msg)
+        raise TimeoutError(err_msg)
+
+    # Devolver la ruta más reciente
+    latest_model_dir = sorted(candidate_dirs, reverse=True)[0]
+    logger.info(f"🎉 Tarea completada. Directorio del modelo encontrado: {latest_model_dir}")
+    return latest_model_dir
 
 # --- Punto de Entrada para Ejecución como Script ---
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Task de Entrenamiento LSTM para KFP Custom Job.")
+    parser = argparse.ArgumentParser(description="Task Lanzador de Entrenamiento LSTM en Vertex AI.")
     
-    # Argumentos que el Vertex AI Custom Job le pasará
-    parser.add_argument("--params", required=True, help="Ruta GCS al JSON de hiperparámetros.")
-    parser.add_argument("--output-gcs-base-dir", default=constants.LSTM_MODELS_PATH)
+    parser.add_argument("--project-id", required=True)
+    parser.add_argument("--region", required=True)
     parser.add_argument("--pair", required=True)
     parser.add_argument("--timeframe", required=True)
-    
-    # Argumentos que Vertex puede inyectar y que podemos ignorar de forma segura
-    parser.add_argument("--project-id", help=argparse.SUPPRESS)
-    parser.add_argument("--gcs-bucket-name", help=argparse.SUPPRESS)
+    parser.add_argument("--params-path", required=True)
+    parser.add_argument("--output-gcs-base-dir", required=True)
+    parser.add_argument("--vertex-training-image-uri", required=True)
+    parser.add_argument("--vertex-machine-type", required=True)
+    parser.add_argument("--vertex-accelerator-type", required=True)
+    parser.add_argument("--vertex-accelerator-count", type=int, required=True)
+    parser.add_argument("--vertex-service-account", required=True)
+    parser.add_argument("--trained-lstm-dir-path-output", type=Path, required=True)
     
     args = parser.parse_args()
 
-    run_training(
-        params_path=args.params,
-        output_gcs_base_dir=args.output_gcs_base_dir,
+    trained_model_path = run_launcher(
+        project_id=args.project_id,
+        region=args.region,
         pair=args.pair,
         timeframe=args.timeframe,
+        params_path=args.params_path,
+        output_gcs_base_dir=args.output_gcs_base_dir,
+        vertex_training_image_uri=args.vertex_training_image_uri,
+        vertex_machine_type=args.vertex_machine_type,
+        vertex_accelerator_type=args.vertex_accelerator_type,
+        vertex_accelerator_count=args.vertex_accelerator_count,
+        vertex_service_account=args.vertex_service_account,
     )
+
+    # Escribir la ruta de salida al archivo que KFP espera
+    args.trained_lstm_dir_path_output.parent.mkdir(parents=True, exist_ok=True)
+    args.trained_lstm_dir_path_output.write_text(trained_model_path)

@@ -2,7 +2,6 @@
 name: Ingest Market Data
 description: Fetches and updates raw OHLC market data from Polygon.io and stores it in GCS as a Parquet file.
 
-# Parámetros de entrada que la pipeline le pasará a este componente.
 inputs:
   - name: pair
     type: String
@@ -28,25 +27,18 @@ inputs:
     description: 'Minimum number of rows required for the download to be considered successful.'
     default: 100000
 
-# Parámetros de salida que este componente producirá.
 outputs:
   - name: completion_message
     type: String
     description: 'A message indicating the result of the ingestion task.'
 
-# ===== IMPLEMENTACIÓN CORREGIDA Y SIMPLIFICADA =====
 implementation:
   container:
-    # La imagen Docker que contiene todas las dependencias y el código fuente.
     image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
-    
-    # Se invoca el script de python directamente.
     command:
       - python
       - -m
       - src.components.data_ingestion.task
-    
-    # Se pasan los argumentos al script de python, incluyendo el nuevo.
     args:
       - --pair
       - {inputValue: pair}
@@ -62,6 +54,5 @@ implementation:
       - {inputValue: end_date}
       - --min-rows
       - {inputValue: min_rows}
-      # Se pasa la ruta de salida al argumento '--completion-message-path' del script.
       - --completion-message-path
       - {outputPath: completion_message}

@@ -38,14 +38,11 @@ import pandas as pd
 import tensorflow as tf
 from tensorflow.keras import models
 
-# Importar los módulos compartidos
 from src.shared import constants, gcs_utils, indicators
 
-# --- Configuración de Logging y Entorno ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# --- Reproducibilidad y Hardware ---
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
@@ -64,25 +61,15 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ No se pudo configurar la GPU: {e}")
 
-
-# --- Funciones de Lógica de Negocio ---
 def make_sequences(arr: np.ndarray, win: int) -> np.ndarray:
-    """Crea secuencias a partir de un array."""
     if len(arr) <= win:
         return np.empty((0, win, arr.shape[1]), dtype=np.float32)
     return np.stack([arr[i - win : i] for i in range(win, len(arr))]).astype(np.float32)
 
-
-# --- Orquestación Principal de la Tarea ---
 def run_rl_data_preparation(
     lstm_model_dir: str, pair: str, timeframe: str, output_gcs_base_dir: str
 ) -> str:
-    """
-    Orquesta el proceso completo de preparación de datos para el agente RL.
-    Retorna la ruta GCS del archivo .npz final.
-    """
     try:
-        # 1. Cargar artefactos LSTM
         logger.info(f"Cargando artefactos LSTM desde: {lstm_model_dir}")
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -94,20 +81,16 @@ def run_rl_data_preparation(
             scaler = joblib.load(scaler_path)
             hp = json.loads(params_path.read_text())
 
-        # Crear un submodelo para extraer embeddings
         emb_model = models.Model(lstm_model.input, lstm_model.layers[-2].output)
         logger.info("✔ Artefactos LSTM y modelo de embedding cargados.")
 
-        # 2. Cargar y procesar datos crudos
         raw_data_path = f"{constants.DATA_PATH}/{pair}/{timeframe}/{pair}_{timeframe}.parquet"
         logger.info(f"Cargando datos crudos desde: {raw_data_path}")
         local_raw_path = gcs_utils.ensure_gcs_path_and_get_local(raw_data_path)
         df_raw = pd.read_parquet(local_raw_path)
-
         df_ind = indicators.build_indicators(df_raw, hp, atr_len=14)
         logger.info("✔ Indicadores calculados.")
 
-        # 3. Escalar y crear secuencias
         feature_cols = scaler.feature_names_in_
         X_scaled = scaler.transform(df_ind[feature_cols])
         X_seq = make_sequences(X_scaled, win=hp["win"])
@@ -116,17 +99,14 @@ def run_rl_data_preparation(
             raise ValueError("No se pudieron generar secuencias, el DataFrame resultante es muy corto.")
         logger.info(f"✔ Secuencias generadas con shape: {X_seq.shape}")
         
-        # 4. Generar predicciones y embeddings
         logger.info("Generando predicciones y embeddings con el modelo LSTM...")
         with tf.device("/GPU:0" if gpus else "/CPU:0"):
             preds = lstm_model.predict(X_seq, verbose=0).astype(np.float32)
             embs = emb_model.predict(X_seq, verbose=0).astype(np.float32)
 
-        # 5. Crear el array de observaciones (OBS)
         OBS = np.hstack([preds, embs]).astype(np.float32)
         logger.info(f"✔ Array de observaciones (OBS) creado con shape: {OBS.shape}")
 
-        # 6. Generar señal de trading base (raw_signal)
         from collections import deque
         raw_signal = np.zeros(len(X_seq), dtype=np.int8)
         dq = deque(maxlen=hp["smooth_win"])
@@ -145,9 +125,7 @@ def run_rl_data_preparation(
         
         logger.info("✔ Señal de trading base (raw_signal) generada.")
 
-        # 7. Guardar el archivo .npz en GCS
         closes = df_ind.close.values[hp["win"] :].astype(np.float32)
-        
         timestamp_str = datetime.utcnow().strftime("%Y%m%d%H%M%S")
         output_gcs_path = (
             f"{output_gcs_base_dir.rstrip('/')}/{pair}/{timeframe}/"
@@ -156,12 +134,7 @@ def run_rl_data_preparation(
         
         with tempfile.TemporaryDirectory() as tmpdir:
             local_npz_path = Path(tmpdir) / "ppo_input_data.npz"
-            np.savez(
-                local_npz_path,
-                obs=OBS,
-                raw=raw_signal.astype(np.int8),
-                closes=closes
-            )
+            np.savez(local_npz_path, obs=OBS, raw=raw_signal.astype(np.int8), closes=closes)
             gcs_utils.upload_gcs_file(local_npz_path, output_gcs_path)
         
         logger.info(f"🎉 Tarea completada. Datos para RL disponibles en: {output_gcs_path}")
@@ -171,15 +144,13 @@ def run_rl_data_preparation(
         logger.critical(f"❌ Fallo crítico en la preparación de datos para RL: {e}", exc_info=True)
         raise
 
-
-# --- Punto de Entrada para Ejecución como Script ---
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Task de Preparación de Datos para RL.")
-    
     parser.add_argument("--lstm-model-dir", required=True, help="Ruta GCS al directorio versionado del modelo LSTM.")
     parser.add_argument("--pair", required=True)
     parser.add_argument("--timeframe", required=True)
     parser.add_argument("--output-gcs-base-dir", default=constants.RL_DATA_INPUTS_PATH)
+    parser.add_argument("--rl-data-path-output", type=Path, required=True, help="Archivo local para escribir la ruta de salida GCS del .npz")
     
     args = parser.parse_args()
 
@@ -190,5 +161,5 @@ if __name__ == "__main__":
         output_gcs_base_dir=args.output_gcs_base_dir,
     )
 
-    # Imprimir la ruta final para que KFP la capture como artefacto de salida
-    print(final_output_path)
+    args.rl_data_path_output.parent.mkdir(parents=True, exist_ok=True)
+    args.rl_data_path_output.write_text(final_output_path)

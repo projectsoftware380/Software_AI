@@ -2,7 +2,6 @@
 name: Prepare Optimization Data
 description: Loads raw data, computes indicators, filters for the last N years, and saves the result to be used for hyperparameter optimization.
 
-# Parámetros de entrada que la pipeline le pasará a este componente.
 inputs:
   - name: pair
     type: String
@@ -19,34 +18,26 @@ inputs:
     description: 'If true, old versioned directories will be removed to save space.'
     default: true
 
-# Parámetros de salida que este componente producirá.
 outputs:
   - name: prepared_data_path
     type: String
     description: 'The GCS path to the resulting Parquet file, ready for optimization.'
 
-# ===== IMPLEMENTACIÓN CORREGIDA =====
 implementation:
   container:
-    # Se utiliza la misma imagen base que contiene las dependencias de pandas, gcsfs, etc.
     image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
-    
-    # El comando para ejecutar la tarea.
     command:
-      - sh
-      - -c
-      # Se ejecuta el script y se redirige su salida estándar (la ruta del archivo final)
-      # a un archivo que KFP puede leer para obtener el valor del output.
-      # Se han eliminado los guiones extra que causaban el error.
-      - |
-        python -m src.components.data_preparation.task \
-          --pair "$0" \
-          --timeframe "$1" \
-          --years-to-keep "$2" \
-          --cleanup "$3" \
-          | tee "$4"
+      - python
+      - -m
+      - src.components.data_preparation.task
+    args:
+      - --pair
       - {inputValue: pair}
+      - --timeframe
       - {inputValue: timeframe}
+      - --years-to-keep
       - {inputValue: years_to_keep}
+      - --cleanup
       - {inputValue: cleanup_old_versions}
+      - --prepared-data-path-output
       - {outputPath: prepared_data_path}

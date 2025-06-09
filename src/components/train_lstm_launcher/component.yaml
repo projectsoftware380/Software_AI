@@ -2,7 +2,6 @@
 name: Launch Vertex AI LSTM Training Job
 description: Submits and monitors a Vertex AI Custom Job to train the final LSTM model on dedicated hardware. This component itself runs on a standard KFP node.
 
-# Parámetros de entrada para configurar y lanzar el Custom Job.
 inputs:
   - name: project_id
     type: String
@@ -41,46 +40,40 @@ inputs:
     type: String
     description: 'The service account email for the training job to run as.'
 
-# Parámetros de salida que este componente producirá.
 outputs:
   - name: trained_lstm_dir_path
     type: String
     description: 'The full GCS path to the newly created, versioned directory containing the trained model, scaler, and params.'
 
-# Define cómo se ejecuta este componente lanzador.
 implementation:
   container:
-    # Este componente solo necesita el SDK de Vertex AI para lanzar el job.
-    # Puede usar la misma imagen que otros componentes de orquestación.
     image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
-    
     command:
-      - sh
-      - -c
-      # Ejecuta el script lanzador y captura su salida estándar (la ruta GCS del directorio del modelo)
-      - |
-        python -m src.components.train_lstm_launcher.task \
-          --project-id "$0" \
-          --region "$1" \
-          --pair "$2" \
-          --timeframe "$3" \
-          --params-path "$4" \
-          --output-gcs-base-dir "$5" \
-          --vertex-training-image-uri "$6" \
-          --vertex-machine-type "$7" \
-          --vertex-accelerator-type "$8" \
-          --vertex-accelerator-count "$9" \
-          --vertex-service-account "${10}" \
-          | tee "${11}"
+      - python
+      - -m
+      - src.components.train_lstm_launcher.task
+    args:
+      - --project-id
       - {inputValue: project_id}
+      - --region
       - {inputValue: region}
+      - --pair
       - {inputValue: pair}
+      - --timeframe
       - {inputValue: timeframe}
+      - --params-path
       - {inputValue: params_path}
+      - --output-gcs-base-dir
       - {inputValue: output_gcs_base_dir}
+      - --vertex-training-image-uri
       - {inputValue: vertex_training_image_uri}
+      - --vertex-machine-type
       - {inputValue: vertex_machine_type}
+      - --vertex-accelerator-type
       - {inputValue: vertex_accelerator_type}
+      - --vertex-accelerator-count
       - {inputValue: vertex_accelerator_count}
+      - --vertex-service-account
       - {inputValue: vertex_service_account}
+      - --trained-lstm-dir-path-output
       - {outputPath: trained_lstm_dir_path}

@@ -2,7 +2,6 @@
 name: Train Reinforcement Learning Agent (PPO)
 description: Trains a PPO agent from stable-baselines3 to act as a filter for the LSTM model's trading signals.
 
-# Parámetros de entrada que la pipeline le pasará a este componente.
 inputs:
   - name: params_path
     type: String
@@ -23,35 +22,30 @@ inputs:
     type: String
     description: 'Base GCS directory for saving TensorBoard logs.'
 
-# Parámetros de salida que este componente producirá.
 outputs:
   - name: trained_rl_model_path
     type: String
     description: 'The full GCS path to the trained and saved PPO model .zip file.'
 
-# Define cómo se ejecuta el componente.
 implementation:
   container:
-    # Esta tarea es intensiva y necesita todas las librerías de ML y RL.
     image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
-    
     command:
-      - sh
-      - -c
-      # Ejecuta el script de entrenamiento y captura su salida estándar (la ruta GCS del modelo .zip)
-      - |
-        python -m src.components.train_rl.task \
-          --params-path "$0" \
-          --rl-data-path "$1" \
-          --pair "$2" \
-          --timeframe "$3" \
-          --output-gcs-base-dir "$4" \
-          --tensorboard-logs-base-dir "$5" \
-          | tee "$6"
+      - python
+      - -m
+      - src.components.train_rl.task
+    args:
+      - --params-path
       - {inputValue: params_path}
+      - --rl-data-path
       - {inputValue: rl_data_path}
+      - --pair
       - {inputValue: pair}
+      - --timeframe
       - {inputValue: timeframe}
+      - --output-gcs-base-dir
       - {inputValue: output_gcs_base_dir}
+      - --tensorboard-logs-base-dir
       - {inputValue: tensorboard_logs_base_dir}
+      - --trained-rl-model-path-output
       - {outputPath: trained_rl_model_path}

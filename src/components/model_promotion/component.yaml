@@ -2,7 +2,6 @@
 name: Decide Model Promotion
 description: Evaluates backtest metrics against production metrics and promotion thresholds. If the new model is approved, it copies its artifacts to the production GCS directory.
 
-# Parámetros de entrada que la pipeline le pasará a este componente.
 inputs:
   - name: new_metrics_dir
     type: String
@@ -23,35 +22,30 @@ inputs:
     type: String
     description: 'The base GCS directory for all production models.'
 
-# Parámetros de salida que este componente producirá.
 outputs:
   - name: model_promoted
     type: Boolean
     description: 'A boolean value indicating if the model was promoted to production (true) or not (false).'
 
-# Define cómo se ejecuta el componente.
 implementation:
   container:
-    # Esta tarea no es computacionalmente intensiva, pero necesita las librerías de GCS.
     image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
-    
     command:
-      - sh
-      - -c
-      # Ejecuta el script de decisión y captura su salida estándar (un string "true" o "false")
-      - |
-        python -m src.components.model_promotion.task \
-          --new-metrics-dir "$0" \
-          --new-lstm-artifacts-dir "$1" \
-          --new-rl-model-path "$2" \
-          --pair "$3" \
-          --timeframe "$4" \
-          --production-base-dir "$5" \
-          | tee "$6"
+      - python
+      - -m
+      - src.components.model_promotion.task
+    args:
+      - --new-metrics-dir
       - {inputValue: new_metrics_dir}
+      - --new-lstm-artifacts-dir
       - {inputValue: new_lstm_artifacts_dir}
+      - --new-rl-model-path
       - {inputValue: new_rl_model_path}
+      - --pair
       - {inputValue: pair}
+      - --timeframe
       - {inputValue: timeframe}
+      - --production-base-dir
       - {inputValue: production_base_dir}
+      - --model-promoted-output
       - {outputPath: model_promoted}

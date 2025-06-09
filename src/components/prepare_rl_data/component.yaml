@@ -2,7 +2,6 @@
 name: Prepare Reinforcement Learning Data
 description: Takes the trained LSTM model artifacts to generate predictions and embeddings, creating the final dataset for the RL agent training.
 
-# Parámetros de entrada que la pipeline le pasará a este componente.
 inputs:
   - name: lstm_model_dir
     type: String
@@ -17,31 +16,26 @@ inputs:
     type: String
     description: 'Base GCS directory where the RL data preparation task will save its versioned NPZ file.'
 
-# Parámetros de salida que este componente producirá.
 outputs:
   - name: rl_data_path
     type: String
     description: 'The full GCS path to the newly created, versioned .npz file containing the RL training data.'
 
-# Define cómo se ejecuta el componente.
 implementation:
   container:
-    # Esta tarea requiere las librerías de ML para cargar el modelo y hacer predicciones.
     image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
-    
     command:
-      - sh
-      - -c
-      # Ejecuta el script de preparación y captura su salida estándar (la ruta GCS del .npz)
-      - |
-        python -m src.components.prepare_rl_data.task \
-          --lstm-model-dir "$0" \
-          --pair "$1" \
-          --timeframe "$2" \
-          --output-gcs-base-dir "$3" \
-          | tee "$4"
+      - python
+      - -m
+      - src.components.prepare_rl_data.task
+    args:
+      - --lstm-model-dir
       - {inputValue: lstm_model_dir}
+      - --pair
       - {inputValue: pair}
+      - --timeframe
       - {inputValue: timeframe}
+      - --output-gcs-base-dir
       - {inputValue: output_gcs_base_dir}
+      - --rl-data-path-output
       - {outputPath: rl_data_path}
