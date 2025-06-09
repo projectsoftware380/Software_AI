@@ -165,6 +165,11 @@
       "executorLabel": "exec-optimize-lstm-hyperparameters",
       "inputDefinitions": {
         "parameters": {
+          "cleanup_old_versions": {
+            "defaultValue": true,
+            "isOptional": true,
+            "parameterType": "BOOLEAN"
+          },
           "features_path": {
             "parameterType": "STRING"
           },
@@ -416,6 +421,8 @@
             "{{$.inputs.parameters['timeframe']}}",
             "--n-trials",
             "{{$.inputs.parameters['n_trials']}}",
+            "--cleanup-old-versions",
+            "{{$.inputs.parameters['cleanup_old_versions']}}",
             "--best-params-path-output",
             "{{$.outputs.parameters['best_params_path'].output_file}}",
             "--optimization-metrics-output",
@@ -718,7 +725,7 @@
               },
               "vertex_training_image_uri": {
                 "runtimeValue": {
-                  "constant": "us-central1-docker.pkg.dev/trading-ai-460823/trading-images/runner-lstm:latest"
+                  "constant": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/runner-lstm:latest"
                 }
               }
             }
