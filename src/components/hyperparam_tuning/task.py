@@ -97,7 +97,10 @@ def quick_bt(pred, closes, atr, rr, up_thr, dn_thr, delta_min, smooth_win, tick)
         dq.append(raw if cond else 0)
         
         buys, sells = dq.count(1), dq.count(-1)
-        signal = 1 if buys > swin // 2 else -1 if sells > swin // 2 else 0
+        
+        # ===== CORRECCIÓN DEL ERROR AQUÍ =====
+        # Se utiliza la variable correcta 'smooth_win' en lugar de 'swin'.
+        signal = 1 if buys > smooth_win // 2 else -1 if sells > smooth_win // 2 else 0
 
         if not pos and signal != 0:
             pos, entry_price, direction = True, price, signal
@@ -173,7 +176,7 @@ def run_optimization(
             
             atr_col = f"atr_{atr_len}"
             if atr_col not in df_ind or df_ind[atr_col].isna().all():
-                return -1e9  # Penalización alta si ATR no se puede calcular
+                return -1e9
 
             # Preparación de etiquetas y máscara
             atr = df_ind[atr_col].values / tick
@@ -203,9 +206,6 @@ def run_optimization(
             y_up_seq, y_dn_seq = up[mask][p["win"]:], dn[mask][p["win"]:]
             closes_seq, atr_seq = close[mask][p["win"]:], atr[mask][p["win"]:]
             
-            # ===== CORRECCIÓN DEL ERROR AQUÍ =====
-            # Se desempaquetan 10 variables para coincidir con la salida de train_test_split.
-            # Las variables no utilizadas (`_`) se ignoran.
             X_tr, X_val, y_up_tr, y_up_val, y_dn_tr, y_dn_val, _, closes_val, _, atr_val = train_test_split(
                 X_seq, y_up_seq, y_dn_seq, closes_seq, atr_seq, test_size=0.2, shuffle=False
             )
