@@ -25,7 +25,7 @@ outputs:
     type: String
     description: 'The GCS path to the resulting Parquet file, ready for optimization.'
 
-# Define cómo se ejecuta el componente.
+# ===== IMPLEMENTACIÓN CORREGIDA =====
 implementation:
   container:
     # Se utiliza la misma imagen base que contiene las dependencias de pandas, gcsfs, etc.
@@ -35,13 +35,13 @@ implementation:
     command:
       - sh
       - -c
-      # Se ejecuta el script y se redirige su salida estándar (que es la ruta del archivo final)
+      # Se ejecuta el script y se redirige su salida estándar (la ruta del archivo final)
       # a un archivo que KFP puede leer para obtener el valor del output.
+      # Se han eliminado los guiones extra que causaban el error.
       - |
         python -m src.components.data_preparation.task \
           --pair "$0" \
-          -
-          - --timeframe "$1" \
+          --timeframe "$1" \
           --years-to-keep "$2" \
           --cleanup "$3" \
           | tee "$4"

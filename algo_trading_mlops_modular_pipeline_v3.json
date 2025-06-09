@@ -393,7 +393,7 @@
           "command": [
             "sh",
             "-c",
-            "python -m src.components.data_preparation.task \\\n  --pair \"$0\" \\\n  -\n  - --timeframe \"$1\" \\\n  --years-to-keep \"$2\" \\\n  --cleanup \"$3\" \\\n  | tee \"$4\"\n",
+            "python -m src.components.data_preparation.task \\\n  --pair \"$0\" \\\n  --timeframe \"$1\" \\\n  --years-to-keep \"$2\" \\\n  --cleanup \"$3\" \\\n  | tee \"$4\"\n",
             "{{$.inputs.parameters['pair']}}",
             "{{$.inputs.parameters['timeframe']}}",
             "{{$.inputs.parameters['years_to_keep']}}",
