@@ -11,6 +11,7 @@ Responsabilidades:
 3.  Guarda los mejores parámetros encontrados en un archivo `best_params.json`.
 4.  Sube el archivo JSON a una ruta versionada en GCS.
 5.  Escribe las métricas de optimización a un artefacto de KFP.
+6.  (Opcional) Limpia las versiones antiguas de los parámetros, conservando solo la más reciente.
 
 Reemplaza la funcionalidad de `optimize_lstm.py`.
 """
@@ -23,6 +24,7 @@ import json
 import logging
 import os
 import random
+import re
 import sys
 import tempfile
 import warnings
@@ -30,6 +32,7 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 
+import gcsfs
 import numpy as np
 import optuna
 import pandas as pd
@@ -66,6 +69,39 @@ except Exception as e:
     logger.warning(f"⚠️ No se pudo configurar la GPU: {e}")
 
 
+def _keep_only_latest_version(base_gcs_prefix: str) -> None:
+    """
+    Mantiene solo el sub-directorio con el timestamp más reciente.
+    """
+    try:
+        fs = gcsfs.GCSFileSystem(project=constants.PROJECT_ID)
+        timestamp_pattern = re.compile(r"/(\d{14})/?$")
+        
+        if not base_gcs_prefix.endswith('/'):
+            base_gcs_prefix += '/'
+        
+        all_dirs = fs.ls(base_gcs_prefix)
+        versioned_dirs = [d for d in all_dirs if fs.isdir(d) and timestamp_pattern.search(d)]
+
+        if len(versioned_dirs) <= 1:
+            logger.info(f"No hay versiones antiguas que limpiar en {base_gcs_prefix}")
+            return
+
+        dirs_sorted = sorted(
+            versioned_dirs,
+            key=lambda p: timestamp_pattern.search(p).group(1),
+            reverse=True,
+        )
+
+        logger.info(f"Se mantendrá la versión más reciente: gs://{dirs_sorted[0]}")
+        for old_dir in dirs_sorted[1:]:
+            logger.info(f"🗑️  Eliminando versión anterior: gs://{old_dir}")
+            fs.rm(old_dir, recursive=True)
+            
+    except Exception as e:
+        logger.warning(f"⚠️ No se pudo realizar la limpieza de versiones antiguas en '{base_gcs_prefix}': {e}")
+
+
 # --- Funciones de Lógica de Negocio (Modelos y Backtest) ---
 
 def make_model(inp_shape: tuple, lr: float, dr: float, filt: int, units: int, heads: int) -> tf.keras.Model:
@@ -98,8 +134,6 @@ def quick_bt(pred, closes, atr, rr, up_thr, dn_thr, delta_min, smooth_win, tick)
         
         buys, sells = dq.count(1), dq.count(-1)
         
-        # ===== CORRECCIÓN DEL ERROR AQUÍ =====
-        # Se utiliza la variable correcta 'smooth_win' en lugar de 'swin'.
         signal = 1 if buys > smooth_win // 2 else -1 if sells > smooth_win // 2 else 0
 
         if not pos and signal != 0:
@@ -125,6 +159,7 @@ def run_optimization(
     n_trials: int,
     output_gcs_path: str,
     metrics_output_file: Path,
+    cleanup_old_versions: bool = True,
 ) -> None:
     """
     Orquesta el proceso completo de optimización con Optuna.
@@ -256,6 +291,11 @@ def run_optimization(
 
         logger.info(f"✅ Optimización completada. Best score: {study.best_value}")
 
+        if cleanup_old_versions:
+            logger.info("Iniciando limpieza de parámetros antiguos...")
+            base_cleanup_path = f"{constants.LSTM_PARAMS_PATH}/{pair}/{timeframe}/"
+            _keep_only_latest_version(base_cleanup_path)
+
     except Exception as e:
         logger.critical(f"❌ Fallo crítico en la optimización: {e}", exc_info=True)
         raise
@@ -268,6 +308,7 @@ if __name__ == "__main__":
     parser.add_argument("--pair", required=True)
     parser.add_argument("--timeframe", required=True)
     parser.add_argument("--n-trials", type=int, default=constants.DEFAULT_N_TRIALS)
+    parser.add_argument("--cleanup-old-versions", type=lambda x: str(x).lower() == 'true', default=True)
     parser.add_argument("--best-params-path-output", type=Path, required=True, help="Archivo local para la ruta GCS del JSON de parámetros.")
     parser.add_argument("--optimization-metrics-output", type=Path, required=True, help="Archivo local para las métricas de KFP.")
     
@@ -287,6 +328,7 @@ if __name__ == "__main__":
         n_trials=args.n_trials,
         output_gcs_path=output_gcs_path,
         metrics_output_file=args.optimization_metrics_output,
+        cleanup_old_versions=args.cleanup_old_versions,
     )
 
     args.best_params_path_output.parent.mkdir(parents=True, exist_ok=True)

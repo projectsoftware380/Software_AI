@@ -16,6 +16,10 @@ inputs:
     type: Integer
     description: 'The number of optimization trials to run in Optuna.'
     default: 25
+  - name: cleanup_old_versions
+    type: Boolean
+    description: 'If true, old versioned directories for parameters will be removed, keeping only the latest.'
+    default: true
 
 outputs:
   - name: best_params_path
@@ -41,6 +45,8 @@ implementation:
       - {inputValue: timeframe}
       - --n-trials
       - {inputValue: n_trials}
+      - --cleanup-old-versions
+      - {inputValue: cleanup_old_versions}
       - --best-params-path-output
       - {outputPath: best_params_path}
       - --optimization-metrics-output
