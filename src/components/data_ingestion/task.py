@@ -160,7 +160,7 @@ def run_ingestion(
             logger.info(f"No existía un Parquet previo en {parquet_uri}. Se creará uno nuevo.")
 
         # 3. Descargar datos por ventanas
-        logger.info(f"📥 Descargando {pair} | {tf} | {start_date} → {end_date}")
+        logger.info(f"📥 Descargando {pair} | {timeframe} | {start_date} → {end_date}")
         all_dfs: List[pd.DataFrame] = []
         win_start = dt.date.fromisoformat(start_date)
         final_end = dt.date.fromisoformat(end_date)

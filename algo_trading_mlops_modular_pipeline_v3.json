@@ -326,33 +326,19 @@
       "exec-ingest-market-data": {
         "container": {
           "args": [
-            "--pair",
             "{{$.inputs.parameters['pair']}}",
-            "--timeframe",
             "{{$.inputs.parameters['timeframe']}}",
-            "--project-id",
             "{{$.inputs.parameters['project_id']}}",
-            "--polygon-secret-name",
             "{{$.inputs.parameters['polygon_secret_name']}}",
-            "--start-date",
             "{{$.inputs.parameters['start_date']}}",
-            "--end-date",
             "{{$.inputs.parameters['end_date']}}",
-            "--min-rows",
             "{{$.inputs.parameters['min_rows']}}",
-            "&&",
-            "echo",
-            "Data ingestion completed successfully for pair ",
-            "{{$.inputs.parameters['pair']}}",
-            " and timeframe ",
-            "{{$.inputs.parameters['timeframe']}}",
-            " > ",
             "{{$.outputs.parameters['completion_message'].output_file}}"
           ],
           "command": [
-            "python",
-            "-m",
-            "src.components.data_ingestion.task"
+            "sh",
+            "-c",
+            "python -m src.components.data_ingestion.task \\\n  --pair \"$0\" \\\n  --timeframe \"$1\" \\\n  --project-id \"$2\" \\\n  --polygon-secret-name \"$3\" \\\n  --start-date \"$4\" \\\n  --end-date \"$5\" \\\n  --min-rows \"$6\" && \\\necho \"Data ingestion completed successfully for pair $0 and timeframe $1\" > \"$7\"\n"
           ],
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }

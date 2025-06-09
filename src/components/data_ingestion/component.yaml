@@ -41,38 +41,32 @@ implementation:
     # Esta URI se importa desde src/shared/constants.py en la pipeline principal.
     image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
     
-    # El comando para ejecutar la tarea. Usamos `python -m` para tratar el script
-    # como un módulo, lo que funciona bien con la estructura de directorios de `src`.
+    # El comando para ejecutar la tarea. Se usa 'sh -c' para ejecutar un script de shell.
     command:
-      - python
-      - -m
-      - src.components.data_ingestion.task
+      - sh
+      - -c
+      # El '|' indica que lo siguiente es un script de varias líneas.
+      # Primero, se ejecuta la tarea de Python. Si termina con éxito (exit code 0),
+      # el operador '&&' permite que se ejecute el comando 'echo'.
+      # La salida de 'echo' se redirige (>) al archivo de salida de KFP.
+      - |
+        python -m src.components.data_ingestion.task \
+          --pair "$0" \
+          --timeframe "$1" \
+          --project-id "$2" \
+          --polygon-secret-name "$3" \
+          --start-date "$4" \
+          --end-date "$5" \
+          --min-rows "$6" && \
+        echo "Data ingestion completed successfully for pair $0 and timeframe $1" > "$7"
     
-    # Los argumentos que se pasan al comando. KFP reemplazará los placeholders
-    # `{inputValue: <name>}` con los valores reales en tiempo de ejecución.
+    # Los argumentos ahora se pasan como argumentos posicionales ($0, $1, $2, etc.) al script de shell.
     args:
-      - --pair
       - {inputValue: pair}
-      - --timeframe
       - {inputValue: timeframe}
-      - --project-id
       - {inputValue: project_id}
-      - --polygon-secret-name
       - {inputValue: polygon_secret_name}
-      - --start-date
       - {inputValue: start_date}
-      - --end-date
       - {inputValue: end_date}
-      - --min-rows
       - {inputValue: min_rows}
-      # El script task.py debe imprimir el mensaje de finalización en la salida
-      # estándar. KFP lo captura automáticamente y lo dirige al archivo de salida
-      # especificado por este placeholder.
-      - '&&'
-      - echo
-      - "Data ingestion completed successfully for pair "
-      - {inputValue: pair}
-      - " and timeframe "
-      - {inputValue: timeframe}
-      - " > "
       - {outputPath: completion_message}
