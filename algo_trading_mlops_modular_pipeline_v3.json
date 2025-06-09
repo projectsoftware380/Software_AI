@@ -449,6 +449,26 @@
   },
   "root": {
     "dag": {
+      "outputs": {
+        "artifacts": {
+          "execute-full-backtesting-backtest_metrics": {
+            "artifactSelectors": [
+              {
+                "outputArtifactKey": "backtest_metrics",
+                "producerSubtask": "execute-full-backtesting"
+              }
+            ]
+          },
+          "optimize-lstm-hyperparameters-optimization_metrics": {
+            "artifactSelectors": [
+              {
+                "outputArtifactKey": "optimization_metrics",
+                "producerSubtask": "optimize-lstm-hyperparameters"
+              }
+            ]
+          }
+        }
+      },
       "tasks": {
         "decide-model-promotion": {
           "cachingOptions": {
@@ -550,7 +570,7 @@
             "parameters": {
               "end_date": {
                 "runtimeValue": {
-                  "constant": "2025-06-06"
+                  "constant": "2025-06-09"
                 }
               },
               "min_rows": {
@@ -833,8 +853,24 @@
           "parameterType": "STRING"
         }
       }
+    },
+    "outputDefinitions": {
+      "artifacts": {
+        "execute-full-backtesting-backtest_metrics": {
+          "artifactType": {
+            "schemaTitle": "system.Metrics",
+            "schemaVersion": "0.0.1"
+          }
+        },
+        "optimize-lstm-hyperparameters-optimization_metrics": {
+          "artifactType": {
+            "schemaTitle": "system.Metrics",
+            "schemaVersion": "0.0.1"
+          }
+        }
+      }
     }
   },
   "schemaVersion": "2.1.0",
-  "sdkVersion": "kfp-2.13.0"
+  "sdkVersion": "kfp-2.1.3"
 }
