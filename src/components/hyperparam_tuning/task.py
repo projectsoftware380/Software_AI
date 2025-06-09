@@ -38,12 +38,15 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import RobustScaler
 from tensorflow.keras import callbacks, layers, models, optimizers
 
+# Importar los módulos compartidos
 from src.shared import constants, gcs_utils, indicators
 
+# --- Configuración de Logging y Entorno ---
 warnings.filterwarnings("ignore", category=FutureWarning)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
+# --- Reproducibilidad y Hardware ---
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
@@ -62,7 +65,11 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ No se pudo configurar la GPU: {e}")
 
+
+# --- Funciones de Lógica de Negocio (Modelos y Backtest) ---
+
 def make_model(inp_shape: tuple, lr: float, dr: float, filt: int, units: int, heads: int) -> tf.keras.Model:
+    """Crea y compila el modelo Keras para un trial de Optuna."""
     x = inp = layers.Input(shape=inp_shape, dtype=tf.float32)
     x = layers.Conv1D(filt, 3, padding="same", activation="relu")(x)
     x = layers.Bidirectional(layers.LSTM(units, return_sequences=True))(x)
@@ -74,27 +81,39 @@ def make_model(inp_shape: tuple, lr: float, dr: float, filt: int, units: int, he
     model.compile(optimizers.Adam(lr), loss="mae")
     return model
 
+
 def quick_bt(pred, closes, atr, rr, up_thr, dn_thr, delta_min, smooth_win, tick) -> float:
+    """Backtest rápido para evaluar el rendimiento de un trial."""
     net, pos, dq = 0.0, False, deque(maxlen=smooth_win)
-    entry_price, direction, sl, tp = 0.0, 0, 0.0, 0.0
+    entry_price = 0.0
+    direction = 0
+    sl = 0.0
+    tp = 0.0
+
     for (u, d), price, atr_i in zip(pred, closes, atr):
         mag, diff = max(u, d), abs(u - d)
         raw = 1 if u > d else -1
         cond = ((raw == 1 and mag >= up_thr) or (raw == -1 and mag >= dn_thr)) and diff >= delta_min
         dq.append(raw if cond else 0)
+        
         buys, sells = dq.count(1), dq.count(-1)
         signal = 1 if buys > swin // 2 else -1 if sells > swin // 2 else 0
+
         if not pos and signal != 0:
             pos, entry_price, direction = True, price, signal
             sl = (up_thr if direction == 1 else dn_thr) * atr_i
             tp = rr * sl
             continue
+        
         if pos:
             pnl = (price - entry_price) / tick if direction == 1 else (entry_price - price) / tick
             if pnl >= tp or pnl <= -sl:
                 net += (tp if pnl >= tp else -sl)
                 pos = False
     return net
+
+
+# --- Orquestación Principal de la Tarea ---
 
 def run_optimization(
     features_path: str,
@@ -104,11 +123,15 @@ def run_optimization(
     output_gcs_path: str,
     metrics_output_file: Path,
 ) -> None:
+    """
+    Orquesta el proceso completo de optimización con Optuna.
+    """
     logger.info(f"Iniciando optimización para {pair}/{timeframe} con {n_trials} trials.")
     logger.info(f"Datos de entrada: {features_path}")
     logger.info(f"Archivo de salida de parámetros: {output_gcs_path}")
 
     try:
+        # Cargar los datos una sola vez
         local_features_path = gcs_utils.ensure_gcs_path_and_get_local(features_path)
         df_raw = pd.read_parquet(local_features_path)
         if "timestamp" in df_raw.columns:
@@ -116,11 +139,15 @@ def run_optimization(
         else:
             raise ValueError("La columna 'timestamp' es obligatoria y no se encontró.")
 
+        # Definir la función objetivo para Optuna
         def objective(trial: optuna.trial.Trial) -> float:
+            # Limpieza de memoria de la sesión de Keras anterior
             tf.keras.backend.clear_session()
             gc.collect()
+
             tick = 0.01 if pair.endswith("JPY") else 0.0001
             atr_len = 14
+            
             p = {
                 "horizon": trial.suggest_int("horizon", 10, 30),
                 "rr": trial.suggest_float("rr", 1.5, 3.0),
@@ -140,30 +167,49 @@ def run_optimization(
                 "macd_slow": trial.suggest_categorical("macd_slow", [21, 26]),
                 "stoch_len": trial.suggest_categorical("stoch_len", [14, 21]),
             }
+
+            # Preparación de datos para el trial
             df_ind = indicators.build_indicators(df_raw.copy(), p, atr_len=atr_len)
+            
             atr_col = f"atr_{atr_len}"
-            if atr_col not in df_ind or df_ind[atr_col].isna().all(): return -1e9
+            if atr_col not in df_ind or df_ind[atr_col].isna().all():
+                return -1e9  # Penalización alta si ATR no se puede calcular
+
+            # Preparación de etiquetas y máscara
             atr = df_ind[atr_col].values / tick
             close = df_ind.close.values
             future_close = np.roll(close, -p["horizon"])
             future_close[-p["horizon"]:] = np.nan
             diff = (future_close - close) / tick
+            
             up = np.maximum(diff, 0) / atr
             dn = np.maximum(-diff, 0) / atr
+            
             mask = (~np.isnan(diff)) & (~np.isnan(atr))
             if mask.sum() < 1000: return -1e8
+
+            # Selección de features y escalado
             feature_cols = [c for c in df_ind.columns if c not in {atr_col, "timestamp"}]
             X_raw = df_ind.loc[mask, feature_cols].select_dtypes(include=np.number)
             if X_raw.empty or X_raw.shape[0] <= p["win"]: return -1e8
+
             scaler = RobustScaler()
             X_scaled = scaler.fit_transform(X_raw)
+
+            # Creación de secuencias
             X_seq = np.stack([X_scaled[i - p["win"]: i] for i in range(p["win"], len(X_scaled))])
             if X_seq.shape[0] < 500: return -1e8
+            
             y_up_seq, y_dn_seq = up[mask][p["win"]:], dn[mask][p["win"]:]
             closes_seq, atr_seq = close[mask][p["win"]:], atr[mask][p["win"]:]
-            X_tr, X_val, y_up_tr, y_up_val, y_dn_tr, y_dn_val, closes_val, atr_val = train_test_split(
+            
+            # ===== CORRECCIÓN DEL ERROR AQUÍ =====
+            # Se desempaquetan 10 variables para coincidir con la salida de train_test_split.
+            # Las variables no utilizadas (`_`) se ignoran.
+            X_tr, X_val, y_up_tr, y_up_val, y_dn_tr, y_dn_val, _, closes_val, _, atr_val = train_test_split(
                 X_seq, y_up_seq, y_dn_seq, closes_seq, atr_seq, test_size=0.2, shuffle=False
             )
+            
             model = make_model(X_tr.shape[1:], p["lr"], p["dr"], p["filt"], p["units"], p["heads"])
             model.fit(
                 X_tr, np.vstack([y_up_tr, y_dn_tr]).T,
@@ -171,14 +217,18 @@ def run_optimization(
                 epochs=15, batch_size=64, verbose=0,
                 callbacks=[callbacks.EarlyStopping(patience=5, restore_best_weights=True)],
             )
+            
+            # Evaluación y retorno del score
             score = quick_bt(model.predict(X_val, verbose=0), closes_val, atr_val,
                              p["rr"], p["min_thr_up"], p["min_thr_dn"],
                              p["delta_min"], p["smooth_win"], tick)
             return score
 
+        # Ejecución del estudio de Optuna
         study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=SEED))
         study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
 
+        # Guardado de los mejores resultados
         best_params = study.best_params
         best_params.update({
             "pair": pair, "timeframe": timeframe, "features_path": features_path,
@@ -196,7 +246,7 @@ def run_optimization(
         kfp_metrics = {
             "metrics": [{
                 "name": "optuna-best-trial-score",
-                "numberValue": study.best_value,
+                "numberValue": study.best_value if study.best_value is not None else -1e9,
                 "format": "RAW"
             }]
         }
@@ -210,8 +260,10 @@ def run_optimization(
         logger.critical(f"❌ Fallo crítico en la optimización: {e}", exc_info=True)
         raise
 
+# --- Punto de Entrada para Ejecución como Script ---
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Task de Optimización de Hiperparámetros para KFP.")
+    
     parser.add_argument("--features-path", required=True, help="Ruta GCS al Parquet con features.")
     parser.add_argument("--pair", required=True)
     parser.add_argument("--timeframe", required=True)
@@ -221,6 +273,7 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
 
+    # Construir la ruta de salida versionada
     timestamp_str = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     output_gcs_path = (
         f"{constants.LSTM_PARAMS_PATH}/{args.pair}/{args.timeframe}/"

@@ -291,34 +291,52 @@
     "executors": {
       "exec-decide-model-promotion": {
         "container": {
-          "command": [
-            "sh",
-            "-c",
-            "python -m src.components.model_promotion.task \\\n  --new-metrics-dir \"$0\" \\\n  --new-lstm-artifacts-dir \"$1\" \\\n  --new-rl-model-path \"$2\" \\\n  --pair \"$3\" \\\n  --timeframe \"$4\" \\\n  --production-base-dir \"$5\" \\\n  | tee \"$6\"\n",
+          "args": [
+            "--new-metrics-dir",
             "{{$.inputs.parameters['new_metrics_dir']}}",
+            "--new-lstm-artifacts-dir",
             "{{$.inputs.parameters['new_lstm_artifacts_dir']}}",
+            "--new-rl-model-path",
             "{{$.inputs.parameters['new_rl_model_path']}}",
+            "--pair",
             "{{$.inputs.parameters['pair']}}",
+            "--timeframe",
             "{{$.inputs.parameters['timeframe']}}",
+            "--production-base-dir",
             "{{$.inputs.parameters['production_base_dir']}}",
+            "--model-promoted-output",
             "{{$.outputs.parameters['model_promoted'].output_file}}"
+          ],
+          "command": [
+            "python",
+            "-m",
+            "src.components.model_promotion.task"
           ],
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }
       },
       "exec-execute-full-backtesting": {
         "container": {
-          "command": [
-            "sh",
-            "-c",
-            "python -m src.components.backtest.task \\\n  --lstm-model-dir \"$0\" \\\n  --rl-model-path \"$1\" \\\n  --features-path \"$2\" \\\n  --pair \"$3\" \\\n  --timeframe \"$4\" \\\n  --kfp-metrics-path \"$5\" \\\n  | tee \"$6\"\n",
+          "args": [
+            "--lstm-model-dir",
             "{{$.inputs.parameters['lstm_model_dir']}}",
+            "--rl-model-path",
             "{{$.inputs.parameters['rl_model_path']}}",
+            "--features-path",
             "{{$.inputs.parameters['features_path']}}",
+            "--pair",
             "{{$.inputs.parameters['pair']}}",
+            "--timeframe",
             "{{$.inputs.parameters['timeframe']}}",
+            "--kfp-metrics-output",
             "{{$.outputs.artifacts['backtest_metrics'].path}}",
+            "--output-gcs-dir-output",
             "{{$.outputs.parameters['output_gcs_dir'].output_file}}"
+          ],
+          "command": [
+            "python",
+            "-m",
+            "src.components.backtest.task"
           ],
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }
@@ -353,84 +371,130 @@
       },
       "exec-launch-vertex-ai-lstm-training-job": {
         "container": {
-          "command": [
-            "sh",
-            "-c",
-            "python -m src.components.train_lstm_launcher.task \\\n  --project-id \"$0\" \\\n  --region \"$1\" \\\n  --pair \"$2\" \\\n  --timeframe \"$3\" \\\n  --params-path \"$4\" \\\n  --output-gcs-base-dir \"$5\" \\\n  --vertex-training-image-uri \"$6\" \\\n  --vertex-machine-type \"$7\" \\\n  --vertex-accelerator-type \"$8\" \\\n  --vertex-accelerator-count \"$9\" \\\n  --vertex-service-account \"${10}\" \\\n  | tee \"${11}\"\n",
+          "args": [
+            "--project-id",
             "{{$.inputs.parameters['project_id']}}",
+            "--region",
             "{{$.inputs.parameters['region']}}",
+            "--pair",
             "{{$.inputs.parameters['pair']}}",
+            "--timeframe",
             "{{$.inputs.parameters['timeframe']}}",
+            "--params-path",
             "{{$.inputs.parameters['params_path']}}",
+            "--output-gcs-base-dir",
             "{{$.inputs.parameters['output_gcs_base_dir']}}",
+            "--vertex-training-image-uri",
             "{{$.inputs.parameters['vertex_training_image_uri']}}",
+            "--vertex-machine-type",
             "{{$.inputs.parameters['vertex_machine_type']}}",
+            "--vertex-accelerator-type",
             "{{$.inputs.parameters['vertex_accelerator_type']}}",
+            "--vertex-accelerator-count",
             "{{$.inputs.parameters['vertex_accelerator_count']}}",
+            "--vertex-service-account",
             "{{$.inputs.parameters['vertex_service_account']}}",
+            "--trained-lstm-dir-path-output",
             "{{$.outputs.parameters['trained_lstm_dir_path'].output_file}}"
+          ],
+          "command": [
+            "python",
+            "-m",
+            "src.components.train_lstm_launcher.task"
           ],
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }
       },
       "exec-optimize-lstm-hyperparameters": {
         "container": {
-          "command": [
-            "sh",
-            "-c",
-            "python -m src.components.hyperparam_tuning.task \\\n  --features-path \"$0\" \\\n  --pair \"$1\" \\\n  --timeframe \"$2\" \\\n  --n-trials \"$3\" \\\n  | tee \"$4\"\n",
+          "args": [
+            "--features-path",
             "{{$.inputs.parameters['features_path']}}",
+            "--pair",
             "{{$.inputs.parameters['pair']}}",
+            "--timeframe",
             "{{$.inputs.parameters['timeframe']}}",
+            "--n-trials",
             "{{$.inputs.parameters['n_trials']}}",
-            "{{$.outputs.parameters['best_params_path'].output_file}}"
+            "--best-params-path-output",
+            "{{$.outputs.parameters['best_params_path'].output_file}}",
+            "--optimization-metrics-output",
+            "{{$.outputs.artifacts['optimization_metrics'].path}}"
+          ],
+          "command": [
+            "python",
+            "-m",
+            "src.components.hyperparam_tuning.task"
           ],
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }
       },
       "exec-prepare-optimization-data": {
         "container": {
-          "command": [
-            "sh",
-            "-c",
-            "python -m src.components.data_preparation.task \\\n  --pair \"$0\" \\\n  --timeframe \"$1\" \\\n  --years-to-keep \"$2\" \\\n  --cleanup \"$3\" \\\n  | tee \"$4\"\n",
+          "args": [
+            "--pair",
             "{{$.inputs.parameters['pair']}}",
+            "--timeframe",
             "{{$.inputs.parameters['timeframe']}}",
+            "--years-to-keep",
             "{{$.inputs.parameters['years_to_keep']}}",
+            "--cleanup",
             "{{$.inputs.parameters['cleanup_old_versions']}}",
+            "--prepared-data-path-output",
             "{{$.outputs.parameters['prepared_data_path'].output_file}}"
+          ],
+          "command": [
+            "python",
+            "-m",
+            "src.components.data_preparation.task"
           ],
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }
       },
       "exec-prepare-reinforcement-learning-data": {
         "container": {
-          "command": [
-            "sh",
-            "-c",
-            "python -m src.components.prepare_rl_data.task \\\n  --lstm-model-dir \"$0\" \\\n  --pair \"$1\" \\\n  --timeframe \"$2\" \\\n  --output-gcs-base-dir \"$3\" \\\n  | tee \"$4\"\n",
+          "args": [
+            "--lstm-model-dir",
             "{{$.inputs.parameters['lstm_model_dir']}}",
+            "--pair",
             "{{$.inputs.parameters['pair']}}",
+            "--timeframe",
             "{{$.inputs.parameters['timeframe']}}",
+            "--output-gcs-base-dir",
             "{{$.inputs.parameters['output_gcs_base_dir']}}",
+            "--rl-data-path-output",
             "{{$.outputs.parameters['rl_data_path'].output_file}}"
+          ],
+          "command": [
+            "python",
+            "-m",
+            "src.components.prepare_rl_data.task"
           ],
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }
       },
       "exec-train-reinforcement-learning-agent-ppo": {
         "container": {
-          "command": [
-            "sh",
-            "-c",
-            "python -m src.components.train_rl.task \\\n  --params-path \"$0\" \\\n  --rl-data-path \"$1\" \\\n  --pair \"$2\" \\\n  --timeframe \"$3\" \\\n  --output-gcs-base-dir \"$4\" \\\n  --tensorboard-logs-base-dir \"$5\" \\\n  | tee \"$6\"\n",
+          "args": [
+            "--params-path",
             "{{$.inputs.parameters['params_path']}}",
+            "--rl-data-path",
             "{{$.inputs.parameters['rl_data_path']}}",
+            "--pair",
             "{{$.inputs.parameters['pair']}}",
+            "--timeframe",
             "{{$.inputs.parameters['timeframe']}}",
+            "--output-gcs-base-dir",
             "{{$.inputs.parameters['output_gcs_base_dir']}}",
+            "--tensorboard-logs-base-dir",
             "{{$.inputs.parameters['tensorboard_logs_base_dir']}}",
+            "--trained-rl-model-path-output",
             "{{$.outputs.parameters['trained_rl_model_path'].output_file}}"
+          ],
+          "command": [
+            "python",
+            "-m",
+            "src.components.train_rl.task"
           ],
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }
