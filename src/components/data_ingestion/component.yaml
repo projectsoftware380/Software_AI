@@ -34,39 +34,34 @@ outputs:
     type: String
     description: 'A message indicating the result of the ingestion task.'
 
-# Define cómo se ejecuta el componente.
+# ===== IMPLEMENTACIÓN CORREGIDA Y SIMPLIFICADA =====
 implementation:
   container:
     # La imagen Docker que contiene todas las dependencias y el código fuente.
-    # Esta URI se importa desde src/shared/constants.py en la pipeline principal.
     image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
     
-    # El comando para ejecutar la tarea. Se usa 'sh -c' para ejecutar un script de shell.
+    # Se invoca el script de python directamente.
     command:
-      - sh
-      - -c
-      # El '|' indica que lo siguiente es un script de varias líneas.
-      # Primero, se ejecuta la tarea de Python. Si termina con éxito (exit code 0),
-      # el operador '&&' permite que se ejecute el comando 'echo'.
-      # La salida de 'echo' se redirige (>) al archivo de salida de KFP.
-      - |
-        python -m src.components.data_ingestion.task \
-          --pair "$0" \
-          --timeframe "$1" \
-          --project-id "$2" \
-          --polygon-secret-name "$3" \
-          --start-date "$4" \
-          --end-date "$5" \
-          --min-rows "$6" && \
-        echo "Data ingestion completed successfully for pair $0 and timeframe $1" > "$7"
+      - python
+      - -m
+      - src.components.data_ingestion.task
     
-    # Los argumentos ahora se pasan como argumentos posicionales ($0, $1, $2, etc.) al script de shell.
+    # Se pasan los argumentos al script de python, incluyendo el nuevo.
     args:
+      - --pair
       - {inputValue: pair}
+      - --timeframe
       - {inputValue: timeframe}
+      - --project-id
       - {inputValue: project_id}
+      - --polygon-secret-name
       - {inputValue: polygon_secret_name}
+      - --start-date
       - {inputValue: start_date}
+      - --end-date
       - {inputValue: end_date}
+      - --min-rows
       - {inputValue: min_rows}
+      # Se pasa la ruta de salida al argumento '--completion-message-path' del script.
+      - --completion-message-path
       - {outputPath: completion_message}

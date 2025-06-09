@@ -160,6 +160,7 @@ def run_ingestion(
             logger.info(f"No existía un Parquet previo en {parquet_uri}. Se creará uno nuevo.")
 
         # 3. Descargar datos por ventanas
+        # ===== CORRECCIÓN DE 'tf' a 'timeframe' =====
         logger.info(f"📥 Descargando {pair} | {timeframe} | {start_date} → {end_date}")
         all_dfs: List[pd.DataFrame] = []
         win_start = dt.date.fromisoformat(start_date)
@@ -243,6 +244,14 @@ if __name__ == "__main__":
     parser.add_argument("--start-date", default="2010-01-01")
     parser.add_argument("--end-date", default=dt.date.today().isoformat())
     parser.add_argument("--min-rows", type=int, default=100_000)
+
+    # ===== CORRECCIÓN: AÑADIR ARGUMENTO PARA RUTA DE SALIDA =====
+    parser.add_argument(
+        "--completion-message-path",
+        type=Path,
+        required=True,
+        help="Ruta de archivo donde se escribirá el mensaje de salida."
+    )
     
     args = parser.parse_args()
 
@@ -257,5 +266,15 @@ if __name__ == "__main__":
         min_rows=args.min_rows,
     )
 
-    if not success:
-        sys.exit(1)
+    # ===== CORRECCIÓN: LÓGICA PARA ESCRIBIR ARCHIVO DE SALIDA =====
+    # Asegurarse de que el directorio padre del archivo de salida exista
+    args.completion_message_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    if success:
+        message = f"Data ingestion completed successfully for pair {args.pair} and timeframe {args.timeframe}"
+        args.completion_message_path.write_text(message)
+        sys.exit(0) # Salir con código 0 (éxito)
+    else:
+        message = f"Data ingestion FAILED for pair {args.pair} and timeframe {args.timeframe}"
+        args.completion_message_path.write_text(message)
+        sys.exit(1) # Salir con código 1 (error)
