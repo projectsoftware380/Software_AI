@@ -1,31 +1,18 @@
-# src/components/model_promotion/component.yaml
-name: Decide Model Promotion
-description: Evaluates backtest metrics against production metrics and promotion thresholds. If the new model is approved, it copies its artifacts to the production GCS directory.
+name: model-promotion
+description: |
+  Decide si el nuevo modelo (LSTM + PPO) debe promoverse a producción
+  comparando métricas de back-test con el modelo actual.
 
 inputs:
-  - name: new_metrics_dir
-    type: String
-    description: 'The GCS path to the directory containing the new candidate model''s metrics.json.'
-  - name: new_lstm_artifacts_dir
-    type: String
-    description: 'The GCS path to the directory of the new LSTM model to be promoted.'
-  - name: new_rl_model_path
-    type: String
-    description: 'The GCS path to the new RL model .zip file to be promoted.'
-  - name: pair
-    type: String
-    description: 'The trading pair being evaluated.'
-  - name: timeframe
-    type: String
-    description: 'The timeframe of the model being evaluated.'
-  - name: production_base_dir
-    type: String
-    description: 'The base GCS directory for all production models.'
+  - {name: new_metrics_dir,        type: String}
+  - {name: new_lstm_artifacts_dir, type: String}
+  - {name: new_rl_model_path,      type: String}
+  - {name: pair,                   type: String}
+  - {name: timeframe,              type: String}
+  - {name: production_base_dir,    type: String}
 
 outputs:
-  - name: model_promoted
-    type: Boolean
-    description: 'A boolean value indicating if the model was promoted to production (true) or not (false).'
+  - {name: model_promoted,         type: String, description: "true/false"}
 
 implementation:
   container:
@@ -47,5 +34,5 @@ implementation:
       - {inputValue: timeframe}
       - --production-base-dir
       - {inputValue: production_base_dir}
-      - --model-promoted-output
-      - {outputPath: model_promoted}
+    fileOutputs:
+      model_promoted: /tmp/model_promoted.txt

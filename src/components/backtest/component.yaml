@@ -1,31 +1,18 @@
-# src/components/backtest/component.yaml
-name: Execute Full Backtesting
-description: Runs a full backtest comparing the base (LSTM) and filtered (LSTM+PPO) strategies on unseen data and generates performance metrics.
+name: backtest-strategy
+description: >
+  Ejecuta el backtest combinando las predicciones del LSTM y el filtro PPO.
+  Sube los CSV de trades y un JSON con métricas a GCS.
 
 inputs:
-  - name: lstm_model_dir
-    type: String
-    description: 'The GCS path to the versioned directory of the trained LSTM model.'
-  - name: rl_model_path
-    type: String
-    description: 'The GCS path to the trained PPO model .zip file.'
-  - name: features_path
-    type: String
-    description: 'The GCS path to the unseen features Parquet file for backtesting.'
-  - name: pair
-    type: String
-    description: 'The trading pair being backtested.'
-  - name: timeframe
-    type: String
-    description: 'The timeframe of the data being backtested.'
+  - {name: lstm_model_dir,   type: String,  description: "gs://…/…/…/LSTM/<timestamp>"}
+  - {name: rl_model_path,    type: String,  description: "gs://…/ppo_filter_model.zip"}
+  - {name: features_path,    type: String,  description: "gs://…_unseen.parquet"}
+  - {name: pair,             type: String}
+  - {name: timeframe,        type: String}
 
 outputs:
-  - name: output_gcs_dir
-    type: String
-    description: 'The GCS path to the versioned directory containing all backtest results (CSVs, JSON).'
-  - name: backtest_metrics
-    type: Metrics
-    description: 'A KFP Metrics artifact for visualizing key performance indicators in the Vertex AI UI.'
+  - {name: output_gcs_dir,        type: String, description: "Carpeta GCS con CSV + metrics"}
+  - {name: kfp_metrics_artifact,  type: String, description: "Ruta al JSON de métricas para Vertex UI"}
 
 implementation:
   container:
@@ -45,7 +32,6 @@ implementation:
       - {inputValue: pair}
       - --timeframe
       - {inputValue: timeframe}
-      - --kfp-metrics-output
-      - {outputPath: backtest_metrics}
-      - --output-gcs-dir-output
-      - {outputPath: output_gcs_dir}
+    fileOutputs:
+      output_gcs_dir: /tmp/backtest_dir.txt
+      kfp_metrics_artifact: /tmp/kfp_metrics.json

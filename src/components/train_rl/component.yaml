@@ -1,31 +1,16 @@
-# src/components/train_rl/component.yaml
-name: Train Reinforcement Learning Agent (PPO)
-description: Trains a PPO agent from stable-baselines3 to act as a filter for the LSTM model's trading signals.
+name: train-rl-agent
+description: Entrena un agente PPO para filtrar las señales del LSTM.
 
 inputs:
-  - name: params_path
-    type: String
-    description: 'The GCS path to the best_params.json file, which contains the PPO hyperparameters.'
-  - name: rl_data_path
-    type: String
-    description: 'The GCS path to the .npz file containing the observations and raw signals for RL training.'
-  - name: pair
-    type: String
-    description: 'The trading pair for which the agent is being trained.'
-  - name: timeframe
-    type: String
-    description: 'The timeframe for which the agent is being trained.'
-  - name: output_gcs_base_dir
-    type: String
-    description: 'Base GCS directory where the trained RL model (.zip) will be saved in a versioned folder.'
-  - name: tensorboard_logs_base_dir
-    type: String
-    description: 'Base GCS directory for saving TensorBoard logs.'
+  - {name: params_path,                type: String}
+  - {name: rl_data_path,               type: String}
+  - {name: pair,                       type: String}
+  - {name: timeframe,                  type: String}
+  - {name: output_gcs_base_dir,        type: String}
+  - {name: tensorboard_logs_base_dir,  type: String}
 
 outputs:
-  - name: trained_rl_model_path
-    type: String
-    description: 'The full GCS path to the trained and saved PPO model .zip file.'
+  - {name: trained_rl_model_path,      type: String}
 
 implementation:
   container:
@@ -47,5 +32,5 @@ implementation:
       - {inputValue: output_gcs_base_dir}
       - --tensorboard-logs-base-dir
       - {inputValue: tensorboard_logs_base_dir}
-      - --trained-rl-model-path-output
-      - {outputPath: trained_rl_model_path}
+    fileOutputs:
+      trained_rl_model_path: /tmp/trained_rl_model.txt

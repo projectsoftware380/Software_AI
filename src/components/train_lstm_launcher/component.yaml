@@ -1,49 +1,22 @@
 # src/components/train_lstm_launcher/component.yaml
-name: Launch Vertex AI LSTM Training Job
-description: Submits and monitors a Vertex AI Custom Job to train the final LSTM model on dedicated hardware. This component itself runs on a standard KFP node.
+name: launch-vertex-ai-lstm-training-job
+description: Ejecuta y monitoriza un CustomJob en Vertex AI que entrena el modelo LSTM.
 
 inputs:
-  - name: project_id
-    type: String
-    description: 'The GCP Project ID.'
-  - name: region
-    type: String
-    description: 'The GCP region for the Vertex AI Custom Job, e.g., us-central1.'
-  - name: pair
-    type: String
-    description: 'The trading pair for which the model is being trained.'
-  - name: timeframe
-    type: String
-    description: 'The timeframe for which the model is being trained.'
-  - name: params_path
-    type: String
-    description: 'GCS path to the best_params.json file from the optimization step.'
-  - name: output_gcs_base_dir
-    type: String
-    description: 'Base GCS directory where the training job will save its versioned artifacts.'
-  - name: vertex_training_image_uri
-    type: String
-    description: 'The URI of the Docker container image to use for the training job (the "runner" image).'
-  - name: vertex_machine_type
-    type: String
-    description: 'The machine type for the Vertex AI training job, e.g., n1-standard-4.'
-    default: 'n1-standard-4'
-  - name: vertex_accelerator_type
-    type: String
-    description: 'The type of GPU accelerator for the training job.'
-    default: 'ACCELERATOR_TYPE_UNSPECIFIED'
-  - name: vertex_accelerator_count
-    type: Integer
-    description: 'The number of GPUs to attach to the training job.'
-    default: 0
-  - name: vertex_service_account
-    type: String
-    description: 'The service account email for the training job to run as.'
+  - {name: project_id,              type: String,  description: ID del proyecto GCP}
+  - {name: region,                  type: String,  description: Región, p.ej. us-central1}
+  - {name: pair,                    type: String}
+  - {name: timeframe,               type: String}
+  - {name: params_path,             type: String,  description: GCS URI a best_params.json}
+  - {name: output_gcs_base_dir,     type: String}
+  - {name: vertex_training_image_uri, type: String}
+  - {name: vertex_machine_type,     type: String,  default: n1-standard-4}
+  - {name: vertex_accelerator_type, type: String,  default: ACCELERATOR_TYPE_UNSPECIFIED}
+  - {name: vertex_accelerator_count,type: Integer, default: 0}
+  - {name: vertex_service_account,  type: String}
 
 outputs:
-  - name: trained_lstm_dir_path
-    type: String
-    description: 'The full GCS path to the newly created, versioned directory containing the trained model, scaler, and params.'
+  - {name: trained_lstm_dir_path,   type: String,  description: GCS URI del directorio con artefactos}
 
 implementation:
   container:
@@ -75,5 +48,6 @@ implementation:
       - {inputValue: vertex_accelerator_count}
       - --vertex-service-account
       - {inputValue: vertex_service_account}
-      - --trained-lstm-dir-path-output
-      - {outputPath: trained_lstm_dir_path}
+    # El script escribe la ruta final en /tmp/trained_dir.txt
+    fileOutputs:
+      trained_lstm_dir_path: /tmp/trained_dir.txt
