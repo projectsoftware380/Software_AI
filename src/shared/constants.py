@@ -55,7 +55,7 @@ KFP_COMPONENTS_IMAGE_URI = (
 
 # Imagen "runner" para el entrenamiento del modelo LSTM en un Vertex AI Custom Job.
 VERTEX_LSTM_TRAINER_IMAGE_URI = (
-    f"us-central1-docker.pkg.dev/{PROJECT_ID}/trading-images/runner-lstm:latest"
+    f"europe-west1-docker.pkg.dev/{PROJECT_ID}/data-ingestion-repo/runner-lstm:latest"
 )
 
 # --- Configuración de Máquinas y Aceleradores para Vertex AI ---
