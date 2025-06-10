@@ -59,16 +59,16 @@ component_op_factory = {
     pipeline_root=constants.PIPELINE_ROOT,
 )
 def trading_pipeline(
+    # === AJUSTE CORREGIDO: El argumento sin valor por defecto va PRIMERO ===
+    common_image_uri: str,
+    # =======================================================================
     pair: str = constants.DEFAULT_PAIR,
     timeframe: str = constants.DEFAULT_TIMEFRAME,
     n_trials: int = constants.DEFAULT_N_TRIALS,
     backtest_features_gcs_path: str = f"{constants.DATA_PATH}/{constants.DEFAULT_PAIR}/{constants.DEFAULT_TIMEFRAME}/{constants.DEFAULT_PAIR}_{constants.DEFAULT_TIMEFRAME}_unseen.parquet",
     vertex_machine_type: str = constants.DEFAULT_VERTEX_LSTM_MACHINE_TYPE,
     vertex_accelerator_type: str = constants.DEFAULT_VERTEX_LSTM_ACCELERATOR_TYPE,
-    vertex_accelerator_count: int = constants.DEFAULT_VERTEX_LSTM_ACCELERATOR_COUNT,
-    # === AJUSTE CORREGIDO: Se declara el parámetro sin valor por defecto ===
-    common_image_uri: str
-    # =======================================================================
+    vertex_accelerator_count: int = constants.DEFAULT_VERTEX_LSTM_ACCELERATOR_COUNT
 ):
     # 1. Ingestión de Datos
     ingest_task = component_op_factory["data_ingestion"](
@@ -80,8 +80,6 @@ def trading_pipeline(
         end_date=datetime.now().strftime("%Y-%m-%d"),
         min_rows=100000,
     )
-    # Forzar la imagen para este componente. Es una buena práctica si no estás
-    # seguro de que el YAML del componente tenga la imagen correcta.
     ingest_task.container.set_image(common_image_uri)
 
     # 2. Preparación de Datos para Optimización
@@ -90,7 +88,6 @@ def trading_pipeline(
         timeframe=timeframe,
     ).after(ingest_task)
     prepare_opt_data_task.container.set_image(common_image_uri)
-
 
     # 3. Optimización de Hiperparámetros
     tuning_task = component_op_factory["hyperparam_tuning"](
@@ -109,14 +106,12 @@ def trading_pipeline(
         timeframe=timeframe,
         params_path=tuning_task.outputs["best_params_path"],
         output_gcs_base_dir=constants.LSTM_MODELS_PATH,
-        vertex_training_image_uri=common_image_uri, # Se pasa el parámetro dinámico
+        vertex_training_image_uri=common_image_uri,
         vertex_machine_type=vertex_machine_type,
         vertex_accelerator_type=vertex_accelerator_type,
         vertex_accelerator_count=vertex_accelerator_count,
         vertex_service_account=constants.VERTEX_LSTM_SERVICE_ACCOUNT,
     )
-    # Este componente lanza otro job, así que no se le establece la imagen a él,
-    # sino que se le pasa la URI para que él la use.
 
     # 5. Preparar Datos para el Agente RL
     prepare_rl_data_task = component_op_factory["prepare_rl_data"](
