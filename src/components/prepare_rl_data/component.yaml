@@ -3,6 +3,11 @@ name: Prepare Reinforcement Learning Data
 description: Takes the trained LSTM model artifacts to generate predictions and embeddings, creating the final dataset for the RL agent training.
 
 inputs:
+  # === AJUSTE: Se añade la URI de la imagen como un parámetro de entrada ===
+  - name: image_uri
+    type: String
+    description: 'URI de la imagen Docker a utilizar para ejecutar el componente.'
+  # =======================================================================
   - name: lstm_model_dir
     type: String
     description: 'The GCS path to the versioned directory containing the trained LSTM model, scaler, and params.'
@@ -23,7 +28,9 @@ outputs:
 
 implementation:
   container:
-    image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
+    # === AJUSTE: La imagen ahora es dinámica y viene de los inputs ===
+    image: {inputValue: image_uri}
+    # ================================================================
     command:
       - python
       - -m

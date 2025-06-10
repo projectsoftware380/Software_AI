@@ -18,8 +18,14 @@ inputs:
   description: "GCS URI al best_params.json"
 - name: output_gcs_base_dir
   type: String
+
+# === ESTE ES EL MOTIVO POR EL QUE ESTÁ BIEN ===
+# Ya tiene un input para recibir la URI de la imagen.
+# El pipeline le pasa la URI a este componente a través de este parámetro.
 - name: vertex_training_image_uri
   type: String
+# ============================================
+
 - name: vertex_machine_type
   type: String
   default: n1-standard-4
@@ -38,6 +44,11 @@ outputs:
 
 implementation:
   container:
+    # Este componente es un "lanzador". La imagen que se define aquí
+    # es la que ejecuta el SCRIPT LANZADOR (`task.py`), no el script
+    # de entrenamiento en sí. El script lanzador, a su vez, usa el
+    # input 'vertex_training_image_uri' para decirle a Vertex AI qué
+    # imagen usar para el job de entrenamiento real.
     image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
     command:
     - python
@@ -57,7 +68,7 @@ implementation:
     - --output-gcs-base-dir
     - {inputValue: output_gcs_base_dir}
     - --vertex-training-image-uri
-    - {inputValue: vertex_training_image_uri}
+    - {inputValue: vertex_training_image_uri} # <--- Lo usa correctamente
     - --vertex-machine-type
     - {inputValue: vertex_machine_type}
     - --vertex-accelerator-type

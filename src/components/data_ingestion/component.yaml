@@ -3,6 +3,11 @@ name: Ingest Market Data
 description: Fetches and updates raw OHLC market data from Polygon.io and stores it in GCS as a Parquet file.
 
 inputs:
+  # === AJUSTE: Se añade la URI de la imagen como un parámetro de entrada ===
+  - name: image_uri
+    type: String
+    description: 'URI de la imagen Docker a utilizar para ejecutar el componente.'
+  # =======================================================================
   - name: pair
     type: String
     description: 'The trading pair to ingest, e.g., EURUSD.'
@@ -34,7 +39,9 @@ outputs:
 
 implementation:
   container:
-    image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
+    # === AJUSTE: La imagen ahora es dinámica y viene de los inputs ===
+    image: {inputValue: image_uri}
+    # ================================================================
     command:
       - python
       - -m

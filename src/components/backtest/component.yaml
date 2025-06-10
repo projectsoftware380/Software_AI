@@ -1,9 +1,15 @@
+# src/components/backtest/component.yaml
 name: backtest-strategy
 description: >
   Ejecuta el backtest combinando las predicciones del LSTM y el filtro PPO.
   Sube los CSV de trades y un JSON con métricas a GCS.
 
 inputs:
+  # === AJUSTE: Se añade la URI de la imagen como un parámetro de entrada ===
+  - name: image_uri
+    type: String
+    description: 'URI de la imagen Docker a utilizar para ejecutar el componente.'
+  # =======================================================================
   - {name: lstm_model_dir,   type: String,  description: "gs://…/…/…/LSTM/<timestamp>"}
   - {name: rl_model_path,    type: String,  description: "gs://…/ppo_filter_model.zip"}
   - {name: features_path,    type: String,  description: "gs://…_unseen.parquet"}
@@ -16,7 +22,9 @@ outputs:
 
 implementation:
   container:
-    image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
+    # === AJUSTE: La imagen ahora es dinámica y viene de los inputs ===
+    image: {inputValue: image_uri}
+    # ================================================================
     command:
       - python
       - -m

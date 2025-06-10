@@ -3,6 +3,11 @@ name: Optimize LSTM Hyperparameters
 description: Uses Optuna to search for the best hyperparameters for the LSTM model, including trading logic and feature engineering parameters.
 
 inputs:
+  # === AJUSTE: Se añade la URI de la imagen como un parámetro de entrada ===
+  - name: image_uri
+    type: String
+    description: 'URI de la imagen Docker a utilizar para ejecutar el componente.'
+  # =======================================================================
   - name: features_path
     type: String
     description: 'The GCS path to the Parquet file prepared for optimization.'
@@ -31,7 +36,9 @@ outputs:
 
 implementation:
   container:
-    image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
+    # === AJUSTE: La imagen ahora es dinámica y viene de los inputs ===
+    image: {inputValue: image_uri}
+    # ================================================================
     command:
       - python
       - -m

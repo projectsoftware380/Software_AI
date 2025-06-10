@@ -4,6 +4,11 @@ description: |
   comparando métricas de back-test con el modelo actual.
 
 inputs:
+  # === AJUSTE: Se añade la URI de la imagen como un parámetro de entrada ===
+  - name: image_uri
+    type: String
+    description: 'URI de la imagen Docker a utilizar para ejecutar el componente.'
+  # =======================================================================
   - {name: new_metrics_dir,        type: String}
   - {name: new_lstm_artifacts_dir, type: String}
   - {name: new_rl_model_path,      type: String}
@@ -16,7 +21,9 @@ outputs:
 
 implementation:
   container:
-    image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
+    # === AJUSTE: La imagen ahora es dinámica y viene de los inputs ===
+    image: {inputValue: image_uri}
+    # ================================================================
     command:
       - python
       - -m
