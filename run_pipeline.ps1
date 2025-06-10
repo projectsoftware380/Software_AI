@@ -33,7 +33,10 @@ if ($LASTEXITCODE -ne 0) {
 
 # --- 4. Ejecutar la Pipeline Pasando la URI como Parámetro ---
 Write-Host "Paso 4: Lanzando la pipeline de Vertex AI..."
-python -m src.pipeline.main --image_uri $ImageUri
+
+# === AJUSTE CORREGIDO: Se cambia '--image_uri' por '--common-image-uri' ===
+python -m src.pipeline.main --common-image-uri $ImageUri
+# =========================================================================
 
 # Verificación final
 if ($LASTEXITCODE -eq 0) {
