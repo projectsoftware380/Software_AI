@@ -38,9 +38,11 @@ component_op_factory = {
     "model_promotion": load_component_from_file(COMPONENTS_DIR / "model_promotion/component.yaml"),
 }
 
-for name, component_op in component_op_factory.items():
-    if name != "train_lstm_launcher":
-        component_op.component_spec.implementation.container.image = args.common_image_uri
+# --- AJUSTE CLAVE: Se elimina la condición 'if'. Ahora TODOS los componentes
+# usan la misma imagen actualizada que se pasa como argumento. ---
+for component_op in component_op_factory.values():
+    component_op.component_spec.implementation.container.image = args.common_image_uri
+# --------------------------------------------------------------------
 
 
 # --- Definición de la Pipeline ---
@@ -81,7 +83,8 @@ def trading_pipeline(
         n_trials=n_trials,
     )
     
-    # --- AJUSTE CLAVE: Pasar la salida de datos al lanzador ---
+    # El lanzador ahora usa la imagen correcta, y a su vez lanza un Custom Job
+    # que también usa la misma imagen correcta.
     train_lstm_task = component_op_factory["train_lstm_launcher"](
         vertex_training_image_uri=args.common_image_uri,
         project_id=constants.PROJECT_ID,
@@ -96,7 +99,6 @@ def trading_pipeline(
         vertex_accelerator_count=vertex_accelerator_count,
         vertex_service_account=constants.VERTEX_LSTM_SERVICE_ACCOUNT,
     )
-    # ---------------------------------------------------------
 
     prepare_rl_data_task = component_op_factory["prepare_rl_data"](
         lstm_model_dir=train_lstm_task.outputs["trained_lstm_dir_path"],
