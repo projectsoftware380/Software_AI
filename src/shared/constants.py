@@ -2,7 +2,6 @@
 Fuente única de configuración para todo el proyecto:
 – IDs y regiones de GCP
 – rutas de GCS
-– URIs de imágenes Docker
 – defaults de Vertex AI
 """
 
@@ -39,14 +38,17 @@ LSTM_MODELS_PATH      = f"{MODELS_PATH}/LSTM_v3"
 RL_MODELS_PATH        = f"{MODELS_PATH}/RL_v3"
 PRODUCTION_MODELS_PATH = f"{MODELS_PATH}/production_v3"
 
-# ──────────────────── DOCKER IMAGE URIs ────────────────────
-# Imagen única para TODOS los componentes (ingesta + entrenamiento)
-COMMON_IMAGE_URI = (
-    f"europe-west1-docker.pkg.dev/{PROJECT_ID}/data-ingestion-repo/data-ingestion-agent:latest"
-)
-
-KFP_COMPONENTS_IMAGE_URI   = COMMON_IMAGE_URI
-VERTEX_LSTM_TRAINER_IMAGE_URI = COMMON_IMAGE_URI
+# ==============================================================================
+# === AJUSTE CLAVE: Se elimina la URI completa y específica de la imagen. ===
+# El script `run_pipeline.ps1` y `main.py` ahora se encargan de construir
+# y pasar la URI completa y versionada dinámicamente.
+#
+# Ya no necesitamos una constante para la URI de la imagen aquí.
+# Si necesitaras las partes base para construir la URI en otro lugar,
+# podrías definirlas así:
+DOCKER_REPO_NAME: str = "data-ingestion-repo"
+DOCKER_IMAGE_NAME: str = "data-ingestion-agent"
+# ==============================================================================
 
 # ──────────────────── VERTEX AI DEFAULTS ───────────────────
 DEFAULT_VERTEX_LSTM_MACHINE_TYPE     = "n1-standard-4"
