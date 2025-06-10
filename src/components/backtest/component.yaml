@@ -5,11 +5,6 @@ description: >
   Sube los CSV de trades y un JSON con métricas a GCS.
 
 inputs:
-  # === AJUSTE: Se añade la URI de la imagen como un parámetro de entrada ===
-  - name: image_uri
-    type: String
-    description: 'URI de la imagen Docker a utilizar para ejecutar el componente.'
-  # =======================================================================
   - {name: lstm_model_dir,   type: String,  description: "gs://…/…/…/LSTM/<timestamp>"}
   - {name: rl_model_path,    type: String,  description: "gs://…/ppo_filter_model.zip"}
   - {name: features_path,    type: String,  description: "gs://…_unseen.parquet"}
@@ -22,9 +17,10 @@ outputs:
 
 implementation:
   container:
-    # === AJUSTE: La imagen ahora es dinámica y viene de los inputs ===
-    image: {inputValue: image_uri}
-    # ================================================================
+    # === AJUSTE: Se revierte a la imagen estática original ===
+    # La sobreescritura se hará en el script de la pipeline (main.py)
+    image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
+    # =========================================================
     command:
       - python
       - -m
