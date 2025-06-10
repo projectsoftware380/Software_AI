@@ -1,4 +1,6 @@
-# src/pipeline/main.py
+# RUTA: src/pipeline/main.py
+# CÓDIGO CORREGIDO Y COMPLETO
+
 import argparse
 import os
 from datetime import datetime
@@ -12,7 +14,6 @@ import google.cloud.aiplatform as aip
 from src.shared import constants
 
 # --- Argument Parser ---
-# Se mueve aquí para que esté disponible globalmente en el script
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--common-image-uri",
@@ -37,14 +38,9 @@ component_op_factory = {
     "model_promotion": load_component_from_file(COMPONENTS_DIR / "model_promotion/component.yaml"),
 }
 
-# === AJUSTE CLAVE: Sobreescribir la imagen de cada componente cargado ===
-# Iteramos sobre todos los componentes que hemos cargado desde YAML.
 for name, component_op in component_op_factory.items():
-    # El lanzador es especial: su imagen es la del lanzador, no la del entrenamiento.
-    # El resto de componentes sí usan la misma imagen común.
     if name != "train_lstm_launcher":
         component_op.component_spec.implementation.container.image = args.common_image_uri
-# =======================================================================
 
 
 # --- Definición de la Pipeline ---
@@ -54,7 +50,6 @@ for name, component_op in component_op_factory.items():
     pipeline_root=constants.PIPELINE_ROOT,
 )
 def trading_pipeline(
-    # La pipeline ya no necesita recibir 'common_image_uri' porque los componentes ya están modificados
     pair: str = constants.DEFAULT_PAIR,
     timeframe: str = constants.DEFAULT_TIMEFRAME,
     n_trials: int = constants.DEFAULT_N_TRIALS,
@@ -63,7 +58,6 @@ def trading_pipeline(
     vertex_accelerator_type: str = constants.DEFAULT_VERTEX_LSTM_ACCELERATOR_TYPE,
     vertex_accelerator_count: int = constants.DEFAULT_VERTEX_LSTM_ACCELERATOR_COUNT
 ):
-    # Ahora las llamadas a los componentes son más limpias
     
     ingest_task = component_op_factory["data_ingestion"](
         pair=pair,
@@ -87,7 +81,7 @@ def trading_pipeline(
         n_trials=n_trials,
     )
     
-    # El lanzador recibe la URI para el job que va a crear
+    # --- AJUSTE CLAVE: Pasar la salida de datos al lanzador ---
     train_lstm_task = component_op_factory["train_lstm_launcher"](
         vertex_training_image_uri=args.common_image_uri,
         project_id=constants.PROJECT_ID,
@@ -95,14 +89,15 @@ def trading_pipeline(
         pair=pair,
         timeframe=timeframe,
         params_path=tuning_task.outputs["best_params_path"],
+        features_gcs_path=prepare_opt_data_task.outputs["prepared_data_path"],
         output_gcs_base_dir=constants.LSTM_MODELS_PATH,
         vertex_machine_type=vertex_machine_type,
         vertex_accelerator_type=vertex_accelerator_type,
         vertex_accelerator_count=vertex_accelerator_count,
         vertex_service_account=constants.VERTEX_LSTM_SERVICE_ACCOUNT,
     )
+    # ---------------------------------------------------------
 
-    # ... (El resto de las tareas de la pipeline siguen igual)
     prepare_rl_data_task = component_op_factory["prepare_rl_data"](
         lstm_model_dir=train_lstm_task.outputs["trained_lstm_dir_path"],
         pair=pair,
@@ -153,8 +148,6 @@ if __name__ == "__main__":
         
         job_display_name = f"algo-trading-v3-{constants.DEFAULT_PAIR}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
-        # Ya no necesitamos pasar 'common_image_uri' aquí, porque la pipeline ya no lo tiene como parámetro.
-        # Los componentes fueron modificados en memoria antes de la compilación.
         job = aip.PipelineJob(
             display_name=job_display_name,
             template_path=pipeline_filename,

@@ -1,5 +1,5 @@
 # RUTA: src/components/train_lstm/main.py
-# DESCRIPCIÓN: Versión corregida que acepta la ruta de datos como un argumento.
+# CÓDIGO CORREGIDO Y COMPLETO
 
 from __future__ import annotations
 
@@ -117,13 +117,12 @@ def train_final_model(
     pair: str,
     timeframe: str,
     params_path: str,
-    features_gcs_path: str,  # <-- AJUSTE: Recibe la ruta de datos
+    features_gcs_path: str, # AHORA SE RECIBE LA RUTA DE LOS DATOS
     output_gcs_base_dir: str,
 ):
     """Función principal que ejecuta el pipeline de entrenamiento."""
     setup_environment()
     
-    # 1. Cargar datos y parámetros
     local_dir = Path("/tmp/data")
     local_dir.mkdir(exist_ok=True)
     
@@ -140,7 +139,6 @@ def train_final_model(
     df_raw = pd.read_parquet(local_features_path).reset_index(drop=True)
     logger.info("Datos de características cargados desde '%s', shape: %s", features_gcs_path, df_raw.shape)
 
-    # 2. Preparar datos para el entrenamiento final
     tick = 0.01 if pair.endswith("JPY") else 0.0001
     atr_len = 14
     
@@ -177,7 +175,6 @@ def train_final_model(
     
     logger.info("Datos preprocesados y listos para entrenamiento, shape X: %s", X_seq.shape)
 
-    # 3. Construir y entrenar el modelo
     model_final = make_model(
         X_seq.shape[1:],
         best_params["lr"],
@@ -200,8 +197,7 @@ def train_final_model(
         callbacks=[es_final],
     )
     
-    # 4. Guardar artefactos en GCS
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") # Se usa un timestamp nuevo y limpio
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     final_output_gcs_path = f"{output_gcs_base_dir}/{pair}/{timeframe}/{ts}"
     local_artifact_dir = Path(f"/tmp/artifacts/{ts}")
     local_artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -222,16 +218,16 @@ if __name__ == "__main__":
     parser.add_argument("--output-gcs-base-dir", required=True, help="Directorio GCS base donde se guardarán los artefactos.")
     parser.add_argument("--pair", required=True)
     parser.add_argument("--timeframe", required=True)
-    # --- AJUSTE: Añadir el nuevo argumento para la ruta de datos ---
+    # --- AJUSTE CLAVE ---
     parser.add_argument("--features-gcs-path", required=True, help="Ruta GCS al archivo parquet de características.")
 
     args = parser.parse_args()
 
-    # --- AJUSTE: Pasar el nuevo argumento a la función ---
+    # --- AJUSTE CLAVE ---
     train_final_model(
         pair=args.pair,
         timeframe=args.timeframe,
         params_path=args.params,
-        features_gcs_path=args.features_gcs_path,
+        features_gcs_path=args.features_gcs_path, # Se pasa la ruta de datos
         output_gcs_base_dir=args.output_gcs_base_dir,
     )

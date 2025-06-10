@@ -75,6 +75,9 @@
       "executorLabel": "exec-launch-vertex-ai-lstm-training-job",
       "inputDefinitions": {
         "parameters": {
+          "features_gcs_path": {
+            "parameterType": "STRING"
+          },
           "output_gcs_base_dir": {
             "parameterType": "STRING"
           },
@@ -308,7 +311,7 @@
             "-m",
             "src.components.backtest.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250610-033207"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250610-124250"
         }
       },
       "exec-ingest-market-data": {
@@ -336,7 +339,7 @@
             "-m",
             "src.components.data_ingestion.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250610-033207"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250610-124250"
         }
       },
       "exec-launch-vertex-ai-lstm-training-job": {
@@ -352,6 +355,8 @@
             "{{$.inputs.parameters['timeframe']}}",
             "--params-path",
             "{{$.inputs.parameters['params_path']}}",
+            "--features-gcs-path",
+            "{{$.inputs.parameters['features_gcs_path']}}",
             "--output-gcs-base-dir",
             "{{$.inputs.parameters['output_gcs_base_dir']}}",
             "--vertex-training-image-uri",
@@ -394,7 +399,7 @@
             "-m",
             "src.components.model_promotion.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250610-033207"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250610-124250"
         }
       },
       "exec-optimize-lstm-hyperparameters": {
@@ -420,7 +425,7 @@
             "-m",
             "src.components.hyperparam_tuning.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250610-033207"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250610-124250"
         }
       },
       "exec-prepare-optimization-data": {
@@ -442,7 +447,7 @@
             "-m",
             "src.components.data_preparation.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250610-033207"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250610-124250"
         }
       },
       "exec-prepare-reinforcement-learning-data": {
@@ -464,7 +469,7 @@
             "-m",
             "src.components.prepare_rl_data.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250610-033207"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250610-124250"
         }
       },
       "exec-train-rl-agent": {
@@ -488,7 +493,7 @@
             "-m",
             "src.components.train_rl.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250610-033207"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250610-124250"
         }
       }
     }
@@ -606,10 +611,17 @@
             "name": "comp-launch-vertex-ai-lstm-training-job"
           },
           "dependentTasks": [
-            "optimize-lstm-hyperparameters"
+            "optimize-lstm-hyperparameters",
+            "prepare-optimization-data"
           ],
           "inputs": {
             "parameters": {
+              "features_gcs_path": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "prepared_data_path",
+                  "producerTask": "prepare-optimization-data"
+                }
+              },
               "output_gcs_base_dir": {
                 "runtimeValue": {
                   "constant": "gs://trading-ai-models-460823/models/LSTM_v3"
@@ -653,7 +665,7 @@
               },
               "vertex_training_image_uri": {
                 "runtimeValue": {
-                  "constant": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250610-033207"
+                  "constant": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250610-124250"
                 }
               }
             }
