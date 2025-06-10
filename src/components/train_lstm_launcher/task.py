@@ -86,7 +86,14 @@ def run_launcher(
             "replica_count": 1,
             "container_spec": {
                 "image_uri": vertex_training_image_uri,
-                "args": training_args,
+                # Se separa el comando de sus argumentos
+                "command": ["python", "-m", "src.components.train_lstm.main"],
+                "args": [
+                    "--params", params_path,
+                    "--output-gcs-base-dir", output_gcs_base_dir,
+                    "--pair", pair,
+                    "--timeframe", timeframe,
+                ],
             },
         }
     ]
