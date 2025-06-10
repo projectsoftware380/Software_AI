@@ -8,13 +8,19 @@ import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import List
+
 from google.cloud import aiplatform as gcp_aiplatform
 from google.cloud import storage as gcp_storage
 
 from src.shared import constants
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
 logger = logging.getLogger(__name__)
+
 
 def run_launcher(
     *,
@@ -23,7 +29,7 @@ def run_launcher(
     pair: str,
     timeframe: str,
     params_path: str,
-    features_gcs_path: str, # <-- AJUSTE CLAVE
+    features_gcs_path: str, # <-- AJUSTE CLAVE 1: La función ahora acepta este parámetro
     output_gcs_base_dir: str,
     vertex_training_image_uri: str,
     vertex_machine_type: str,
@@ -31,16 +37,22 @@ def run_launcher(
     vertex_accelerator_count: int,
     vertex_service_account: str,
 ) -> str:
-    gcp_aiplatform.init(project=project_id, location=region, staging_bucket=constants.STAGING_PATH)
+    """Envía el Custom Job y devuelve la carpeta GCS donde quedó el modelo."""
+
+    gcp_aiplatform.init(
+        project=project_id,
+        location=region,
+        staging_bucket=constants.STAGING_PATH,
+    )
     logger.info("Vertex AI inicializado · staging bucket: %s", constants.STAGING_PATH)
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     job_display_name = f"lstm-train-v3-{pair.lower()}-{timeframe.lower()}-{ts}"
 
-    # AJUSTE CLAVE: Añadir el nuevo argumento a la lista de args
-    container_args = [
+    # Se construye la lista de argumentos para pasarla al contenedor de entrenamiento
+    container_args: List[str] = [
         "--params", params_path,
-        "--features-gcs-path", features_gcs_path,
+        "--features-gcs-path", features_gcs_path, # <-- AJUSTE CLAVE 1: Se pasa el nuevo argumento
         "--output-gcs-base-dir", output_gcs_base_dir,
         "--pair", pair,
         "--timeframe", timeframe,
@@ -74,14 +86,22 @@ def run_launcher(
     )
 
     try:
-        custom_job.run(service_account=vertex_service_account, sync=True, timeout=3 * 60 * 60)
+        custom_job.run(
+            service_account=vertex_service_account,
+            sync=True,
+            timeout=3 * 60 * 60,
+        )
         logger.info("Custom Job %s completado ✔️", job_display_name)
     except Exception as err:
         logger.error("Custom Job %s falló: %s", job_display_name, err, exc_info=True)
         raise RuntimeError(f"Vertex AI Custom Job falló: {err}") from err
 
     bucket_name = constants.GCS_BUCKET_NAME
-    prefix = f"{output_gcs_base_dir.removeprefix(f'gs://{bucket_name}/')}/{pair}/{timeframe}/"
+    prefix = (
+        f"{output_gcs_base_dir.removeprefix(f'gs://{bucket_name}/')}"
+        f"/{pair}/{timeframe}/"
+    )
+
     storage_client = gcp_storage.Client(project=project_id)
     bucket = storage_client.bucket(bucket_name)
 
@@ -109,9 +129,9 @@ if __name__ == "__main__":
     parser.add_argument("--pair", required=True)
     parser.add_argument("--timeframe", required=True)
     parser.add_argument("--params-path", required=True)
-    # --- AJUSTE CLAVE: Añadir el nuevo argumento al parser ---
+    # --- AJUSTE CLAVE 2: Añadir el argumento al parser para que lo reconozca ---
     parser.add_argument("--features-gcs-path", required=True)
-    # ----------------------------------------------------
+    # --------------------------------------------------------------------------
     parser.add_argument("--output-gcs-base-dir", required=True)
     parser.add_argument("--vertex-training-image-uri", required=True)
     parser.add_argument("--vertex-machine-type", required=True)
@@ -120,14 +140,14 @@ if __name__ == "__main__":
     parser.add_argument("--vertex-service-account", required=True)
     cli = parser.parse_args()
 
-    # --- AJUSTE CLAVE: Pasar el nuevo argumento a la función ---
+    # --- AJUSTE CLAVE 2: Pasar el nuevo argumento a la función ---
     trained_dir = run_launcher(
         project_id=cli.project_id,
         region=cli.region,
         pair=cli.pair,
         timeframe=cli.timeframe,
         params_path=cli.params_path,
-        features_gcs_path=cli.features_gcs_path,
+        features_gcs_path=cli.features_gcs_path, # <-- Se pasa el valor
         output_gcs_base_dir=cli.output_gcs_base_dir,
         vertex_training_image_uri=cli.vertex_training_image_uri,
         vertex_machine_type=cli.vertex_machine_type,
@@ -135,7 +155,7 @@ if __name__ == "__main__":
         vertex_accelerator_count=cli.vertex_accelerator_count,
         vertex_service_account=cli.vertex_service_account,
     )
-    # ---------------------------------------------------
+    # -------------------------------------------------------------
 
     Path("/tmp/trained_dir.txt").write_text(trained_dir)
     print(f"Trained model artifacts directory: {trained_dir}")
