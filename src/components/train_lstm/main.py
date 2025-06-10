@@ -117,7 +117,7 @@ def train_final_model(
     pair: str,
     timeframe: str,
     params_path: str,
-    features_gcs_path: str, # AHORA SE RECIBE LA RUTA DE LOS DATOS
+    features_gcs_path: str,
     output_gcs_base_dir: str,
 ):
     """Función principal que ejecuta el pipeline de entrenamiento."""
@@ -126,14 +126,12 @@ def train_final_model(
     local_dir = Path("/tmp/data")
     local_dir.mkdir(exist_ok=True)
     
-    # Descargar hiperparámetros
     local_params_path = local_dir / "best_params.json"
     download_gcs_file(params_path, local_params_path)
     with open(local_params_path) as f:
         best_params = json.load(f)
-    logger.info("Hiperparámetros cargados: %s", json.dumps(best_params, indent=2))
+    logger.info("Hiperparámetros cargados.")
     
-    # Descargar datos de características usando la ruta recibida como argumento
     local_features_path = local_dir / Path(features_gcs_path).name
     download_gcs_file(features_gcs_path, local_features_path)
     df_raw = pd.read_parquet(local_features_path).reset_index(drop=True)
@@ -165,7 +163,12 @@ def train_final_model(
     
     mask_b = (~np.isnan(diff_b)) & (np.maximum(up_b, dn_b) >= 0)
     
-    X_raw_f = df_b.loc[mask_b, df_b.columns.difference([f"atr_{atr_len}"])]
+    # --- AJUSTE CLAVE: Excluir 'timestamp' junto con 'atr' ANTES de escalar ---
+    cols_to_exclude = [col for col in df_b.columns if 'atr_' in col] + ['timestamp']
+    feature_cols = df_b.columns.difference(cols_to_exclude)
+    X_raw_f = df_b.loc[mask_b, feature_cols]
+    # -------------------------------------------------------------------------
+    
     y_up_f = up_b[mask_b]
     y_dn_f = dn_b[mask_b]
     
@@ -218,16 +221,14 @@ if __name__ == "__main__":
     parser.add_argument("--output-gcs-base-dir", required=True, help="Directorio GCS base donde se guardarán los artefactos.")
     parser.add_argument("--pair", required=True)
     parser.add_argument("--timeframe", required=True)
-    # --- AJUSTE CLAVE ---
     parser.add_argument("--features-gcs-path", required=True, help="Ruta GCS al archivo parquet de características.")
 
     args = parser.parse_args()
 
-    # --- AJUSTE CLAVE ---
     train_final_model(
         pair=args.pair,
         timeframe=args.timeframe,
         params_path=args.params,
-        features_gcs_path=args.features_gcs_path, # Se pasa la ruta de datos
+        features_gcs_path=args.features_gcs_path,
         output_gcs_base_dir=args.output_gcs_base_dir,
     )
