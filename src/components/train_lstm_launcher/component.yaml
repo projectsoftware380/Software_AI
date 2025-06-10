@@ -1,53 +1,70 @@
 # src/components/train_lstm_launcher/component.yaml
 name: launch-vertex-ai-lstm-training-job
-description: Ejecuta y monitoriza un CustomJob en Vertex AI que entrena el modelo LSTM.
+description: Ejecuta un CustomJob en Vertex AI que entrena el modelo LSTM.
 
 inputs:
-  - {name: project_id,              type: String,  description: ID del proyecto GCP}
-  - {name: region,                  type: String,  description: Región, p.ej. us-central1}
-  - {name: pair,                    type: String}
-  - {name: timeframe,               type: String}
-  - {name: params_path,             type: String,  description: GCS URI a best_params.json}
-  - {name: output_gcs_base_dir,     type: String}
-  - {name: vertex_training_image_uri, type: String}
-  - {name: vertex_machine_type,     type: String,  default: n1-standard-4}
-  - {name: vertex_accelerator_type, type: String,  default: ACCELERATOR_TYPE_UNSPECIFIED}
-  - {name: vertex_accelerator_count,type: Integer, default: 0}
-  - {name: vertex_service_account,  type: String}
+- name: project_id
+  type: String
+  description: "ID del proyecto GCP"
+- name: region
+  type: String
+  description: "Región (por ejemplo, us-central1)"
+- name: pair
+  type: String
+- name: timeframe
+  type: String
+- name: params_path
+  type: String
+  description: "GCS URI al best_params.json"
+- name: output_gcs_base_dir
+  type: String
+- name: vertex_training_image_uri
+  type: String
+- name: vertex_machine_type
+  type: String
+  default: n1-standard-4
+- name: vertex_accelerator_type
+  type: String
+  default: ACCELERATOR_TYPE_UNSPECIFIED
+- name: vertex_accelerator_count
+  type: Integer
+  default: 0
+- name: vertex_service_account
+  type: String
 
 outputs:
-  - {name: trained_lstm_dir_path,   type: String,  description: GCS URI del directorio con artefactos}
+- name: trained_lstm_dir_path
+  type: String
 
 implementation:
   container:
     image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
     command:
-      - python
-      - -m
-      - src.components.train_lstm_launcher.task
+    - python
+    - -m
+    - src.components.train_lstm_launcher.task
     args:
-      - --project-id
-      - {inputValue: project_id}
-      - --region
-      - {inputValue: region}
-      - --pair
-      - {inputValue: pair}
-      - --timeframe
-      - {inputValue: timeframe}
-      - --params-path
-      - {inputValue: params_path}
-      - --output-gcs-base-dir
-      - {inputValue: output_gcs_base_dir}
-      - --vertex-training-image-uri
-      - {inputValue: vertex_training_image_uri}
-      - --vertex-machine-type
-      - {inputValue: vertex_machine_type}
-      - --vertex-accelerator-type
-      - {inputValue: vertex_accelerator_type}
-      - --vertex-accelerator-count
-      - {inputValue: vertex_accelerator_count}
-      - --vertex-service-account
-      - {inputValue: vertex_service_account}
-    # El script escribe la ruta final en /tmp/trained_dir.txt
+    - --project-id
+    - {inputValue: project_id}
+    - --region
+    - {inputValue: region}
+    - --pair
+    - {inputValue: pair}
+    - --timeframe
+    - {inputValue: timeframe}
+    - --params-path
+    - {inputValue: params_path}
+    - --output-gcs-base-dir
+    - {inputValue: output_gcs_base_dir}
+    - --vertex-training-image-uri
+    - {inputValue: vertex_training_image_uri}
+    - --vertex-machine-type
+    - {inputValue: vertex_machine_type}
+    - --vertex-accelerator-type
+    - {inputValue: vertex_accelerator_type}
+    - --vertex-accelerator-count
+    - {inputValue: vertex_accelerator_count}
+    - --vertex-service-account
+    - {inputValue: vertex_service_account}
     fileOutputs:
       trained_lstm_dir_path: /tmp/trained_dir.txt

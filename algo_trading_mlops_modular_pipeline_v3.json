@@ -1,39 +1,7 @@
 {
   "components": {
-    "comp-decide-model-promotion": {
-      "executorLabel": "exec-decide-model-promotion",
-      "inputDefinitions": {
-        "parameters": {
-          "new_lstm_artifacts_dir": {
-            "parameterType": "STRING"
-          },
-          "new_metrics_dir": {
-            "parameterType": "STRING"
-          },
-          "new_rl_model_path": {
-            "parameterType": "STRING"
-          },
-          "pair": {
-            "parameterType": "STRING"
-          },
-          "production_base_dir": {
-            "parameterType": "STRING"
-          },
-          "timeframe": {
-            "parameterType": "STRING"
-          }
-        }
-      },
-      "outputDefinitions": {
-        "parameters": {
-          "model_promoted": {
-            "parameterType": "BOOLEAN"
-          }
-        }
-      }
-    },
-    "comp-execute-full-backtesting": {
-      "executorLabel": "exec-execute-full-backtesting",
+    "comp-backtest-strategy": {
+      "executorLabel": "exec-backtest-strategy",
       "inputDefinitions": {
         "parameters": {
           "features_path": {
@@ -54,15 +22,10 @@
         }
       },
       "outputDefinitions": {
-        "artifacts": {
-          "backtest_metrics": {
-            "artifactType": {
-              "schemaTitle": "system.Metrics",
-              "schemaVersion": "0.0.1"
-            }
-          }
-        },
         "parameters": {
+          "kfp_metrics_artifact": {
+            "parameterType": "STRING"
+          },
           "output_gcs_dir": {
             "parameterType": "STRING"
           }
@@ -156,6 +119,38 @@
       "outputDefinitions": {
         "parameters": {
           "trained_lstm_dir_path": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    },
+    "comp-model-promotion": {
+      "executorLabel": "exec-model-promotion",
+      "inputDefinitions": {
+        "parameters": {
+          "new_lstm_artifacts_dir": {
+            "parameterType": "STRING"
+          },
+          "new_metrics_dir": {
+            "parameterType": "STRING"
+          },
+          "new_rl_model_path": {
+            "parameterType": "STRING"
+          },
+          "pair": {
+            "parameterType": "STRING"
+          },
+          "production_base_dir": {
+            "parameterType": "STRING"
+          },
+          "timeframe": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "parameters": {
+          "model_promoted": {
             "parameterType": "STRING"
           }
         }
@@ -258,8 +253,8 @@
         }
       }
     },
-    "comp-train-reinforcement-learning-agent-ppo": {
-      "executorLabel": "exec-train-reinforcement-learning-agent-ppo",
+    "comp-train-rl-agent": {
+      "executorLabel": "exec-train-rl-agent",
       "inputDefinitions": {
         "parameters": {
           "output_gcs_base_dir": {
@@ -294,33 +289,7 @@
   "defaultPipelineRoot": "gs://trading-ai-models-460823/pipeline_root_v3",
   "deploymentSpec": {
     "executors": {
-      "exec-decide-model-promotion": {
-        "container": {
-          "args": [
-            "--new-metrics-dir",
-            "{{$.inputs.parameters['new_metrics_dir']}}",
-            "--new-lstm-artifacts-dir",
-            "{{$.inputs.parameters['new_lstm_artifacts_dir']}}",
-            "--new-rl-model-path",
-            "{{$.inputs.parameters['new_rl_model_path']}}",
-            "--pair",
-            "{{$.inputs.parameters['pair']}}",
-            "--timeframe",
-            "{{$.inputs.parameters['timeframe']}}",
-            "--production-base-dir",
-            "{{$.inputs.parameters['production_base_dir']}}",
-            "--model-promoted-output",
-            "{{$.outputs.parameters['model_promoted'].output_file}}"
-          ],
-          "command": [
-            "python",
-            "-m",
-            "src.components.model_promotion.task"
-          ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
-        }
-      },
-      "exec-execute-full-backtesting": {
+      "exec-backtest-strategy": {
         "container": {
           "args": [
             "--lstm-model-dir",
@@ -332,11 +301,7 @@
             "--pair",
             "{{$.inputs.parameters['pair']}}",
             "--timeframe",
-            "{{$.inputs.parameters['timeframe']}}",
-            "--kfp-metrics-output",
-            "{{$.outputs.artifacts['backtest_metrics'].path}}",
-            "--output-gcs-dir-output",
-            "{{$.outputs.parameters['output_gcs_dir'].output_file}}"
+            "{{$.inputs.parameters['timeframe']}}"
           ],
           "command": [
             "python",
@@ -398,14 +363,36 @@
             "--vertex-accelerator-count",
             "{{$.inputs.parameters['vertex_accelerator_count']}}",
             "--vertex-service-account",
-            "{{$.inputs.parameters['vertex_service_account']}}",
-            "--trained-lstm-dir-path-output",
-            "{{$.outputs.parameters['trained_lstm_dir_path'].output_file}}"
+            "{{$.inputs.parameters['vertex_service_account']}}"
           ],
           "command": [
             "python",
             "-m",
             "src.components.train_lstm_launcher.task"
+          ],
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
+        }
+      },
+      "exec-model-promotion": {
+        "container": {
+          "args": [
+            "--new-metrics-dir",
+            "{{$.inputs.parameters['new_metrics_dir']}}",
+            "--new-lstm-artifacts-dir",
+            "{{$.inputs.parameters['new_lstm_artifacts_dir']}}",
+            "--new-rl-model-path",
+            "{{$.inputs.parameters['new_rl_model_path']}}",
+            "--pair",
+            "{{$.inputs.parameters['pair']}}",
+            "--timeframe",
+            "{{$.inputs.parameters['timeframe']}}",
+            "--production-base-dir",
+            "{{$.inputs.parameters['production_base_dir']}}"
+          ],
+          "command": [
+            "python",
+            "-m",
+            "src.components.model_promotion.task"
           ],
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }
@@ -480,7 +467,7 @@
           "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest"
         }
       },
-      "exec-train-reinforcement-learning-agent-ppo": {
+      "exec-train-rl-agent": {
         "container": {
           "args": [
             "--params-path",
@@ -494,9 +481,7 @@
             "--output-gcs-base-dir",
             "{{$.inputs.parameters['output_gcs_base_dir']}}",
             "--tensorboard-logs-base-dir",
-            "{{$.inputs.parameters['tensorboard_logs_base_dir']}}",
-            "--trained-rl-model-path-output",
-            "{{$.outputs.parameters['trained_rl_model_path'].output_file}}"
+            "{{$.inputs.parameters['tensorboard_logs_base_dir']}}"
           ],
           "command": [
             "python",
@@ -516,14 +501,6 @@
     "dag": {
       "outputs": {
         "artifacts": {
-          "execute-full-backtesting-backtest_metrics": {
-            "artifactSelectors": [
-              {
-                "outputArtifactKey": "backtest_metrics",
-                "producerSubtask": "execute-full-backtesting"
-              }
-            ]
-          },
           "optimize-lstm-hyperparameters-optimization_metrics": {
             "artifactSelectors": [
               {
@@ -535,65 +512,16 @@
         }
       },
       "tasks": {
-        "decide-model-promotion": {
+        "backtest-strategy": {
           "cachingOptions": {
             "enableCache": true
           },
           "componentRef": {
-            "name": "comp-decide-model-promotion"
-          },
-          "dependentTasks": [
-            "execute-full-backtesting",
-            "launch-vertex-ai-lstm-training-job",
-            "train-reinforcement-learning-agent-ppo"
-          ],
-          "inputs": {
-            "parameters": {
-              "new_lstm_artifacts_dir": {
-                "taskOutputParameter": {
-                  "outputParameterKey": "trained_lstm_dir_path",
-                  "producerTask": "launch-vertex-ai-lstm-training-job"
-                }
-              },
-              "new_metrics_dir": {
-                "taskOutputParameter": {
-                  "outputParameterKey": "output_gcs_dir",
-                  "producerTask": "execute-full-backtesting"
-                }
-              },
-              "new_rl_model_path": {
-                "taskOutputParameter": {
-                  "outputParameterKey": "trained_rl_model_path",
-                  "producerTask": "train-reinforcement-learning-agent-ppo"
-                }
-              },
-              "pair": {
-                "componentInputParameter": "pair"
-              },
-              "production_base_dir": {
-                "runtimeValue": {
-                  "constant": "gs://trading-ai-models-460823/models/production_v3"
-                }
-              },
-              "timeframe": {
-                "componentInputParameter": "timeframe"
-              }
-            }
-          },
-          "taskInfo": {
-            "name": "decide-model-promotion"
-          }
-        },
-        "execute-full-backtesting": {
-          "cachingOptions": {
-            "enableCache": true
-          },
-          "componentRef": {
-            "name": "comp-execute-full-backtesting"
+            "name": "comp-backtest-strategy"
           },
           "dependentTasks": [
             "launch-vertex-ai-lstm-training-job",
-            "train-reinforcement-learning-agent-ppo"
+            "train-rl-agent"
           ],
           "inputs": {
             "parameters": {
@@ -612,7 +540,7 @@
               "rl_model_path": {
                 "taskOutputParameter": {
                   "outputParameterKey": "trained_rl_model_path",
-                  "producerTask": "train-reinforcement-learning-agent-ppo"
+                  "producerTask": "train-rl-agent"
                 }
               },
               "timeframe": {
@@ -621,7 +549,7 @@
             }
           },
           "taskInfo": {
-            "name": "execute-full-backtesting"
+            "name": "backtest-strategy"
           }
         },
         "ingest-market-data": {
@@ -734,6 +662,55 @@
             "name": "launch-vertex-ai-lstm-training-job"
           }
         },
+        "model-promotion": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-model-promotion"
+          },
+          "dependentTasks": [
+            "backtest-strategy",
+            "launch-vertex-ai-lstm-training-job",
+            "train-rl-agent"
+          ],
+          "inputs": {
+            "parameters": {
+              "new_lstm_artifacts_dir": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "trained_lstm_dir_path",
+                  "producerTask": "launch-vertex-ai-lstm-training-job"
+                }
+              },
+              "new_metrics_dir": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "output_gcs_dir",
+                  "producerTask": "backtest-strategy"
+                }
+              },
+              "new_rl_model_path": {
+                "taskOutputParameter": {
+                  "outputParameterKey": "trained_rl_model_path",
+                  "producerTask": "train-rl-agent"
+                }
+              },
+              "pair": {
+                "componentInputParameter": "pair"
+              },
+              "production_base_dir": {
+                "runtimeValue": {
+                  "constant": "gs://trading-ai-models-460823/models/production_v3"
+                }
+              },
+              "timeframe": {
+                "componentInputParameter": "timeframe"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "model-promotion"
+          }
+        },
         "optimize-lstm-hyperparameters": {
           "cachingOptions": {
             "enableCache": true
@@ -826,12 +803,12 @@
             "name": "prepare-reinforcement-learning-data"
           }
         },
-        "train-reinforcement-learning-agent-ppo": {
+        "train-rl-agent": {
           "cachingOptions": {
             "enableCache": true
           },
           "componentRef": {
-            "name": "comp-train-reinforcement-learning-agent-ppo"
+            "name": "comp-train-rl-agent"
           },
           "dependentTasks": [
             "launch-vertex-ai-lstm-training-job",
@@ -875,7 +852,7 @@
             }
           },
           "taskInfo": {
-            "name": "train-reinforcement-learning-agent-ppo"
+            "name": "train-rl-agent"
           }
         }
       }
@@ -921,12 +898,6 @@
     },
     "outputDefinitions": {
       "artifacts": {
-        "execute-full-backtesting-backtest_metrics": {
-          "artifactType": {
-            "schemaTitle": "system.Metrics",
-            "schemaVersion": "0.0.1"
-          }
-        },
         "optimize-lstm-hyperparameters-optimization_metrics": {
           "artifactType": {
             "schemaTitle": "system.Metrics",
