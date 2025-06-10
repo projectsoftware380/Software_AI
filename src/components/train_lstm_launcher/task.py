@@ -29,7 +29,7 @@ def run_launcher(
     pair: str,
     timeframe: str,
     params_path: str,
-    features_gcs_path: str, # <-- AJUSTE CLAVE 1: La función ahora acepta este parámetro
+    features_gcs_path: str, # <-- AJUSTE 1: La función debe aceptar este parámetro
     output_gcs_base_dir: str,
     vertex_training_image_uri: str,
     vertex_machine_type: str,
@@ -49,10 +49,9 @@ def run_launcher(
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     job_display_name = f"lstm-train-v3-{pair.lower()}-{timeframe.lower()}-{ts}"
 
-    # Se construye la lista de argumentos para pasarla al contenedor de entrenamiento
     container_args: List[str] = [
         "--params", params_path,
-        "--features-gcs-path", features_gcs_path, # <-- AJUSTE CLAVE 1: Se pasa el nuevo argumento
+        "--features-gcs-path", features_gcs_path, # <-- Se pasa el nuevo argumento al job
         "--output-gcs-base-dir", output_gcs_base_dir,
         "--pair", pair,
         "--timeframe", timeframe,
@@ -129,7 +128,7 @@ if __name__ == "__main__":
     parser.add_argument("--pair", required=True)
     parser.add_argument("--timeframe", required=True)
     parser.add_argument("--params-path", required=True)
-    # --- AJUSTE CLAVE 2: Añadir el argumento al parser para que lo reconozca ---
+    # --- AJUSTE CLAVE 2: Asegurarse de que el parser reconozca el argumento ---
     parser.add_argument("--features-gcs-path", required=True)
     # --------------------------------------------------------------------------
     parser.add_argument("--output-gcs-base-dir", required=True)
@@ -140,7 +139,6 @@ if __name__ == "__main__":
     parser.add_argument("--vertex-service-account", required=True)
     cli = parser.parse_args()
 
-    # --- AJUSTE CLAVE 2: Pasar el nuevo argumento a la función ---
     trained_dir = run_launcher(
         project_id=cli.project_id,
         region=cli.region,
@@ -155,7 +153,6 @@ if __name__ == "__main__":
         vertex_accelerator_count=cli.vertex_accelerator_count,
         vertex_service_account=cli.vertex_service_account,
     )
-    # -------------------------------------------------------------
 
     Path("/tmp/trained_dir.txt").write_text(trained_dir)
     print(f"Trained model artifacts directory: {trained_dir}")
