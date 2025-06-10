@@ -1,25 +1,6 @@
-# src/components/train_lstm/main.py
-"""
-Tarea de entrenamiento del modelo LSTM para el pipeline de Vertex AI (v3).
+# RUTA: src/components/train_lstm/main.py
+# DESCRIPCIÓN: Versión corregida que acepta la ruta de datos como un argumento.
 
-Flujo de Operaciones:
-1.  **Recibe argumentos**: Acepta la ruta a los hiperparámetros optimizados,
-    la ubicación de los datos de entrada y el directorio base de salida en GCS.
-2.  **Configura el entorno**: Habilita la configuración de GPU, como el crecimiento
-    de memoria y la precisión mixta, para un rendimiento óptimo.
-3.  **Carga y preprocesa datos**:
-    - Descarga el archivo de características (features.parquet) desde GCS.
-    - Descarga el archivo de hiperparámetros (best_params.json) desde GCS.
-    - Construye los indicadores técnicos y las secuencias según los parámetros.
-    - Escala los datos usando un RobustScaler.
-4.  **Construye y entrena el modelo**:
-    - Crea la arquitectura del modelo LSTM + Atención según los hiperparámetros.
-    - Entrena el modelo con todos los datos disponibles.
-5.  **Guarda los artefactos**:
-    - Crea un subdirectorio único con timestamp en la ruta de salida de GCS.
-    - Sube el modelo entrenado (model.h5), el escalador (scaler.pkl) y una
-      copia de los parámetros usados (params.json) a este directorio.
-"""
 from __future__ import annotations
 
 import argparse
@@ -66,7 +47,7 @@ def setup_environment():
     else:
         logger.warning("No se detectó GPU; se usará CPU.")
 
-# --- Funciones de Preprocesamiento (adaptadas de tu referencia) ---
+# --- Funciones de Preprocesamiento ---
 def build_indicators(df, sma_len, rsi_len, macf, macs, stoch_len, atr_len):
     """Construye los indicadores técnicos sobre el DataFrame."""
     out = df.copy()
@@ -93,7 +74,7 @@ def to_sequences(mat, up, dn, win):
         np.asarray(y_dn, np.float32),
     )
 
-# --- Definición del Modelo (adaptado de tu referencia) ---
+# --- Definición del Modelo ---
 def make_model(inp_sh, lr, dr, filt, units, heads):
     """Crea y compila el modelo Keras."""
     inp = layers.Input(shape=inp_sh, dtype=tf.float32)
@@ -102,7 +83,7 @@ def make_model(inp_sh, lr, dr, filt, units, heads):
     x = layers.MultiHeadAttention(num_heads=heads, key_dim=units)(x, x)
     x = layers.GlobalAveragePooling1D()(x)
     x = layers.Dropout(dr)(x)
-    out = layers.Dense(2, dtype='float32')(x) # Salida para UP y DN
+    out = layers.Dense(2, dtype='float32')(x)
     model = models.Model(inp, out)
     model.compile(optimizer=tf.keras.optimizers.Adam(lr), loss="mae")
     return model
@@ -136,7 +117,7 @@ def train_final_model(
     pair: str,
     timeframe: str,
     params_path: str,
-    data_input_dir: str, # Directorio base para features
+    features_gcs_path: str,  # <-- AJUSTE: Recibe la ruta de datos
     output_gcs_base_dir: str,
 ):
     """Función principal que ejecuta el pipeline de entrenamiento."""
@@ -153,16 +134,15 @@ def train_final_model(
         best_params = json.load(f)
     logger.info("Hiperparámetros cargados: %s", json.dumps(best_params, indent=2))
     
-    # Descargar datos de características
-    features_gcs_path = f"{data_input_dir}/{pair}/{timeframe}/{pair}_{timeframe}_features.parquet"
-    local_features_path = local_dir / f"{pair}_{timeframe}_features.parquet"
+    # Descargar datos de características usando la ruta recibida como argumento
+    local_features_path = local_dir / Path(features_gcs_path).name
     download_gcs_file(features_gcs_path, local_features_path)
     df_raw = pd.read_parquet(local_features_path).reset_index(drop=True)
-    logger.info("Datos de características cargados, shape: %s", df_raw.shape)
+    logger.info("Datos de características cargados desde '%s', shape: %s", features_gcs_path, df_raw.shape)
 
     # 2. Preparar datos para el entrenamiento final
     tick = 0.01 if pair.endswith("JPY") else 0.0001
-    atr_len = 14 # Usaremos un valor fijo o podría venir de los parámetros
+    atr_len = 14
     
     df_b = build_indicators(
         df_raw,
@@ -179,7 +159,7 @@ def train_final_model(
     horiz = best_params["horizon"]
     
     fut_b = np.roll(clo_b, -horiz)
-    fut_b[-horiz:] = np.nan # El último tramo no tiene futuro
+    fut_b[-horiz:] = np.nan
     
     diff_b = (fut_b - clo_b) / tick
     up_b = np.maximum(diff_b, 0) / atr_b
@@ -187,12 +167,10 @@ def train_final_model(
     
     mask_b = (~np.isnan(diff_b)) & (np.maximum(up_b, dn_b) >= 0)
     
-    # Separar X e y
     X_raw_f = df_b.loc[mask_b, df_b.columns.difference([f"atr_{atr_len}"])]
     y_up_f = up_b[mask_b]
     y_dn_f = dn_b[mask_b]
     
-    # Escalar y crear secuencias
     scaler_final = RobustScaler()
     X_scaled = scaler_final.fit_transform(X_raw_f)
     X_seq, y_up_seq, y_dn_seq = to_sequences(X_scaled, y_up_f, y_dn_f, best_params["win"])
@@ -216,15 +194,14 @@ def train_final_model(
     model_final.fit(
         X_seq,
         np.vstack([y_up_seq, y_dn_seq]).T,
-        epochs=60,      # Podría venir de params
-        batch_size=128, # Podría venir de params
+        epochs=60,
+        batch_size=128,
         verbose=1,
         callbacks=[es_final],
     )
     
     # 4. Guardar artefactos en GCS
-    # Crear un directorio único para esta ejecución
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S") # Se usa un timestamp nuevo y limpio
     final_output_gcs_path = f"{output_gcs_base_dir}/{pair}/{timeframe}/{ts}"
     local_artifact_dir = Path(f"/tmp/artifacts/{ts}")
     local_artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -235,7 +212,6 @@ def train_final_model(
     with open(local_artifact_dir / "params.json", "w") as f:
         json.dump(best_params, f, indent=4)
     
-    # Subir el directorio de artefactos a GCS
     upload_local_directory_to_gcs(local_artifact_dir, final_output_gcs_path)
     logger.info("✅ Artefactos subidos exitosamente a: %s", final_output_gcs_path)
 
@@ -244,18 +220,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Entrenador de Modelo LSTM para Vertex AI")
     parser.add_argument("--params", required=True, help="Ruta GCS al archivo de hiperparámetros JSON.")
     parser.add_argument("--output-gcs-base-dir", required=True, help="Directorio GCS base donde se guardarán los artefactos.")
-    parser.add_argument("--pair", required=True, help="El par de divisas (ej. EURUSD).")
-    parser.add_argument("--timeframe", required=True, help="El marco de tiempo (ej. 15minute).")
-    
-    # Este argumento es implícito, lo construiremos a partir de la estructura del bucket
-    DATA_INPUT_DIR = "gs://trading-ai-models-460823/data/features"
+    parser.add_argument("--pair", required=True)
+    parser.add_argument("--timeframe", required=True)
+    # --- AJUSTE: Añadir el nuevo argumento para la ruta de datos ---
+    parser.add_argument("--features-gcs-path", required=True, help="Ruta GCS al archivo parquet de características.")
 
     args = parser.parse_args()
 
+    # --- AJUSTE: Pasar el nuevo argumento a la función ---
     train_final_model(
         pair=args.pair,
         timeframe=args.timeframe,
         params_path=args.params,
-        data_input_dir=DATA_INPUT_DIR,
+        features_gcs_path=args.features_gcs_path,
         output_gcs_base_dir=args.output_gcs_base_dir,
     )

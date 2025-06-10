@@ -1,14 +1,12 @@
-# src/components/train_lstm_launcher/component.yaml
+# RUTA: src/components/train_lstm_launcher/component.yaml
 name: launch-vertex-ai-lstm-training-job
 description: Ejecuta un CustomJob en Vertex AI que entrena el modelo LSTM.
 
 inputs:
 - name: project_id
   type: String
-  description: "ID del proyecto GCP"
 - name: region
   type: String
-  description: "Región (por ejemplo, us-central1)"
 - name: pair
   type: String
 - name: timeframe
@@ -16,11 +14,15 @@ inputs:
 - name: params_path
   type: String
   description: "GCS URI al best_params.json"
+# --- AJUSTE: Añadir nueva entrada para la ruta de los datos ---
+- name: features_gcs_path
+  type: String
+  description: "GCS URI al archivo parquet de características para el entrenamiento."
+# ------------------------------------------------------------
 - name: output_gcs_base_dir
   type: String
 - name: vertex_training_image_uri
   type: String
-  description: "URI de la imagen para el job de entrenamiento de Vertex AI"
 - name: vertex_machine_type
   type: String
   default: n1-standard-4
@@ -39,8 +41,6 @@ outputs:
 
 implementation:
   container:
-    # La imagen aquí es para el propio lanzador.
-    # Esta es correcta y puede ser estática.
     image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
     command:
     - python
@@ -57,10 +57,14 @@ implementation:
     - {inputValue: timeframe}
     - --params-path
     - {inputValue: params_path}
+    # --- AJUSTE: Añadir el argumento a la lista de args ---
+    - --features-gcs-path
+    - {inputValue: features_gcs_path}
+    # --------------------------------------------------
     - --output-gcs-base-dir
     - {inputValue: output_gcs_base_dir}
     - --vertex-training-image-uri
-    - {inputValue: vertex_training_image_uri} # <--- Recibe la URI dinámica aquí
+    - {inputValue: vertex_training_image_uri}
     - --vertex-machine-type
     - {inputValue: vertex_machine_type}
     - --vertex-accelerator-type
