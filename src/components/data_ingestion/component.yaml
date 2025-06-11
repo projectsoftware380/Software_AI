@@ -17,11 +17,11 @@ inputs:
     description: 'Name of the secret in Secret Manager containing the Polygon API key.'
   - name: start_date
     type: String
-    description: 'Start date for data fetching in yyyy-MM-dd format.'
+    description: 'Start date for data fetching in YYYY-MM-DD format.'
     default: '2010-01-01'
   - name: end_date
     type: String
-    description: 'End date for data fetching in yyyy-MM-dd format. Defaults to today.'
+    description: 'End date for data fetching in YYYY-MM-DD format. Defaults to today.'
   - name: min_rows
     type: Integer
     description: 'Minimum number of rows required for the download to be considered successful.'
@@ -34,10 +34,8 @@ outputs:
 
 implementation:
   container:
-    # === AJUSTE: Se revierte a la imagen estática original ===
-    # La sobreescritura se hará en el script de la pipeline (main.py)
-    image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
-    # =========================================================
+    # La clave 'image' se ha eliminado.
+    # Será inyectada en tiempo de ejecución por el script principal de la pipeline (src/pipeline/main.py).
     command:
       - python
       - -m

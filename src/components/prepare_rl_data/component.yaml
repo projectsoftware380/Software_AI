@@ -23,10 +23,8 @@ outputs:
 
 implementation:
   container:
-    # === AJUSTE: Se revierte a la imagen estática original ===
-    # La sobreescritura se hará en el script de la pipeline (main.py)
-    image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
-    # =========================================================
+    # La clave 'image' se ha eliminado.
+    # Será inyectada en tiempo de ejecución por el script principal de la pipeline (src/pipeline/main.py).
     command:
       - python
       - -m
