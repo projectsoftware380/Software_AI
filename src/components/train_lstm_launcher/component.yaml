@@ -18,11 +18,9 @@ inputs:
 - name: params_path
   type: String
   description: "GCS URI al best_params.json"
-# --- AJUSTE CLAVE: Añadir nueva entrada para la ruta de los datos ---
 - name: features_gcs_path
   type: String
   description: "GCS URI al archivo parquet de características para el entrenamiento."
-# -----------------------------------------------------------------
 - name: output_gcs_base_dir
   type: String
 - name: vertex_training_image_uri
@@ -46,8 +44,11 @@ outputs:
 
 implementation:
   container:
-    # La clave 'image' se ha eliminado.
-    # Será inyectada en tiempo de ejecución por el script principal de la pipeline (src/pipeline/main.py).
+    # +++ INICIO DE LA CORRECCIÓN +++
+    # Se añade un placeholder para que KFP pueda cargar el componente.
+    # El script de la pipeline (main.py) lo sobreescribirá con la imagen real.
+    image: placeholder-image
+    # +++ FIN DE LA CORRECCIÓN +++
     command:
     - python
     - -m
@@ -63,10 +64,8 @@ implementation:
     - {inputValue: timeframe}
     - --params-path
     - {inputValue: params_path}
-    # --- AJUSTE CLAVE: Añadir el argumento a la lista ---
     - --features-gcs-path
     - {inputValue: features_gcs_path}
-    # ----------------------------------------------------
     - --output-gcs-base-dir
     - {inputValue: output_gcs_base_dir}
     - --vertex-training-image-uri

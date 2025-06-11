@@ -25,8 +25,9 @@ outputs:
 
 implementation:
   container:
-    # La clave 'image' se ha eliminado.
-    # Será inyectada en tiempo de ejecución por el script principal de la pipeline (src/pipeline/main.py).
+    # Se añade un placeholder para que KFP pueda cargar el componente.
+    # El script de la pipeline (main.py) lo sobreescribirá con la imagen real.
+    image: placeholder-image
     command:
       - python
       - -m
