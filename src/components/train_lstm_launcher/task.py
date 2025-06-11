@@ -1,23 +1,23 @@
 # RUTA: src/components/train_lstm_launcher/task.py
-# CÓDIGO CORREGIDO Y COMPLETO
+# DESCRIPCIÓN: Lanza un Vertex AI Custom Job para entrenar el modelo LSTM y
+#              devuelve en un archivo la carpeta GCS donde se guardaron
+#              los artefactos entrenados, para que KFP la encadene.
 
 from __future__ import annotations
 
 import argparse
 import logging
-import time
+import os
+import sys
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import List
 
-from google.cloud import aiplatform as gcp_aiplatform
-from google.cloud import storage as gcp_storage
+from google.cloud import aiplatform as aip
 
-from src.shared import constants
-
+# ――― Configuración de logging ――― #
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
+    stream=sys.stdout,
 )
 logger = logging.getLogger(__name__)
 
@@ -29,130 +29,101 @@ def run_launcher(
     pair: str,
     timeframe: str,
     params_path: str,
-    features_gcs_path: str, # <-- AJUSTE 1: La función debe aceptar este parámetro
+    features_gcs_path: str,
     output_gcs_base_dir: str,
     vertex_training_image_uri: str,
     vertex_machine_type: str,
     vertex_accelerator_type: str,
     vertex_accelerator_count: int,
     vertex_service_account: str,
-) -> str:
-    """Envía el Custom Job y devuelve la carpeta GCS donde quedó el modelo."""
+    trained_lstm_dir_path_output: str,  # archivo de salida que KFP crea
+) -> None:
+    """Crea y ejecuta un Custom Job; escribe la ruta resultante en el
+    archivo que KFP indica mediante --trained-lstm-dir-path-output."""
 
-    gcp_aiplatform.init(
-        project=project_id,
-        location=region,
-        staging_bucket=constants.STAGING_PATH,
-    )
-    logger.info("Vertex AI inicializado · staging bucket: %s", constants.STAGING_PATH)
+    aip.init(project=project_id, location=region)
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    job_display_name = f"lstm-train-v3-{pair.lower()}-{timeframe.lower()}-{ts}"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    job_display_name = f"train-lstm-{pair.lower()}-{timeframe.lower()}-{timestamp}"
+    logger.info(f"⏳ Lanzando CustomJob: {job_display_name}")
 
-    container_args: List[str] = [
-        "--params", params_path,
-        "--features-gcs-path", features_gcs_path, # <-- Se pasa el nuevo argumento al job
-        "--output-gcs-base-dir", output_gcs_base_dir,
-        "--pair", pair,
-        "--timeframe", timeframe,
-    ]
+    # Ruta donde el job grabará modelos y métricas
+    output_dir = os.path.join(output_gcs_base_dir, job_display_name)
 
     worker_pool_specs = [
         {
-            "machine_spec": {"machine_type": vertex_machine_type},
+            "machine_spec": {
+                "machine_type": vertex_machine_type,
+                "accelerator_type": vertex_accelerator_type,
+                "accelerator_count": vertex_accelerator_count,
+            },
             "replica_count": 1,
             "container_spec": {
                 "image_uri": vertex_training_image_uri,
                 "command": ["python", "-m", "src.components.train_lstm.main"],
-                "args": container_args,
+                "args": [
+                    f"--pair={pair}",
+                    f"--timeframe={timeframe}",
+                    f"--params-path={params_path}",
+                    f"--features-gcs-path={features_gcs_path}",
+                    f"--output-gcs-dir={output_dir}",
+                ],
             },
         }
     ]
 
-    if vertex_accelerator_count > 0 and vertex_accelerator_type != "ACCELERATOR_TYPE_UNSPECIFIED":
-        spec = worker_pool_specs[0]["machine_spec"]
-        spec["accelerator_type"] = vertex_accelerator_type
-        spec["accelerator_count"] = vertex_accelerator_count
-        logger.info("Añadiendo GPU %s × %d", vertex_accelerator_type, vertex_accelerator_count)
-
-    logger.info("Enviando Custom Job: %s con args: %s", job_display_name, container_args)
-
-    custom_job = gcp_aiplatform.CustomJob(
+    job = aip.CustomJob(
         display_name=job_display_name,
+        worker_pool_specs=worker_pool_specs,
         project=project_id,
         location=region,
-        worker_pool_specs=worker_pool_specs,
+        base_output_dir=output_gcs_base_dir,
     )
 
-    try:
-        custom_job.run(
-            service_account=vertex_service_account,
-            sync=True,
-            timeout=3 * 60 * 60,
-        )
-        logger.info("Custom Job %s completado ✔️", job_display_name)
-    except Exception as err:
-        logger.error("Custom Job %s falló: %s", job_display_name, err, exc_info=True)
-        raise RuntimeError(f"Vertex AI Custom Job falló: {err}") from err
+    job.run(service_account=vertex_service_account, sync=True)
+    logger.info(f"🏁 Estado final del CustomJob: {job.state}")
 
-    bucket_name = constants.GCS_BUCKET_NAME
-    prefix = (
-        f"{output_gcs_base_dir.removeprefix(f'gs://{bucket_name}/')}"
-        f"/{pair}/{timeframe}/"
-    )
+    if job.state != aip.JobState.JOB_STATE_SUCCEEDED:
+        logger.error("El entrenamiento falló - revisa la consola de Vertex AI.")
+        sys.exit(1)
 
-    storage_client = gcp_storage.Client(project=project_id)
-    bucket = storage_client.bucket(bucket_name)
-
-    time.sleep(10)
-
-    candidate_dirs: list[str] = []
-    for page in bucket.list_blobs(prefix=prefix, delimiter="/").pages:
-        for dir_prefix in getattr(page, "prefixes", []):
-            blob = bucket.blob(f"{dir_prefix.rstrip('/')}/model.h5")
-            if blob.exists():
-                candidate_dirs.append(f"gs://{bucket_name}/{dir_prefix.rstrip('/')}")
-
-    if not candidate_dirs:
-        raise TimeoutError(f"No se encontró model.h5 en gs://{bucket_name}/{prefix}")
-
-    latest_model_dir = max(candidate_dirs)
-    logger.info("Modelo encontrado en: %s", latest_model_dir)
-    return latest_model_dir
+    # ――― Escribir la salida para KFP ――― #
+    logger.info(f"🔗 Guardando ruta del modelo entrenado: {output_dir}")
+    with open(trained_lstm_dir_path_output, "w") as f:
+        f.write(output_dir)
+    logger.info("✅ Ruta escrita correctamente")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser("Launcher Vertex AI LSTM Trainer")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--project-id", required=True)
     parser.add_argument("--region", required=True)
     parser.add_argument("--pair", required=True)
     parser.add_argument("--timeframe", required=True)
     parser.add_argument("--params-path", required=True)
-    # --- AJUSTE CLAVE 2: Asegurarse de que el parser reconozca el argumento ---
     parser.add_argument("--features-gcs-path", required=True)
-    # --------------------------------------------------------------------------
     parser.add_argument("--output-gcs-base-dir", required=True)
     parser.add_argument("--vertex-training-image-uri", required=True)
     parser.add_argument("--vertex-machine-type", required=True)
     parser.add_argument("--vertex-accelerator-type", required=True)
     parser.add_argument("--vertex-accelerator-count", type=int, required=True)
     parser.add_argument("--vertex-service-account", required=True)
-    cli = parser.parse_args()
+    # ← argumento que KFP rellena automáticamente con un archivo temporal
+    parser.add_argument("--trained-lstm-dir-path-output", required=True)
 
-    trained_dir = run_launcher(
-        project_id=cli.project_id,
-        region=cli.region,
-        pair=cli.pair,
-        timeframe=cli.timeframe,
-        params_path=cli.params_path,
-        features_gcs_path=cli.features_gcs_path, # <-- Se pasa el valor
-        output_gcs_base_dir=cli.output_gcs_base_dir,
-        vertex_training_image_uri=cli.vertex_training_image_uri,
-        vertex_machine_type=cli.vertex_machine_type,
-        vertex_accelerator_type=cli.vertex_accelerator_type,
-        vertex_accelerator_count=cli.vertex_accelerator_count,
-        vertex_service_account=cli.vertex_service_account,
+    args = parser.parse_args()
+    run_launcher(
+        project_id=args.project_id,
+        region=args.region,
+        pair=args.pair,
+        timeframe=args.timeframe,
+        params_path=args.params_path,
+        features_gcs_path=args.features_gcs_path,
+        output_gcs_base_dir=args.output_gcs_base_dir,
+        vertex_training_image_uri=args.vertex_training_image_uri,
+        vertex_machine_type=args.vertex_machine_type,
+        vertex_accelerator_type=args.vertex_accelerator_type,
+        vertex_accelerator_count=args.vertex_accelerator_count,
+        vertex_service_account=args.vertex_service_account,
+        trained_lstm_dir_path_output=args.trained_lstm_dir_path_output,
     )
-
-    Path("/tmp/trained_dir.txt").write_text(trained_dir)
-    print(f"Trained model artifacts directory: {trained_dir}")

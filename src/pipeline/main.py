@@ -1,31 +1,27 @@
 # RUTA: src/pipeline/main.py
-# CÓDIGO CORREGIDO Y COMPLETO
+# Compila y lanza la pipeline modular con la nueva salida del componente LSTM Launcher.
 
 import argparse
 import os
 from datetime import datetime
 from pathlib import Path
 
-from kfp import compiler
-from kfp.dsl import pipeline
-from kfp.components import load_component_from_file
 import google.cloud.aiplatform as aip
+from kfp import compiler
+from kfp.components import load_component_from_file
+from kfp.dsl import pipeline
 
 from src.shared import constants
 
-# --- Argument Parser ---
+# ――― CLI para inyectar una única imagen Docker común ――― #
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--common-image-uri",
-    type=str,
     required=True,
-    help="La URI completa de la imagen Docker a usar en los componentes."
+    help="URI completa de la imagen Docker que se usará en TODOS los componentes",
 )
-# Usamos parse_known_args para que no interfiera con los argumentos de KFP
 args, _ = parser.parse_known_args()
 
-
-# --- Carga de Componentes ---
 COMPONENTS_DIR = Path(__file__).parent.parent / "components"
 
 component_op_factory = {
@@ -39,23 +35,26 @@ component_op_factory = {
     "model_promotion": load_component_from_file(COMPONENTS_DIR / "model_promotion/component.yaml"),
 }
 
-for component_op in component_op_factory.values():
-    component_op.component_spec.implementation.container.image = args.common_image_uri
+# Todas las imágenes se sustituyen por la suministrada vía CLI
+for op in component_op_factory.values():
+    op.component_spec.implementation.container.image = args.common_image_uri
 
-
-# --- Definición de la Pipeline ---
+# ――― Definición de la pipeline ――― #
 @pipeline(
     name="algo-trading-mlops-modular-pipeline-v3",
-    description="KFP v3 Pipeline modular para entrenar y desplegar modelos de trading algorítmico.",
+    description="Pipeline v3: ingestión → HPO → LSTM → RL → backtest → promoción",
     pipeline_root=constants.PIPELINE_ROOT,
 )
 def trading_pipeline(
     pair: str = constants.DEFAULT_PAIR,
     timeframe: str = constants.DEFAULT_TIMEFRAME,
     n_trials: int = constants.DEFAULT_N_TRIALS,
-    backtest_features_gcs_path: str = f"{constants.DATA_PATH}/{constants.DEFAULT_PAIR}/{constants.DEFAULT_TIMEFRAME}/{constants.DEFAULT_PAIR}_{constants.DEFAULT_TIMEFRAME}_unseen.parquet"
+    backtest_features_gcs_path: str = (
+        f"{constants.DATA_PATH}/{constants.DEFAULT_PAIR}/{constants.DEFAULT_TIMEFRAME}/"
+        f"{constants.DEFAULT_PAIR}_{constants.DEFAULT_TIMEFRAME}_unseen.parquet"
+    ),
 ):
-
+    # 1) Ingestión -------------------------------------------------------------
     ingest_task = component_op_factory["data_ingestion"](
         pair=pair,
         timeframe=timeframe,
@@ -63,31 +62,28 @@ def trading_pipeline(
         polygon_secret_name=constants.POLYGON_API_KEY_SECRET_NAME,
         start_date="2010-01-01",
         end_date=datetime.now().strftime("%Y-%m-%d"),
-        min_rows=100000,
+        min_rows=100_000,
     )
 
+    # 2) Preparar datos para HPO ----------------------------------------------
     prepare_opt_data_task = component_op_factory["data_preparation"](
         pair=pair,
         timeframe=timeframe,
     ).after(ingest_task)
 
+    # 3) Optuna HPO ------------------------------------------------------------
     tuning_task = component_op_factory["hyperparam_tuning"](
         features_path=prepare_opt_data_task.outputs["prepared_data_path"],
         pair=pair,
         timeframe=timeframe,
         n_trials=n_trials,
     )
-
-    # +++ INICIO DE LA MODIFICACIÓN: Asignación de Recursos a la Tarea de HPO +++
-    # Se especifica la CPU y Memoria de la máquina n1-standard-8
-    tuning_task.set_cpu_limit('8')
-    tuning_task.set_memory_limit('30G')
-    # Se usan los métodos correctos para especificar la cantidad y el tipo de GPU
+    # Recursos explícitos para el tuning
+    tuning_task.set_cpu_limit("8").set_memory_limit("30G")
     tuning_task.set_gpu_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT)
     tuning_task.set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE)
-    # +++ FIN DE LA MODIFICACIÓN +++
 
-
+    # 4) Launcher que crea el Custom Job de entrenamiento LSTM -----------------
     train_lstm_task = component_op_factory["train_lstm_launcher"](
         vertex_training_image_uri=args.common_image_uri,
         project_id=constants.PROJECT_ID,
@@ -103,6 +99,7 @@ def trading_pipeline(
         vertex_service_account=constants.VERTEX_LSTM_SERVICE_ACCOUNT,
     )
 
+    # 5) Preparar datos para RL ------------------------------------------------
     prepare_rl_data_task = component_op_factory["prepare_rl_data"](
         lstm_model_dir=train_lstm_task.outputs["trained_lstm_dir_path"],
         pair=pair,
@@ -110,6 +107,7 @@ def trading_pipeline(
         output_gcs_base_dir=constants.RL_DATA_INPUTS_PATH,
     )
 
+    # 6) Entrenar agente RL ----------------------------------------------------
     train_rl_task = component_op_factory["train_rl"](
         params_path=f"{train_lstm_task.outputs['trained_lstm_dir_path']}/params.json",
         rl_data_path=prepare_rl_data_task.outputs["rl_data_path"],
@@ -119,6 +117,7 @@ def trading_pipeline(
         tensorboard_logs_base_dir=constants.TENSORBOARD_LOGS_PATH,
     )
 
+    # 7) Backtest --------------------------------------------------------------
     backtest_task = component_op_factory["backtest"](
         lstm_model_dir=train_lstm_task.outputs["trained_lstm_dir_path"],
         rl_model_path=train_rl_task.outputs["trained_rl_model_path"],
@@ -127,7 +126,8 @@ def trading_pipeline(
         timeframe=timeframe,
     )
 
-    promotion_task = component_op_factory["model_promotion"](
+    # 8) Promoción de modelos --------------------------------------------------
+    component_op_factory["model_promotion"](
         new_metrics_dir=backtest_task.outputs["output_gcs_dir"],
         new_lstm_artifacts_dir=train_lstm_task.outputs["trained_lstm_dir_path"],
         new_rl_model_path=train_rl_task.outputs["trained_rl_model_path"],
@@ -136,35 +136,27 @@ def trading_pipeline(
         production_base_dir=constants.PRODUCTION_MODELS_PATH,
     )
 
-# --- Compilación y Ejecución de la Pipeline ---
+# ――― Compilación y envío opcional ――― #
 if __name__ == "__main__":
-    pipeline_filename = "algo_trading_mlops_modular_pipeline_v3.json"
+    PIPELINE_JSON = "algo_trading_mlops_modular_pipeline_v3.json"
 
-    compiler.Compiler().compile(
-        pipeline_func=trading_pipeline,
-        package_path=pipeline_filename
-    )
-    print(f"✅ Pipeline compilada a {pipeline_filename}")
+    compiler.Compiler().compile(trading_pipeline, PIPELINE_JSON)
+    print(f"✅ Pipeline compilada a {PIPELINE_JSON}")
 
-    SUBMIT_TO_VERTEX = os.getenv("SUBMIT_PIPELINE_TO_VERTEX", "true").lower() == "true"
-    if SUBMIT_TO_VERTEX:
-        print("\n🚀 Iniciando sumisión y ejecución de la pipeline en Vertex AI...")
+    if os.getenv("SUBMIT_PIPELINE_TO_VERTEX", "true").lower() == "true":
         aip.init(project=constants.PROJECT_ID, location=constants.REGION)
-
-        job_display_name = f"algo-trading-v3-{constants.DEFAULT_PAIR}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-
+        display_name = f"algo-trading-v3-{constants.DEFAULT_PAIR}-{datetime.now():%Y%m%d-%H%M%S}"
         job = aip.PipelineJob(
-            display_name=job_display_name,
-            template_path=pipeline_filename,
+            display_name=display_name,
+            template_path=PIPELINE_JSON,
             pipeline_root=constants.PIPELINE_ROOT,
             enable_caching=False,
             parameter_values={
                 "pair": constants.DEFAULT_PAIR,
                 "timeframe": constants.DEFAULT_TIMEFRAME,
                 "n_trials": constants.DEFAULT_N_TRIALS,
-            }
+            },
         )
-
-        print(f"Enviando PipelineJob '{job_display_name}' con la imagen '{args.common_image_uri}'...")
+        print(f"🚀 Enviando PipelineJob '{display_name}'...")
         job.run()
-        print(f"✅ PipelineJob enviado. Puedes verlo en la consola de Vertex AI.")
+        print("📊 Revisa el progreso en Vertex AI → Pipelines.")
