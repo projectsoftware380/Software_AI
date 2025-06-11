@@ -82,11 +82,9 @@ def trading_pipeline(
     # Se especifica la CPU y Memoria de la máquina n1-standard-8
     tuning_task.set_cpu_limit('8')
     tuning_task.set_memory_limit('30G')
-    # Se usa el método .set_accelerator() para asignar la GPU
-    tuning_task.set_accelerator(
-        accelerator_type=constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE,
-        accelerator_count=constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT
-    )
+    # Se usan los métodos correctos para especificar la cantidad y el tipo de GPU
+    tuning_task.set_gpu_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT)
+    tuning_task.set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE)
     # +++ FIN DE LA MODIFICACIÓN +++
 
 
