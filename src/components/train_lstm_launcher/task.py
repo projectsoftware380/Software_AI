@@ -1,3 +1,4 @@
+# src/components/train_lstm_launcher/task.py
 """
 Lanza un Custom Job de Vertex AI para entrenar el modelo LSTM y escribe en disco
 la ruta donde quedaron los artefactos. *Necesita Python 3.8+*
@@ -20,10 +21,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ——— CONSTANTE DE STAGING BUCKET ——————————————————————————————
+# ——— BUCKET DE STAGING (obligatorio para Vertex AI CustomJob) ————
 STAGING_BUCKET = "gs://trading-ai-models-460823/staging_for_custom_jobs"
 
 
+# ───────────────────────── función principal ─────────────────────────
 def run_launcher(
     *,
     project_id: str,
@@ -40,17 +42,21 @@ def run_launcher(
     vertex_service_account: str,
     trained_lstm_dir_path_output: str,
 ) -> None:
-    """Ejecuta el CustomJob y guarda la ruta de salida en el archivo que
-    Kubeflow Pipelines indica mediante `--trained-lstm-dir-path-output`."""
+    """
+    Ejecuta el CustomJob y guarda la ruta de salida en el archivo que
+    Kubeflow Pipelines indica mediante `--trained-lstm-dir-path-output`.
+    """
 
+    # Inicializa Vertex AI (sin staging aquí porque lo pasamos al constructor)
     aip.init(project=project_id, location=region)
 
+    # Nombre legible y carpeta de salida
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     job_display_name = f"train-lstm-{pair.lower()}-{timeframe.lower()}-{ts}"
+    output_dir = os.path.join(output_gcs_base_dir, job_display_name)
     logger.info("⏳ Creando CustomJob %s", job_display_name)
 
-    output_dir = os.path.join(output_gcs_base_dir, job_display_name)
-
+    # Definición del worker
     worker_pool_specs = [
         {
             "machine_spec": {
@@ -73,15 +79,17 @@ def run_launcher(
         }
     ]
 
+    # ——— CustomJob con staging_bucket ————————————————
     job = aip.CustomJob(
         display_name=job_display_name,
         worker_pool_specs=worker_pool_specs,
         base_output_dir=output_dir,
         project=project_id,
         location=region,
-        staging_bucket=STAGING_BUCKET,  # ✅ Ajuste aplicado aquí
+        staging_bucket=STAGING_BUCKET,  # ✅ FIX: bucket de staging
     )
 
+    # Ejecutar y esperar
     job.run(service_account=vertex_service_account, sync=True)
     logger.info("🏁 Estado final: %s", job.state.name)
 
@@ -95,6 +103,7 @@ def run_launcher(
         f.write(output_dir)
 
 
+# ──────────────────────────── CLI — Entrypoint ────────────────────────────
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--project-id", required=True)
