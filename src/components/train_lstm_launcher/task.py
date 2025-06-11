@@ -1,7 +1,6 @@
-# src/components/train_lstm_launcher/task.py
 """
-Lanza un Custom Job de Vertex AI para entrenar el modelo LSTM y escribe en disco
-la ruta donde quedaron los artefactos. *Necesita Python 3.8+*
+Lanza un Custom Job de Vertex AI para entrenar el modelo LSTM y
+escribe en disco la ruta de los artefactos.  *Necesita Python 3.8+*
 """
 from __future__ import annotations
 
@@ -21,9 +20,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ——— BUCKET DE STAGING (obligatorio para Vertex AI CustomJob) ————
+# ——— bucket de staging ————————————————————————————————
 STAGING_BUCKET = "gs://trading-ai-models-460823/staging_for_custom_jobs"
-
 
 # ───────────────────────── función principal ─────────────────────────
 def run_launcher(
@@ -42,21 +40,15 @@ def run_launcher(
     vertex_service_account: str,
     trained_lstm_dir_path_output: str,
 ) -> None:
-    """
-    Ejecuta el CustomJob y guarda la ruta de salida en el archivo que
-    Kubeflow Pipelines indica mediante `--trained-lstm-dir-path-output`.
-    """
-
-    # Inicializa Vertex AI (sin staging aquí porque lo pasamos al constructor)
+    """Ejecuta el CustomJob y guarda la ruta de salida para KFP."""
     aip.init(project=project_id, location=region)
 
-    # Nombre legible y carpeta de salida
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     job_display_name = f"train-lstm-{pair.lower()}-{timeframe.lower()}-{ts}"
     output_dir = os.path.join(output_gcs_base_dir, job_display_name)
     logger.info("⏳ Creando CustomJob %s", job_display_name)
 
-    # Definición del worker
+    # ——— definición del worker ——————————————————————
     worker_pool_specs = [
         {
             "machine_spec": {
@@ -71,9 +63,9 @@ def run_launcher(
                 "args": [
                     f"--pair={pair}",
                     f"--timeframe={timeframe}",
-                    f"--params-path={params_path}",
+                    f"--params={params_path}",                 # ✅ nombre correcto
                     f"--features-gcs-path={features_gcs_path}",
-                    f"--output-gcs-dir={output_dir}",
+                    f"--output-gcs-base-dir={output_gcs_base_dir}",  # ✅ nombre correcto
                 ],
             },
         }
@@ -86,10 +78,9 @@ def run_launcher(
         base_output_dir=output_dir,
         project=project_id,
         location=region,
-        staging_bucket=STAGING_BUCKET,  # ✅ FIX: bucket de staging
+        staging_bucket=STAGING_BUCKET,
     )
 
-    # Ejecutar y esperar
     job.run(service_account=vertex_service_account, sync=True)
     logger.info("🏁 Estado final: %s", job.state.name)
 
@@ -97,20 +88,19 @@ def run_launcher(
         logger.error("El entrenamiento falló — revisa Vertex AI → Jobs.")
         sys.exit(1)
 
-    # ——— informar a KFP ————————————————————————————————
+    # ——— informar a KFP ——————————————————————————
     logger.info("🔗 Guardando ruta del modelo entrenado en %s", trained_lstm_dir_path_output)
     with open(trained_lstm_dir_path_output, "w", encoding="utf-8") as f:
         f.write(output_dir)
 
-
-# ──────────────────────────── CLI — Entrypoint ────────────────────────────
+# ──────────────────────────── CLI / Entrypoint ────────────────────────────
 if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("--project-id", required=True)
     p.add_argument("--region", required=True)
     p.add_argument("--pair", required=True)
     p.add_argument("--timeframe", required=True)
-    p.add_argument("--params-path", required=True)
+    p.add_argument("--params-path", required=True)           # recibe nombre viejo desde KFP
     p.add_argument("--features-gcs-path", required=True)
     p.add_argument("--output-gcs-base-dir", required=True)
     p.add_argument("--vertex-training-image-uri", required=True)
