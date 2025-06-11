@@ -1,43 +1,51 @@
-apiVersion: kfp.google.com/v2
-kind: component
-metadata:
-  name: launch_vertex_ai_lstm_training_job
-spec:
-  inputs:
-    parameters:
-    - {name: project_id,              parameterType: STRING}
-    - {name: region,                  parameterType: STRING}
-    - {name: pair,                    parameterType: STRING}
-    - {name: timeframe,               parameterType: STRING}
-    - {name: params_path,             parameterType: STRING}
-    - {name: features_gcs_path,       parameterType: STRING}
-    - {name: output_gcs_base_dir,     parameterType: STRING}
-    - {name: vertex_training_image_uri,  parameterType: STRING}
-    - {name: vertex_machine_type,     parameterType: STRING}
-    - {name: vertex_accelerator_type, parameterType: STRING}
-    - {name: vertex_accelerator_count,parameterType: NUMBER_INTEGER}
-    - {name: vertex_service_account,  parameterType: STRING}
-  outputs:
-    parameters:
-    - {name: trained_lstm_dir_path,   parameterType: STRING}
-  implementation:
-    container:
-      image: europe-west1-docker.pkg.dev/trading-ai-460823/containers/train-lstm-launcher:latest
-      command:
+name: launch_vertex_ai_lstm_training_job
+description: Lanza un Custom Job de Vertex AI para entrenar el modelo LSTM
+inputs:
+  - {name: project_id, type: String}
+  - {name: region, type: String}
+  - {name: pair, type: String}
+  - {name: timeframe, type: String}
+  - {name: params_path, type: String}
+  - {name: features_gcs_path, type: String}
+  - {name: output_gcs_base_dir, type: String}
+  - {name: vertex_training_image_uri, type: String}
+  - {name: vertex_machine_type, type: String}
+  - {name: vertex_accelerator_type, type: String}
+  - {name: vertex_accelerator_count, type: Integer}
+  - {name: vertex_service_account, type: String}
+outputs:
+  - {name: trained_lstm_dir_path, type: String}
+implementation:
+  container:
+    image: europe-west1-docker.pkg.dev/trading-ai-460823/containers/train-lstm-launcher:latest
+    command:
       - python
       - -m
       - src.components.train_lstm_launcher.task
-      args:
-      - "--project-id"             ; - {inputValue: project_id}
-      - "--region"                 ; - {inputValue: region}
-      - "--pair"                   ; - {inputValue: pair}
-      - "--timeframe"              ; - {inputValue: timeframe}
-      - "--params-path"            ; - {inputValue: params_path}
-      - "--features-gcs-path"      ; - {inputValue: features_gcs_path}
-      - "--output-gcs-base-dir"    ; - {inputValue: output_gcs_base_dir}
-      - "--vertex-training-image-uri" ; - {inputValue: vertex_training_image_uri}
-      - "--vertex-machine-type"    ; - {inputValue: vertex_machine_type}
-      - "--vertex-accelerator-type"; - {inputValue: vertex_accelerator_type}
-      - "--vertex-accelerator-count"; - {inputValue: vertex_accelerator_count}
-      - "--vertex-service-account" ; - {inputValue: vertex_service_account}
-      - "--trained-lstm-dir-path-output"; - {outputPath: trained_lstm_dir_path}
+    args:
+      - --project-id
+      - {inputValue: project_id}
+      - --region
+      - {inputValue: region}
+      - --pair
+      - {inputValue: pair}
+      - --timeframe
+      - {inputValue: timeframe}
+      - --params-path
+      - {inputValue: params_path}
+      - --features-gcs-path
+      - {inputValue: features_gcs_path}
+      - --output-gcs-base-dir
+      - {inputValue: output_gcs_base_dir}
+      - --vertex-training-image-uri
+      - {inputValue: vertex_training_image_uri}
+      - --vertex-machine-type
+      - {inputValue: vertex_machine_type}
+      - --vertex-accelerator-type
+      - {inputValue: vertex_accelerator_type}
+      - --vertex-accelerator-count
+      - {inputValue: vertex_accelerator_count}
+      - --vertex-service-account
+      - {inputValue: vertex_service_account}
+      - --trained-lstm-dir-path-output
+      - {outputPath: trained_lstm_dir_path}

@@ -97,18 +97,12 @@
             "parameterType": "STRING"
           },
           "vertex_accelerator_count": {
-            "defaultValue": 0.0,
-            "isOptional": true,
             "parameterType": "NUMBER_INTEGER"
           },
           "vertex_accelerator_type": {
-            "defaultValue": "ACCELERATOR_TYPE_UNSPECIFIED",
-            "isOptional": true,
             "parameterType": "STRING"
           },
           "vertex_machine_type": {
-            "defaultValue": "n1-standard-4",
-            "isOptional": true,
             "parameterType": "STRING"
           },
           "vertex_service_account": {
@@ -311,7 +305,7 @@
             "-m",
             "src.components.backtest.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250611-110140"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250611-132625"
         }
       },
       "exec-ingest-market-data": {
@@ -339,7 +333,7 @@
             "-m",
             "src.components.data_ingestion.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250611-110140"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250611-132625"
         }
       },
       "exec-launch-vertex-ai-lstm-training-job": {
@@ -368,14 +362,16 @@
             "--vertex-accelerator-count",
             "{{$.inputs.parameters['vertex_accelerator_count']}}",
             "--vertex-service-account",
-            "{{$.inputs.parameters['vertex_service_account']}}"
+            "{{$.inputs.parameters['vertex_service_account']}}",
+            "--trained-lstm-dir-path-output",
+            "{{$.outputs.parameters['trained_lstm_dir_path'].output_file}}"
           ],
           "command": [
             "python",
             "-m",
             "src.components.train_lstm_launcher.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250611-110140"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250611-132625"
         }
       },
       "exec-model-promotion": {
@@ -399,7 +395,7 @@
             "-m",
             "src.components.model_promotion.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250611-110140"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250611-132625"
         }
       },
       "exec-optimize-lstm-hyperparameters": {
@@ -425,7 +421,7 @@
             "-m",
             "src.components.hyperparam_tuning.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250611-110140",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250611-132625",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -455,7 +451,7 @@
             "-m",
             "src.components.data_preparation.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250611-110140"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250611-132625"
         }
       },
       "exec-prepare-reinforcement-learning-data": {
@@ -477,7 +473,7 @@
             "-m",
             "src.components.prepare_rl_data.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250611-110140"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250611-132625"
         }
       },
       "exec-train-rl-agent": {
@@ -501,13 +497,13 @@
             "-m",
             "src.components.train_rl.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250611-110140"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250611-132625"
         }
       }
     }
   },
   "pipelineInfo": {
-    "description": "KFP v3 Pipeline modular para entrenar y desplegar modelos de trading algor\u00edtmico.",
+    "description": "Pipeline v3: ingesti\u00f3n \u2192 HPO \u2192 LSTM \u2192 RL \u2192 backtest \u2192 promoci\u00f3n",
     "name": "algo-trading-mlops-modular-pipeline-v3"
   },
   "root": {
@@ -679,7 +675,7 @@
               },
               "vertex_training_image_uri": {
                 "runtimeValue": {
-                  "constant": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250611-110140"
+                  "constant": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250611-132625"
                 }
               }
             }

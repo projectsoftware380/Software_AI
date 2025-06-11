@@ -1,3 +1,4 @@
+# Asumiendo que este es src/pipeline/main.py
 """Pipeline v3 – ahora lee los YAML en UTF‑8 explícitamente para esquivar
 UnicodeDecodeError en Windows."""
 import argparse
@@ -166,4 +167,4 @@ if __name__ == "__main__":
         )
         print("🚀 Enviando PipelineJob", display_name)
         job.run()
-        print("📊 Sigue el progreso en Vertex AI → Pipelines")
+        print("📊 Sigue el progreso en Vertex AI → Pipelines")

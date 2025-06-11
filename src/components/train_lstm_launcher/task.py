@@ -1,6 +1,6 @@
 """
-Lanza un Custom Job de Vertex AI para entrenar el modelo LSTM y escribe en disco
-la ruta donde quedaron los artefactos.  *Necesita Python 3.8+*.
+Lanza un Custom Job de Vertex AI para entrenar el modelo LSTM y escribe en disco
+la ruta donde quedaron los artefactos. *Necesita Python 3.8+*
 """
 from __future__ import annotations
 
@@ -20,6 +20,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ——— CONSTANTE DE STAGING BUCKET ——————————————————————————————
+STAGING_BUCKET = "gs://trading-ai-models-460823/staging_for_custom_jobs"
+
 
 def run_launcher(
     *,
@@ -38,7 +41,7 @@ def run_launcher(
     trained_lstm_dir_path_output: str,
 ) -> None:
     """Ejecuta el CustomJob y guarda la ruta de salida en el archivo que
-    Kubeflow Pipelines indica mediante `--trained-lstm-dir-path-output`."""
+    Kubeflow Pipelines indica mediante `--trained-lstm-dir-path-output`."""
 
     aip.init(project=project_id, location=region)
 
@@ -76,13 +79,14 @@ def run_launcher(
         base_output_dir=output_dir,
         project=project_id,
         location=region,
+        staging_bucket=STAGING_BUCKET,  # ✅ Ajuste aplicado aquí
     )
 
     job.run(service_account=vertex_service_account, sync=True)
     logger.info("🏁 Estado final: %s", job.state.name)
 
     if job.state != aip.JobState.JOB_STATE_SUCCEEDED:
-        logger.error("El entrenamiento falló — revisa Vertex AI → Jobs.")
+        logger.error("El entrenamiento falló — revisa Vertex AI → Jobs.")
         sys.exit(1)
 
     # ——— informar a KFP ————————————————————————————————
