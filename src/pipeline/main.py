@@ -55,7 +55,7 @@ def trading_pipeline(
     n_trials: int = constants.DEFAULT_N_TRIALS,
     backtest_features_gcs_path: str = f"{constants.DATA_PATH}/{constants.DEFAULT_PAIR}/{constants.DEFAULT_TIMEFRAME}/{constants.DEFAULT_PAIR}_{constants.DEFAULT_TIMEFRAME}_unseen.parquet"
 ):
-    
+
     ingest_task = component_op_factory["data_ingestion"](
         pair=pair,
         timeframe=timeframe,
@@ -78,20 +78,18 @@ def trading_pipeline(
         n_trials=n_trials,
     )
 
-    # +++ INICIO DE LA MODIFICACIÓN 1: Asignación de GPU a la tarea de HPO +++
-    tuning_task.set_cpu_limit('8')  # Coincide con n1-standard-8
-    tuning_task.set_memory_limit('30G') # Coincide con n1-standard-8
-    tuning_task.add_node_selector_constraint(
-        'cloud.google.com/gke-accelerator',
-        constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE
+    # +++ INICIO DE LA MODIFICACIÓN: Asignación de Recursos a la Tarea de HPO +++
+    # Se especifica la CPU y Memoria de la máquina n1-standard-8
+    tuning_task.set_cpu_limit('8')
+    tuning_task.set_memory_limit('30G')
+    # Se usa el método .set_accelerator() para asignar la GPU
+    tuning_task.set_accelerator(
+        accelerator_type=constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE,
+        accelerator_count=constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT
     )
-    tuning_task.set_gpu_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT)
-    # +++ FIN DE LA MODIFICACIÓN 1 +++
+    # +++ FIN DE LA MODIFICACIÓN +++
 
-    
-    # +++ INICIO DE LA MODIFICACIÓN 2: Usar constantes para el lanzador +++
-    # El lanzador ahora usa la imagen correcta y se le pasa la configuración
-    # de hardware desde el archivo de constantes centralizado.
+
     train_lstm_task = component_op_factory["train_lstm_launcher"](
         vertex_training_image_uri=args.common_image_uri,
         project_id=constants.PROJECT_ID,
@@ -106,7 +104,6 @@ def trading_pipeline(
         vertex_accelerator_count=constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT,
         vertex_service_account=constants.VERTEX_LSTM_SERVICE_ACCOUNT,
     )
-    # +++ FIN DE LA MODIFICACIÓN 2 +++
 
     prepare_rl_data_task = component_op_factory["prepare_rl_data"](
         lstm_model_dir=train_lstm_task.outputs["trained_lstm_dir_path"],
@@ -144,7 +141,7 @@ def trading_pipeline(
 # --- Compilación y Ejecución de la Pipeline ---
 if __name__ == "__main__":
     pipeline_filename = "algo_trading_mlops_modular_pipeline_v3.json"
-    
+
     compiler.Compiler().compile(
         pipeline_func=trading_pipeline,
         package_path=pipeline_filename
@@ -155,7 +152,7 @@ if __name__ == "__main__":
     if SUBMIT_TO_VERTEX:
         print("\n🚀 Iniciando sumisión y ejecución de la pipeline en Vertex AI...")
         aip.init(project=constants.PROJECT_ID, location=constants.REGION)
-        
+
         job_display_name = f"algo-trading-v3-{constants.DEFAULT_PAIR}-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
         job = aip.PipelineJob(
@@ -169,7 +166,7 @@ if __name__ == "__main__":
                 "n_trials": constants.DEFAULT_N_TRIALS,
             }
         )
-        
+
         print(f"Enviando PipelineJob '{job_display_name}' con la imagen '{args.common_image_uri}'...")
         job.run()
         print(f"✅ PipelineJob enviado. Puedes verlo en la consola de Vertex AI.")
