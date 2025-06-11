@@ -21,7 +21,8 @@ parser.add_argument(
     required=True,
     help="La URI completa de la imagen Docker a usar en los componentes."
 )
-args = parser.parse_args()
+# Usamos parse_known_args para que no interfiera con los argumentos de KFP
+args, _ = parser.parse_known_args()
 
 
 # --- Carga de Componentes ---
@@ -38,11 +39,8 @@ component_op_factory = {
     "model_promotion": load_component_from_file(COMPONENTS_DIR / "model_promotion/component.yaml"),
 }
 
-# --- AJUSTE CLAVE: Se elimina la condición 'if'. Ahora TODOS los componentes
-# usan la misma imagen actualizada que se pasa como argumento. ---
 for component_op in component_op_factory.values():
     component_op.component_spec.implementation.container.image = args.common_image_uri
-# --------------------------------------------------------------------
 
 
 # --- Definición de la Pipeline ---
@@ -55,10 +53,7 @@ def trading_pipeline(
     pair: str = constants.DEFAULT_PAIR,
     timeframe: str = constants.DEFAULT_TIMEFRAME,
     n_trials: int = constants.DEFAULT_N_TRIALS,
-    backtest_features_gcs_path: str = f"{constants.DATA_PATH}/{constants.DEFAULT_PAIR}/{constants.DEFAULT_TIMEFRAME}/{constants.DEFAULT_PAIR}_{constants.DEFAULT_TIMEFRAME}_unseen.parquet",
-    vertex_machine_type: str = constants.DEFAULT_VERTEX_LSTM_MACHINE_TYPE,
-    vertex_accelerator_type: str = constants.DEFAULT_VERTEX_LSTM_ACCELERATOR_TYPE,
-    vertex_accelerator_count: int = constants.DEFAULT_VERTEX_LSTM_ACCELERATOR_COUNT
+    backtest_features_gcs_path: str = f"{constants.DATA_PATH}/{constants.DEFAULT_PAIR}/{constants.DEFAULT_TIMEFRAME}/{constants.DEFAULT_PAIR}_{constants.DEFAULT_TIMEFRAME}_unseen.parquet"
 ):
     
     ingest_task = component_op_factory["data_ingestion"](
@@ -82,9 +77,21 @@ def trading_pipeline(
         timeframe=timeframe,
         n_trials=n_trials,
     )
+
+    # +++ INICIO DE LA MODIFICACIÓN 1: Asignación de GPU a la tarea de HPO +++
+    tuning_task.set_cpu_limit('8')  # Coincide con n1-standard-8
+    tuning_task.set_memory_limit('30G') # Coincide con n1-standard-8
+    tuning_task.add_node_selector_constraint(
+        'cloud.google.com/gke-accelerator',
+        constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE
+    )
+    tuning_task.set_gpu_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT)
+    # +++ FIN DE LA MODIFICACIÓN 1 +++
+
     
-    # El lanzador ahora usa la imagen correcta, y a su vez lanza un Custom Job
-    # que también usa la misma imagen correcta.
+    # +++ INICIO DE LA MODIFICACIÓN 2: Usar constantes para el lanzador +++
+    # El lanzador ahora usa la imagen correcta y se le pasa la configuración
+    # de hardware desde el archivo de constantes centralizado.
     train_lstm_task = component_op_factory["train_lstm_launcher"](
         vertex_training_image_uri=args.common_image_uri,
         project_id=constants.PROJECT_ID,
@@ -94,11 +101,12 @@ def trading_pipeline(
         params_path=tuning_task.outputs["best_params_path"],
         features_gcs_path=prepare_opt_data_task.outputs["prepared_data_path"],
         output_gcs_base_dir=constants.LSTM_MODELS_PATH,
-        vertex_machine_type=vertex_machine_type,
-        vertex_accelerator_type=vertex_accelerator_type,
-        vertex_accelerator_count=vertex_accelerator_count,
+        vertex_machine_type=constants.DEFAULT_VERTEX_GPU_MACHINE_TYPE,
+        vertex_accelerator_type=constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE,
+        vertex_accelerator_count=constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT,
         vertex_service_account=constants.VERTEX_LSTM_SERVICE_ACCOUNT,
     )
+    # +++ FIN DE LA MODIFICACIÓN 2 +++
 
     prepare_rl_data_task = component_op_factory["prepare_rl_data"](
         lstm_model_dir=train_lstm_task.outputs["trained_lstm_dir_path"],

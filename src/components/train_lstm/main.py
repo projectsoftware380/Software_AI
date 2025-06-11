@@ -166,8 +166,13 @@ def train_final_model(
     # --- AJUSTE CLAVE: Excluir 'timestamp' junto con 'atr' ANTES de escalar ---
     cols_to_exclude = [col for col in df_b.columns if 'atr_' in col] + ['timestamp']
     feature_cols = df_b.columns.difference(cols_to_exclude)
-    X_raw_f = df_b.loc[mask_b, feature_cols]
-    # -------------------------------------------------------------------------
+    
+    # ============================ INICIO DE LA CORRECCIÓN ============================
+    # Se añade .select_dtypes(include=np.number) para asegurar que solo las columnas
+    # numéricas se pasen al escalador, previniendo errores si alguna columna
+    # no numérica (aparte de 'timestamp') estuviera presente.
+    X_raw_f = df_b.loc[mask_b, feature_cols].select_dtypes(include=np.number)
+    # ============================= FIN DE LA CORRECCIÓN ==============================
     
     y_up_f = up_b[mask_b]
     y_dn_f = dn_b[mask_b]

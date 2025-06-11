@@ -51,9 +51,26 @@ DOCKER_IMAGE_NAME: str = "data-ingestion-agent"
 # ==============================================================================
 
 # ──────────────────── VERTEX AI DEFAULTS ───────────────────
+
+# +++ INICIO DE LA MODIFICACIÓN: Centralización de Hardware +++
+
+# --- Configuración para CPU (para tareas de datos o como opción base) ---
+DEFAULT_VERTEX_CPU_MACHINE_TYPE = "n1-standard-4"
+
+# --- Configuración para GPU (la nueva configuración centralizada para entrenamiento) ---
+DEFAULT_VERTEX_GPU_MACHINE_TYPE      = "n1-standard-8"
+DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE  = "NVIDIA_TESLA_T4"
+DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT = 1
+
+# --- Valores por defecto para la pipeline ---
+# Estos son los valores que se usaban antes. Puedes mantenerlos o actualizarlos
+# para que la GPU sea la opción por defecto si lo deseas.
 DEFAULT_VERTEX_LSTM_MACHINE_TYPE     = "n1-standard-4"
 DEFAULT_VERTEX_LSTM_ACCELERATOR_TYPE = "ACCELERATOR_TYPE_UNSPECIFIED"
 DEFAULT_VERTEX_LSTM_ACCELERATOR_COUNT = 0
+
+# +++ FIN DE LA MODIFICACIÓN +++
+
 
 # ──────────────────── PIPELINE DEFAULTS ────────────────────
 DEFAULT_N_TRIALS   = 2
