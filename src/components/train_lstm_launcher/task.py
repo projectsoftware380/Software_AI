@@ -1,8 +1,7 @@
-# RUTA: src/components/train_lstm_launcher/task.py
-# DESCRIPCIÓN: Lanza un Vertex AI Custom Job para entrenar el modelo LSTM y
-#              devuelve en un archivo la carpeta GCS donde se guardaron
-#              los artefactos entrenados, para que KFP la encadene.
-
+"""
+Lanza un Custom Job de Vertex AI para entrenar el modelo LSTM y escribe en disco
+la ruta donde quedaron los artefactos.  *Necesita Python 3.8+*.
+"""
 from __future__ import annotations
 
 import argparse
@@ -13,7 +12,7 @@ from datetime import datetime, timezone
 
 from google.cloud import aiplatform as aip
 
-# ――― Configuración de logging ――― #
+# ——— logging ————————————————————————————————————————————————
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
@@ -36,18 +35,17 @@ def run_launcher(
     vertex_accelerator_type: str,
     vertex_accelerator_count: int,
     vertex_service_account: str,
-    trained_lstm_dir_path_output: str,  # archivo de salida que KFP crea
+    trained_lstm_dir_path_output: str,
 ) -> None:
-    """Crea y ejecuta un Custom Job; escribe la ruta resultante en el
-    archivo que KFP indica mediante --trained-lstm-dir-path-output."""
+    """Ejecuta el CustomJob y guarda la ruta de salida en el archivo que
+    Kubeflow Pipelines indica mediante `--trained-lstm-dir-path-output`."""
 
     aip.init(project=project_id, location=region)
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    job_display_name = f"train-lstm-{pair.lower()}-{timeframe.lower()}-{timestamp}"
-    logger.info(f"⏳ Lanzando CustomJob: {job_display_name}")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    job_display_name = f"train-lstm-{pair.lower()}-{timeframe.lower()}-{ts}"
+    logger.info("⏳ Creando CustomJob %s", job_display_name)
 
-    # Ruta donde el job grabará modelos y métricas
     output_dir = os.path.join(output_gcs_base_dir, job_display_name)
 
     worker_pool_specs = [
@@ -75,43 +73,41 @@ def run_launcher(
     job = aip.CustomJob(
         display_name=job_display_name,
         worker_pool_specs=worker_pool_specs,
+        base_output_dir=output_dir,
         project=project_id,
         location=region,
-        base_output_dir=output_gcs_base_dir,
     )
 
     job.run(service_account=vertex_service_account, sync=True)
-    logger.info(f"🏁 Estado final del CustomJob: {job.state}")
+    logger.info("🏁 Estado final: %s", job.state.name)
 
     if job.state != aip.JobState.JOB_STATE_SUCCEEDED:
-        logger.error("El entrenamiento falló - revisa la consola de Vertex AI.")
+        logger.error("El entrenamiento falló — revisa Vertex AI → Jobs.")
         sys.exit(1)
 
-    # ――― Escribir la salida para KFP ――― #
-    logger.info(f"🔗 Guardando ruta del modelo entrenado: {output_dir}")
-    with open(trained_lstm_dir_path_output, "w") as f:
+    # ——— informar a KFP ————————————————————————————————
+    logger.info("🔗 Guardando ruta del modelo entrenado en %s", trained_lstm_dir_path_output)
+    with open(trained_lstm_dir_path_output, "w", encoding="utf-8") as f:
         f.write(output_dir)
-    logger.info("✅ Ruta escrita correctamente")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--project-id", required=True)
-    parser.add_argument("--region", required=True)
-    parser.add_argument("--pair", required=True)
-    parser.add_argument("--timeframe", required=True)
-    parser.add_argument("--params-path", required=True)
-    parser.add_argument("--features-gcs-path", required=True)
-    parser.add_argument("--output-gcs-base-dir", required=True)
-    parser.add_argument("--vertex-training-image-uri", required=True)
-    parser.add_argument("--vertex-machine-type", required=True)
-    parser.add_argument("--vertex-accelerator-type", required=True)
-    parser.add_argument("--vertex-accelerator-count", type=int, required=True)
-    parser.add_argument("--vertex-service-account", required=True)
-    # ← argumento que KFP rellena automáticamente con un archivo temporal
-    parser.add_argument("--trained-lstm-dir-path-output", required=True)
+    p = argparse.ArgumentParser()
+    p.add_argument("--project-id", required=True)
+    p.add_argument("--region", required=True)
+    p.add_argument("--pair", required=True)
+    p.add_argument("--timeframe", required=True)
+    p.add_argument("--params-path", required=True)
+    p.add_argument("--features-gcs-path", required=True)
+    p.add_argument("--output-gcs-base-dir", required=True)
+    p.add_argument("--vertex-training-image-uri", required=True)
+    p.add_argument("--vertex-machine-type", required=True)
+    p.add_argument("--vertex-accelerator-type", required=True)
+    p.add_argument("--vertex-accelerator-count", type=int, required=True)
+    p.add_argument("--vertex-service-account", required=True)
+    p.add_argument("--trained-lstm-dir-path-output", required=True)
+    args = p.parse_args()
 
-    args = parser.parse_args()
     run_launcher(
         project_id=args.project_id,
         region=args.region,
