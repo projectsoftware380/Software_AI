@@ -5,7 +5,7 @@ Pipeline v3 – ingestión → HPO → LSTM → RL → backtest → promoción.
 Cambios clave:
 • Se quita  `from __future__ import annotations`
   (KFP ahora recibe los tipos reales y deja de confundirlos con artifacts).
-• El resto permanece idéntico a la versión previa – misma lógica.
+• Se corrige la configuración de GPU para las tareas que lo requieren.
 """
 
 import argparse
@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 import google.cloud.aiplatform as aip
-from kfp import compiler, dsl         # pipeline decorators y helpers
+from kfp import compiler, dsl
 from kfp.components import load_component_from_text
 
 from src.shared import constants
@@ -55,10 +55,11 @@ component_op_factory = {
 
 # ───── Usa la misma imagen Docker para todos los contenedores ─────
 for comp in component_op_factory.values():
-    try:  # KFP < 2.5
-        comp.component_spec.implementation.container.image = args.common_image_uri  # type: ignore[attr-defined]
-    except AttributeError:  # KFP ≥ 2.5
-        comp.component_spec.implementation.container.command[0].image = args.common_image_uri  # type: ignore[attr-defined]
+    try:
+        comp.component_spec.implementation.container.image = args.common_image_uri
+    except AttributeError:
+        if hasattr(comp.component_spec.implementation, 'container') and comp.component_spec.implementation.container:
+            comp.component_spec.implementation.container.image = args.common_image_uri
 
 # ───────────────────────── Definición PIPELINE ─────────────────────────
 @dsl.pipeline(
@@ -101,6 +102,9 @@ def trading_pipeline(
         .set_cpu_limit("8")
         .set_memory_limit("30G")
         .set_gpu_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT)
+        # ===== CORRECCIÓN DEFINITIVA =====
+        # El método correcto para especificar el tipo de GPU es `set_accelerator_type`.
+        .set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE)
     )
 
     # 4 ▸ Entrenamiento LSTM ─────────────────────────────────────
@@ -141,6 +145,8 @@ def trading_pipeline(
         .set_cpu_limit("8")
         .set_memory_limit("20G")
         .set_gpu_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT)
+        # ===== CORRECCIÓN DEFINITIVA =====
+        .set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE)
     )
 
     # 7 ▸ Backtest ───────────────────────────────────────────────
@@ -168,7 +174,7 @@ if __name__ == "__main__":
 
     # 1) Compila a JSON
     compiler.Compiler().compile(trading_pipeline, PIPELINE_JSON)
-    print("✅ Pipeline compilada a", PIPELINE_JSON)
+    print(f"✅ Pipeline compilada a {PIPELINE_JSON}")
 
     # 2) (Opcional) Enviar a Vertex AI
     if os.getenv("SUBMIT_PIPELINE_TO_VERTEX", "true").lower() == "true":
@@ -185,6 +191,6 @@ if __name__ == "__main__":
                 "n_trials": constants.DEFAULT_N_TRIALS,
             },
         )
-        print("🚀 Enviando PipelineJob", display_name)
+        print(f"🚀 Enviando PipelineJob '{display_name}'")
         job.run()
         print("📊 Sigue el progreso en Vertex AI → Pipelines")

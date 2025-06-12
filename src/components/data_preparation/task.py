@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------
 # RUTA: src/components/data_preparation/task.py
-# Revisión 2025-06-12  – ajustes de robustez y limpieza
+# Revisión 2025-06-12 – ajustes de robustez y limpieza
 # ---------------------------------------------------------------------
 from __future__ import annotations
 
@@ -14,13 +14,13 @@ from pathlib import Path
 from typing import Dict
 
 import gcsfs
-import numpy as np                  # ← reproducibilidad
+import numpy as np
 import pandas as pd
 
 from src.shared import constants, gcs_utils, indicators
 
 # ───────────────────── configuración global ──────────────────────────
-SEED = 42                           # AJUSTE CLAVE
+SEED = 42
 np.random.seed(SEED)
 
 logging.basicConfig(
@@ -68,8 +68,10 @@ def _validate_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise ValueError(f"Faltan columnas obligatorias: {missing}")
 
-    # timestamp en datetime y sin NaT  – AJUSTE CLAVE
-    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    # ===== CORRECCIÓN =====
+    # Se especifica `unit="ms"` para que pandas interprete correctamente
+    # el timestamp entero que viene de la API de Polygon.
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", errors="coerce")
     df.dropna(subset=["timestamp"], inplace=True)
 
     # OHLC deben ser numéricos y no nulos
