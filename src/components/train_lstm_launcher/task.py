@@ -9,6 +9,7 @@ import logging
 import os
 import sys
 from datetime import datetime, timezone
+from pathlib import Path                    # ✅ nuevo
 
 from google.cloud import aiplatform as aip
 
@@ -63,9 +64,9 @@ def run_launcher(
                 "args": [
                     f"--pair={pair}",
                     f"--timeframe={timeframe}",
-                    f"--params={params_path}",                 # ✅ nombre correcto
+                    f"--params={params_path}",
                     f"--features-gcs-path={features_gcs_path}",
-                    f"--output-gcs-base-dir={output_gcs_base_dir}",  # ✅ nombre correcto
+                    f"--output-gcs-base-dir={output_gcs_base_dir}",
                 ],
             },
         }
@@ -82,16 +83,20 @@ def run_launcher(
     )
 
     job.run(service_account=vertex_service_account, sync=True)
-    logger.info("🏁 Estado final: %s", job.state.name)
+    logger.info("🏁 Estado final: %s", getattr(job.state, "name", job.state))
 
-    if job.state != aip.JobState.JOB_STATE_SUCCEEDED:
+    # —— Comparación de estado sin usar enum del SDK ——
+    state_name = getattr(job.state, "name", str(job.state))
+    if state_name != "JOB_STATE_SUCCEEDED":
         logger.error("El entrenamiento falló — revisa Vertex AI → Jobs.")
         sys.exit(1)
 
     # ——— informar a KFP ——————————————————————————
-    logger.info("🔗 Guardando ruta del modelo entrenado en %s", trained_lstm_dir_path_output)
-    with open(trained_lstm_dir_path_output, "w", encoding="utf-8") as f:
-        f.write(output_dir)
+    out_path = Path(trained_lstm_dir_path_output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)        # ✅ crea carpeta si falta
+    logger.info("🔗 Guardando ruta del modelo entrenado en %s", out_path)
+    out_path.write_text(output_dir, encoding="utf-8")         # ✅ evita FileNotFoundError
+
 
 # ──────────────────────────── CLI / Entrypoint ────────────────────────────
 if __name__ == "__main__":
@@ -100,7 +105,7 @@ if __name__ == "__main__":
     p.add_argument("--region", required=True)
     p.add_argument("--pair", required=True)
     p.add_argument("--timeframe", required=True)
-    p.add_argument("--params-path", required=True)           # recibe nombre viejo desde KFP
+    p.add_argument("--params-path", required=True)           # nombre que recibe KFP
     p.add_argument("--features-gcs-path", required=True)
     p.add_argument("--output-gcs-base-dir", required=True)
     p.add_argument("--vertex-training-image-uri", required=True)
