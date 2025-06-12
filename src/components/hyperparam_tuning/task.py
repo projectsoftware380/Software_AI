@@ -1,69 +1,85 @@
 # src/components/hyperparam_tuning/task.py
 """
-Tarea de optimización de hiperparámetros para el modelo LSTM usando Optuna.
+Optuna HPO para el modelo LSTM.
 
 Flujo:
-1. Construye indicadores y secuencias.
-2. Entrena un modelo LSTM por trial y hace un back-test rápido.
+1. Calcula indicadores y secuencias.
+2. Entrena un LSTM por trial y hace un back-test rápido.
 3. Guarda best_params.json en GCS y expone métricas para KFP.
 """
 
 from __future__ import annotations
-import argparse, gc, json, logging, os, random, re, sys, tempfile, warnings
+
+import argparse
+import gc
+import json
+import logging
+import os
+import random
+import re
+import sys
+import tempfile
+import warnings
 from collections import deque
 from datetime import datetime
 from pathlib import Path
 
-import gcsfs, numpy as np, optuna, pandas as pd, tensorflow as tf
+import gcsfs
+import numpy as np
+import optuna
+import pandas as pd
+import tensorflow as tf
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import RobustScaler
 from tensorflow.keras import callbacks, layers, models, optimizers
 
 from src.shared import constants, gcs_utils, indicators
 
-# ───────────────────────────── logging ─────────────────────────────
+# ───────────────────────────── logging ──────────────────────────────
 warnings.filterwarnings("ignore", category=FutureWarning)
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
-)
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# ─────────────────── reproducibilidad + GPU check ──────────────────
+# ───────── reproducibilidad + (opcional) configuración GPU ──────────
 SEED = 42
-random.seed(SEED); np.random.seed(SEED); tf.random.set_seed(SEED)
+random.seed(SEED)
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
 os.environ.setdefault("TF_DETERMINISTIC_OPS", "1")
 
 try:
     gpus = tf.config.list_physical_devices("GPU")
-    if not gpus:
-        raise RuntimeError("‼️ GPU requerida y no detectada; abortando tarea.")
-    for gpu in gpus:
-        tf.config.experimental.set_memory_growth(gpu, True)
-    tf.keras.mixed_precision.set_global_policy("mixed_float16")
-    logger.info("🚀 GPU(s) configuradas con memoria dinámica y mixed_precision.")
+    if gpus:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        tf.keras.mixed_precision.set_global_policy("mixed_float16")
+        logger.info("🚀 GPU(s) detectadas – memoria dinámica y mixed-precision activadas.")
+    else:
+        raise RuntimeError("No GPU found")
 except Exception as exc:
-    logger.critical("Error al inicializar GPU: %s", exc, exc_info=True)
-    sys.exit(2)
+    logger.warning("⚠️  No se utilizará GPU (%s). Continuando con CPU; el HPO será más lento.",
+                   exc if isinstance(exc, RuntimeError) else "error al configurar GPU")
+    gpus = []  # normalizamos a lista vacía
 
-# ──────────────────── utilidades de housekeeping ───────────────────
+# ────────────────────── housekeeping GCS (opt) ──────────────────────
 def _keep_only_latest_version(base_gcs_prefix: str) -> None:
-    """Conserva sólo la sub-carpeta con timestamp más reciente."""
+    """Conserva sólo la sub-carpeta con timestamp más reciente dentro de `base_gcs_prefix`."""
     try:
         fs = gcsfs.GCSFileSystem(project=constants.PROJECT_ID)
-        if not base_gcs_prefix.endswith("/"):
-            base_gcs_prefix += "/"
+        base_gcs_prefix = base_gcs_prefix.rstrip("/") + "/"
         timestamp_re = re.compile(r"/(\d{14})/?$")
         dirs = [d for d in fs.ls(base_gcs_prefix) if fs.isdir(d) and timestamp_re.search(d)]
         if len(dirs) <= 1:
             return
         dirs.sort(key=lambda p: timestamp_re.search(p).group(1), reverse=True)
         for old_dir in dirs[1:]:
-            logger.info("🗑️  Eliminando versión anterior: gs://%s", old_dir)
+            logger.info("🗑️  Borrando versión anterior: gs://%s", old_dir)
             fs.rm(old_dir, recursive=True)
     except Exception as exc:
         logger.warning("No se pudo limpiar versiones antiguas: %s", exc)
 
-# ───────────────────── model & back-test helpers ───────────────────
+# ───────────────────────── helpers de modelo  ───────────────────────
 def make_model(inp_shape, lr, dr, filt, units, heads):
     x = inp = layers.Input(shape=inp_shape, dtype=tf.float32)
     x = layers.Conv1D(filt, 3, padding="same", activation="relu")(x)
@@ -86,11 +102,13 @@ def quick_bt(pred, closes, atr, rr, up_thr, dn_thr, delta_min, smooth_win, tick)
         dq.append(raw if cond else 0)
         buys, sells = dq.count(1), dq.count(-1)
         signal = 1 if buys > smooth_win // 2 else -1 if sells > smooth_win // 2 else 0
+
         if not pos and signal:
             pos, entry_price, direction = True, price, signal
             sl = (up_thr if direction == 1 else dn_thr) * atr_i
             tp = rr * sl
             continue
+
         if pos:
             pnl = ((price - entry_price) if direction == 1 else (entry_price - price)) / tick
             if pnl >= tp or pnl <= -sl:
@@ -98,12 +116,18 @@ def quick_bt(pred, closes, atr, rr, up_thr, dn_thr, delta_min, smooth_win, tick)
                 pos = False
     return net
 
-# ───────────────────────── función principal ──────────────────────
-def run_optimization(features_path, pair, timeframe, n_trials,
-                     output_gcs_path, metrics_output_file,
-                     cleanup_old_versions=True) -> None:
+# ────────────────────────── función principal ───────────────────────
+def run_optimization(*,
+                     features_path: str,
+                     pair: str,
+                     timeframe: str,
+                     n_trials: int,
+                     output_gcs_path: str,
+                     metrics_output_file: Path,
+                     cleanup_old_versions: bool = True) -> None:
 
-    logger.info("🚀 Iniciando Optuna HPO para %s/%s (%d trials)", pair, timeframe, n_trials)
+    logger.info("🚀 Iniciando HPO (%s / %s) con %d trials…", pair, timeframe, n_trials)
+
     local_features_path = gcs_utils.ensure_gcs_path_and_get_local(features_path)
     df_raw = pd.read_parquet(local_features_path)
 
@@ -111,12 +135,14 @@ def run_optimization(features_path, pair, timeframe, n_trials,
         raise ValueError("La columna 'timestamp' es obligatoria y no se encontró.")
     df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"], unit="ms", errors="coerce")
 
-    def objective(trial: optuna.trial.Trial) -> float:
-        tf.keras.backend.clear_session(); gc.collect()
+    def objective(trial: optuna.Trial) -> float:
+        tf.keras.backend.clear_session()
+        gc.collect()
 
         tick = 0.01 if pair.endswith("JPY") else 0.0001
         atr_len = 14
-        p = {  # sampling de hiperparámetros
+
+        p = {   # sampleo de hiperparámetros
             "horizon":    trial.suggest_int("horizon", 10, 30),
             "rr":         trial.suggest_float("rr", 1.5, 3.0),
             "min_thr_up": trial.suggest_float("min_thr_up", 0.5, 2.0),
@@ -136,12 +162,13 @@ def run_optimization(features_path, pair, timeframe, n_trials,
             "stoch_len":  trial.suggest_categorical("stoch_len", [14, 21]),
         }
 
+        # 1️⃣ indicadores
         df_ind = indicators.build_indicators(df_raw.copy(), p, atr_len=atr_len)
 
-        # ─── Target variables ───────────────────────────────────────
         atr = df_ind[f"atr_{atr_len}"].values / tick
         close = df_ind.close.values
-        fut_close = np.roll(close, -p["horizon"]); fut_close[-p["horizon"]:] = np.nan
+        fut_close = np.roll(close, -p["horizon"])
+        fut_close[-p["horizon"]:] = np.nan
         diff = (fut_close - close) / tick
         up = np.maximum(diff, 0) / atr
         dn = np.maximum(-diff, 0) / atr
@@ -150,32 +177,42 @@ def run_optimization(features_path, pair, timeframe, n_trials,
         if mask.sum() < 1_000:
             return -1e8
 
-        # ─── Features ───────────────────────────────────────────────
+        # 2️⃣ features – solo numéricas, sin timestamp ni atr_*
         feature_cols = [c for c in df_ind.columns
-                        if c not in {"timestamp"} and not c.startswith("atr_")]
+                        if c != "timestamp" and not c.startswith("atr_")]
         X_raw = df_ind.loc[mask, feature_cols].select_dtypes(include=np.number)
         if X_raw.empty or X_raw.shape[0] <= p["win"]:
             return -1e8
 
         scaler = RobustScaler()
         X_scaled = scaler.fit_transform(X_raw)
-        X_seq = np.stack([X_scaled[i - p["win"]: i] for i in range(p["win"], len(X_scaled))]).astype(np.float32)
+
+        X_seq = np.stack(
+            [X_scaled[i - p["win"]: i] for i in range(p["win"], len(X_scaled))]
+        ).astype(np.float32)
+
         if X_seq.shape[0] < 500:
             return -1e8
 
-        y_up_seq, y_dn_seq = up[mask][p["win"]:], dn[mask][p["win"]:]
-        closes_seq, atr_seq = close[mask][p["win"]:], atr[mask][p["win"]:]
+        y_up_seq = up[mask][p["win"]:]
+        y_dn_seq = dn[mask][p["win"]:]
+        closes_seq = close[mask][p["win"]:]
+        atr_seq = atr[mask][p["win"]:]
 
-        # ─── train / val split ──────────────────────────────────────
-        X_tr, X_val, y_up_tr, y_up_val, y_dn_tr, y_dn_val, _, closes_val, _, atr_val = train_test_split(
-            X_seq, y_up_seq, y_dn_seq, closes_seq, atr_seq, test_size=0.2, shuffle=False
+        # 3️⃣ split train / val sin barajar
+        X_tr, X_val, y_up_tr, y_up_val, y_dn_tr, y_dn_val, closes_val, atr_val = train_test_split(
+            X_seq, y_up_seq, y_dn_seq, closes_seq, atr_seq,
+            test_size=0.2, shuffle=False
         )
 
-        model = make_model(X_tr.shape[1:], p["lr"], p["dr"], p["filt"], p["units"], p["heads"])
+        model = make_model(
+            X_tr.shape[1:], p["lr"], p["dr"],
+            p["filt"], p["units"], p["heads"]
+        )
         model.fit(
             X_tr,
-            np.vstack([y_up_tr, y_dn_tr]).T,
-            validation_data=(X_val, np.vstack([y_up_val, y_dn_val]).T),
+            np.column_stack([y_up_tr, y_dn_tr]),
+            validation_data=(X_val, np.column_stack([y_up_val, y_dn_val])),
             epochs=15,
             batch_size=64,
             verbose=0,
@@ -193,7 +230,9 @@ def run_optimization(features_path, pair, timeframe, n_trials,
     study = optuna.create_study(direction="maximize",
                                 sampler=optuna.samplers.TPESampler(seed=SEED))
     study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
-    best_params = study.best_params | {
+
+    best_params = {
+        **study.best_params,
         "pair": pair,
         "timeframe": timeframe,
         "features_path": features_path,
@@ -201,25 +240,27 @@ def run_optimization(features_path, pair, timeframe, n_trials,
         "best_trial_score": study.best_value,
     }
 
+    # ⬆️ guarda best_params.json
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_json = Path(tmpdir) / "best_params.json"
         tmp_json.write_text(json.dumps(best_params, indent=2))
         gcs_utils.upload_gcs_file(tmp_json, output_gcs_path)
 
+    # ⬆️ métricas para Vertex AI
     metrics_output_file.parent.mkdir(parents=True, exist_ok=True)
     metrics_output_file.write_text(json.dumps({
         "metrics": [{
             "name": "optuna-best-trial-score",
-            "numberValue": study.best_value or -1e9,
-            "format": "RAW",
+            "numberValue": best_params["best_trial_score"] or -1e9,
+            "format": "RAW"
         }]
     }))
-    logger.info("✅ Optimización finalizada. Best score: %.2f", study.best_value)
+    logger.info("✅ HPO completado. Best score: %.2f", study.best_value)
 
     if cleanup_old_versions:
         _keep_only_latest_version(f"{constants.LSTM_PARAMS_PATH}/{pair}/{timeframe}/")
 
-# ──────────────────────────── CLI ────────────────────────────
+# ────────────────────────────── CLI ────────────────────────────────
 if __name__ == "__main__":
     cli = argparse.ArgumentParser("Optuna HPO task")
     cli.add_argument("--features-path", required=True)
@@ -233,7 +274,8 @@ if __name__ == "__main__":
     args = cli.parse_args()
 
     ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-    out_gcs = f"{constants.LSTM_PARAMS_PATH}/{args.pair}/{args.timeframe}/{ts}/best_params.json"
+    out_gcs = (f"{constants.LSTM_PARAMS_PATH}/{args.pair}/{args.timeframe}/"
+               f"{ts}/best_params.json")
 
     run_optimization(
         features_path=args.features_path,
@@ -245,5 +287,6 @@ if __name__ == "__main__":
         cleanup_old_versions=args.cleanup_old_versions,
     )
 
+    # Para que KFP capture la ruta
     args.best_params_path_output.parent.mkdir(parents=True, exist_ok=True)
     args.best_params_path_output.write_text(out_gcs)
