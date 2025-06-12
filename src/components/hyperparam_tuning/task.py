@@ -60,11 +60,10 @@ try:
 except Exception as exc:
     logger.warning("⚠️  No se utilizará GPU (%s). Continuando con CPU; el HPO será más lento.",
                    exc if isinstance(exc, RuntimeError) else "error al configurar GPU")
-    gpus = []  # normalizamos a lista vacía
+    gpus = []
 
 # ────────────────────── housekeeping GCS (opt) ──────────────────────
 def _keep_only_latest_version(base_gcs_prefix: str) -> None:
-    """Conserva sólo la sub-carpeta con timestamp más reciente dentro de `base_gcs_prefix`."""
     try:
         fs = gcsfs.GCSFileSystem(project=constants.PROJECT_ID)
         base_gcs_prefix = base_gcs_prefix.rstrip("/") + "/"
@@ -142,7 +141,7 @@ def run_optimization(*,
         tick = 0.01 if pair.endswith("JPY") else 0.0001
         atr_len = 14
 
-        p = {   # sampleo de hiperparámetros
+        p = {
             "horizon":    trial.suggest_int("horizon", 10, 30),
             "rr":         trial.suggest_float("rr", 1.5, 3.0),
             "min_thr_up": trial.suggest_float("min_thr_up", 0.5, 2.0),
@@ -162,7 +161,6 @@ def run_optimization(*,
             "stoch_len":  trial.suggest_categorical("stoch_len", [14, 21]),
         }
 
-        # 1️⃣ indicadores
         df_ind = indicators.build_indicators(df_raw.copy(), p, atr_len=atr_len)
 
         atr = df_ind[f"atr_{atr_len}"].values / tick
@@ -177,7 +175,6 @@ def run_optimization(*,
         if mask.sum() < 1_000:
             return -1e8
 
-        # 2️⃣ features – solo numéricas, sin timestamp ni atr_*
         feature_cols = [c for c in df_ind.columns
                         if c != "timestamp" and not c.startswith("atr_")]
         X_raw = df_ind.loc[mask, feature_cols].select_dtypes(include=np.number)
@@ -199,8 +196,10 @@ def run_optimization(*,
         closes_seq = close[mask][p["win"]:]
         atr_seq = atr[mask][p["win"]:]
 
-        # 3️⃣ split train / val sin barajar
-        X_tr, X_val, y_up_tr, y_up_val, y_dn_tr, y_dn_val, closes_val, atr_val = train_test_split(
+        # ===== CORRECCIÓN =====
+        # Se añaden las variables que faltaban (closes_tr, atr_tr)
+        # para desempaquetar correctamente los 10 arrays que devuelve la función.
+        X_tr, X_val, y_up_tr, y_up_val, y_dn_tr, y_dn_val, closes_tr, closes_val, atr_tr, atr_val = train_test_split(
             X_seq, y_up_seq, y_dn_seq, closes_seq, atr_seq,
             test_size=0.2, shuffle=False
         )
@@ -240,13 +239,11 @@ def run_optimization(*,
         "best_trial_score": study.best_value,
     }
 
-    # ⬆️ guarda best_params.json
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_json = Path(tmpdir) / "best_params.json"
         tmp_json.write_text(json.dumps(best_params, indent=2))
         gcs_utils.upload_gcs_file(tmp_json, output_gcs_path)
 
-    # ⬆️ métricas para Vertex AI
     metrics_output_file.parent.mkdir(parents=True, exist_ok=True)
     metrics_output_file.write_text(json.dumps({
         "metrics": [{
@@ -287,6 +284,5 @@ if __name__ == "__main__":
         cleanup_old_versions=args.cleanup_old_versions,
     )
 
-    # Para que KFP capture la ruta
     args.best_params_path_output.parent.mkdir(parents=True, exist_ok=True)
     args.best_params_path_output.write_text(out_gcs)
