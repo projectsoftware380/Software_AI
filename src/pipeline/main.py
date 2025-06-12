@@ -1,6 +1,9 @@
-# Asumiendo que este es src/pipeline/main.py
-"""Pipeline v3 – ahora lee los YAML en UTF‑8 explícitamente para esquivar
-UnicodeDecodeError en Windows."""
+# src/pipeline/main.py
+"""Pipeline v3 – ingestión → HPO → LSTM → RL → backtest → promoción.
+Lectura UTF-8 explícita para esquivar UnicodeDecodeError en Windows.
+"""
+from __future__ import annotations
+
 import argparse
 import os
 from datetime import datetime
@@ -13,21 +16,15 @@ from kfp.dsl import pipeline
 
 from src.shared import constants
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CLI — una única imagen Docker para todos los componentes
-# ─────────────────────────────────────────────────────────────────────────────
-parser = argparse.ArgumentParser(description="Compila y/o envía la pipeline")
-parser.add_argument(
-    "--common-image-uri",
-    required=True,
-    help="URI completa de la imagen Docker a usar en TODOS los componentes",
-)
+# ───────────────────────────── CLI ──────────────────────────────
+parser = argparse.ArgumentParser("Compila y/o envía la pipeline")
+parser.add_argument("--common-image-uri", required=True,
+                    help="URI Docker (misma imagen) para TODOS los componentes")
 args, _ = parser.parse_known_args()
 
 COMPONENTS_DIR = Path(__file__).parent.parent / "components"
 
 def load_utf8_component(rel_path: str):
-    """Carga un componente asegurando lectura UTF‑8."""
     yaml_text = (COMPONENTS_DIR / rel_path).read_text(encoding="utf-8")
     return load_component_from_text(yaml_text)
 
@@ -42,13 +39,11 @@ component_op_factory = {
     "model_promotion":     load_utf8_component("model_promotion/component.yaml"),
 }
 
-# Re‑etiquetar imagen
+# Aplica la misma imagen a todos los contenedores-componente
 for op in component_op_factory.values():
     op.component_spec.implementation.container.image = args.common_image_uri
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Definición de la pipeline
-# ─────────────────────────────────────────────────────────────────────────────
+# ───────────────────────── Definición PIPELINE ─────────────────────────
 @pipeline(
     name="algo-trading-mlops-modular-pipeline-v3",
     description="Pipeline v3: ingestión → HPO → LSTM → RL → backtest → promoción",
@@ -63,7 +58,7 @@ def trading_pipeline(
         f"{constants.DEFAULT_PAIR}_{constants.DEFAULT_TIMEFRAME}_unseen.parquet"
     ),
 ):
-    # 1 ▸ Ingestión -----------------------------------------------------------
+    # 1 ▸ Ingestión ──────────────────────────────────────────────
     ingest_task = component_op_factory["data_ingestion"](
         pair=pair,
         timeframe=timeframe,
@@ -74,24 +69,26 @@ def trading_pipeline(
         min_rows=100_000,
     )
 
-    # 2 ▸ Preparar datos para HPO -------------------------------------------
+    # 2 ▸ Datos para HPO ────────────────────────────────────────
     prepare_opt_data_task = component_op_factory["data_preparation"](
         pair=pair,
         timeframe=timeframe,
     ).after(ingest_task)
 
-    # 3 ▸ Optuna HPO ---------------------------------------------------------
+    # 3 ▸ Optuna HPO (GPU) ──────────────────────────────────────
     tuning_task = component_op_factory["hyperparam_tuning"](
         features_path=prepare_opt_data_task.outputs["prepared_data_path"],
         pair=pair,
         timeframe=timeframe,
         n_trials=n_trials,
     )
-    tuning_task.set_cpu_limit("8").set_memory_limit("30G")
-    tuning_task.set_gpu_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT)
-    tuning_task.set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE)
+    (tuning_task
+        .set_cpu_limit("8")          # RAM/CPU explícitas
+        .set_memory_limit("30G")
+        .set_gpu_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT)
+        .set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE))
 
-    # 4 ▸ Lanzar entrenamiento LSTM -----------------------------------------
+    # 4 ▸ Entrenamiento LSTM (se lanza como CustomJob GPU) ─────
     train_lstm_task = component_op_factory["train_lstm_launcher"](
         vertex_training_image_uri=args.common_image_uri,
         project_id=constants.PROJECT_ID,
@@ -107,7 +104,7 @@ def trading_pipeline(
         vertex_service_account=constants.VERTEX_LSTM_SERVICE_ACCOUNT,
     )
 
-    # 5 ▸ Datos para RL ------------------------------------------------------
+    # 5 ▸ Datos para RL ─────────────────────────────────────────
     prepare_rl_data_task = component_op_factory["prepare_rl_data"](
         lstm_model_dir=train_lstm_task.outputs["trained_lstm_dir_path"],
         pair=pair,
@@ -115,7 +112,7 @@ def trading_pipeline(
         output_gcs_base_dir=constants.RL_DATA_INPUTS_PATH,
     )
 
-    # 6 ▸ Entrenar agente RL -------------------------------------------------
+    # 6 ▸ Entrenamiento PPO (GPU) ──────────────────────────────
     train_rl_task = component_op_factory["train_rl"](
         params_path=f"{train_lstm_task.outputs['trained_lstm_dir_path']}/params.json",
         rl_data_path=prepare_rl_data_task.outputs["rl_data_path"],
@@ -124,8 +121,13 @@ def trading_pipeline(
         output_gcs_base_dir=constants.RL_MODELS_PATH,
         tensorboard_logs_base_dir=constants.TENSORBOARD_LOGS_PATH,
     )
+    (train_rl_task
+        .set_cpu_limit("8")
+        .set_memory_limit("20G")
+        .set_gpu_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT)        # 🆕
+        .set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE)) # 🆕
 
-    # 7 ▸ Backtest -----------------------------------------------------------
+    # 7 ▸ Backtest ──────────────────────────────────────────────
     backtest_task = component_op_factory["backtest"](
         lstm_model_dir=train_lstm_task.outputs["trained_lstm_dir_path"],
         rl_model_path=train_rl_task.outputs["trained_rl_model_path"],
@@ -134,7 +136,7 @@ def trading_pipeline(
         timeframe=timeframe,
     )
 
-    # 8 ▸ Promoción ----------------------------------------------------------
+    # 8 ▸ Promoción a Producción ───────────────────────────────
     component_op_factory["model_promotion"](
         new_metrics_dir=backtest_task.outputs["output_gcs_dir"],
         new_lstm_artifacts_dir=train_lstm_task.outputs["trained_lstm_dir_path"],
@@ -144,7 +146,7 @@ def trading_pipeline(
         production_base_dir=constants.PRODUCTION_MODELS_PATH,
     )
 
-# ════════════════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     PIPELINE_JSON = "algo_trading_mlops_modular_pipeline_v3.json"
 
