@@ -1,8 +1,7 @@
 # src/components/train_rl/task.py
 """
 Entrena un agente PPO (Stable-Baselines3) que filtra las señales del LSTM.
-Genera un .zip y lo sube a GCS, devolviendo la URI final para el resto
-de la pipeline.
+👉  Esta versión ABORTA si no se detecta GPU y crea el modelo con device="cuda".
 """
 
 from __future__ import annotations
@@ -18,7 +17,8 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
-import tensorflow as tf
+import torch                                   # 🆕 fail-fast GPU check
+import tensorflow as tf                        # solo para reproducibilidad de seeds
 from gymnasium import Env, spaces
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv
@@ -30,12 +30,17 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# ───────────────────── reproducibilidad ─────────────────────
+# ───────────── reproducibilidad + GPU check ────────────────
 SEED = 42
 random.seed(SEED)
 np.random.seed(SEED)
 tf.random.set_seed(SEED)
 os.environ.setdefault("TF_DETERMINISTIC_OPS", "1")
+
+if not torch.cuda.is_available():
+    raise RuntimeError("‼️ GPU requerida y no detectada; abortando entrenamiento PPO.")
+torch.backends.cudnn.benchmark = True
+logger.info("🚀 PyTorch GPU disponible (%s)", torch.cuda.get_device_name(0))
 
 # ──────────────────────── Entorno Gym ───────────────────────
 class SignalFilterEnv(Env):
@@ -63,7 +68,7 @@ class SignalFilterEnv(Env):
         accepted = action == 1
         reward = self._pnl[self._step] if accepted else 0.0
         if accepted and reward == 0.0:
-            reward = self._penalty                     # castiga acciones inútiles
+            reward = self._penalty
         self._step += 1
         done = self._step > self._max_steps
         next_obs = self._obs[self._step] if not done else np.zeros_like(self._obs[0])
@@ -125,6 +130,7 @@ def run_rl_training(
         seed=SEED,
         verbose=1,
         tensorboard_log=tb_log,
+        device="cuda",                       # 🆕 fuerza uso de GPU
     )
 
     logger.info("🏋️  Entrenando PPO (%d timesteps)…", total_steps)
@@ -148,7 +154,7 @@ def run_rl_training(
 
 # ──────────────────────────── CLI / Entrypoint ────────────────────────────
 if __name__ == "__main__":
-    p = argparse.ArgumentParser("Train RL PPO filter")
+    p = argparse.ArgumentParser("Train RL PPO filter (GPU required)")
     p.add_argument("--params-path", required=True)
     p.add_argument("--rl-data-path", required=True)
     p.add_argument("--pair", required=True)
@@ -167,6 +173,6 @@ if __name__ == "__main__":
     )
 
     out_file = Path("/tmp/trained_rl_model.txt")
-    out_file.parent.mkdir(parents=True, exist_ok=True)  # ✅ asegura directorio
+    out_file.parent.mkdir(parents=True, exist_ok=True)
     out_file.write_text(final_uri)
     print(f"Trained RL model stored at: {final_uri}")
