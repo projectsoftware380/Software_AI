@@ -1,18 +1,7 @@
-# src/components/data_preparation/task.py
-"""
-Tarea del componente de preparación de datos para optimización.
-
-Responsabilidades:
-1.  Cargar el Parquet con datos OHLC e indicadores básicos.
-2.  Calcular un set de indicadores técnicos robustos (usando el módulo `indicators`).
-3.  Recortar el histórico a una ventana de N años recientes.
-4.  Asegurar que no queden valores NaN en el dataset final.
-5.  Guardar el Parquet resultante en una nueva ruta versionada en GCS.
-6.  (Opcional) Limpiar versiones antiguas en el mismo directorio para ahorrar espacio.
-
-Este script reemplaza la funcionalidad de `prepare_opt_data.py`.
-"""
-
+# ---------------------------------------------------------------------
+# RUTA: src/components/data_preparation/task.py
+# Revisión 2025-06-12  – ajustes de robustez y limpieza
+# ---------------------------------------------------------------------
 from __future__ import annotations
 
 import argparse
@@ -24,150 +13,155 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict
 
-import pandas as pd
 import gcsfs
+import numpy as np                  # ← reproducibilidad
+import pandas as pd
 
-# Importar los módulos compartidos de la nueva estructura
 from src.shared import constants, gcs_utils, indicators
 
-# --- Configuración del Logging ---
+# ───────────────────── configuración global ──────────────────────────
+SEED = 42                           # AJUSTE CLAVE
+np.random.seed(SEED)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
+    stream=sys.stdout,
 )
 logger = logging.getLogger(__name__)
 
-
-# --- Lógica de Limpieza de Versiones Antiguas ---
+# ───────────────────── helpers de housekeeping ───────────────────────
 def _keep_only_latest_version(base_gcs_prefix: str) -> None:
     """
-    Mantiene solo el sub-directorio con el timestamp más reciente.
-
-    Examina una ruta base en GCS (ej: .../data_filtered_for_opt_v3/<pair>/<tf>/)
-    y elimina todos los subdirectorios versionados (YYYYMMDDHHMMSS) excepto
-    el más nuevo.
+    Mantiene sólo el sub-directorio con timestamp (YYYYMMDDHHMMSS)
+    más reciente y borra el resto.
     """
     try:
         fs = gcsfs.GCSFileSystem(project=constants.PROJECT_ID)
-        # El patrón busca directorios que terminen en /YYYYMMDDHHMMSS/
-        timestamp_pattern = re.compile(r"/(\d{14})/?$")
-        
-        all_dirs = fs.ls(base_gcs_prefix)
-        versioned_dirs = [d for d in all_dirs if timestamp_pattern.search(d)]
 
-        if len(versioned_dirs) <= 1:
+        if not base_gcs_prefix.endswith("/"):
+            base_gcs_prefix += "/"
+
+        ts_re = re.compile(r"/(\d{14})/?$")
+        dirs = [p for p in fs.ls(base_gcs_prefix)
+                if fs.isdir(p) and ts_re.search(p)]
+
+        if len(dirs) <= 1:
             logger.info("No hay versiones antiguas que limpiar.")
             return
 
-        # Ordenar de más nuevo a más viejo basándose en el timestamp del nombre
-        dirs_sorted = sorted(
-            versioned_dirs,
-            key=lambda p: timestamp_pattern.search(p).group(1),
-            reverse=True,
-        )
+        dirs.sort(key=lambda p: ts_re.search(p).group(1), reverse=True)
+        logger.info("Se conserva versión más reciente: gs://%s", dirs[0])
 
-        for old_dir in dirs_sorted[1:]:
-            logger.info(f"🗑️  Eliminando versión anterior: gs://{old_dir}")
-            fs.rm(old_dir, recursive=True)
-            
-    except Exception as e:
-        logger.warning(f"⚠️ No se pudo realizar la limpieza de versiones antiguas en '{base_gcs_prefix}': {e}")
+        for old in dirs[1:]:
+            logger.info("🗑️  Eliminando versión antigua: gs://%s", old)
+            fs.rm(old, recursive=True)
 
+    except Exception as exc:
+        logger.warning("No se pudo limpiar versiones antiguas: %s", exc)
 
-# --- Orquestación Principal de la Tarea ---
+# ───────────────────── validaciones de DataFrame ─────────────────────
+def _validate_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """Normaliza columnas clave y elimina filas problemáticas."""
+    required_cols = {"open", "high", "low", "close", "timestamp"}
+    missing = required_cols.difference(df.columns)
+    if missing:
+        raise ValueError(f"Faltan columnas obligatorias: {missing}")
+
+    # timestamp en datetime y sin NaT  – AJUSTE CLAVE
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    df.dropna(subset=["timestamp"], inplace=True)
+
+    # OHLC deben ser numéricos y no nulos
+    df.dropna(subset=["open", "high", "low", "close"], inplace=True)
+    df = df.sort_values("timestamp").reset_index(drop=True)
+    return df
+
+# ────────────────────────── tarea principal ──────────────────────────
 def run_preparation(
+    *,
     input_gcs_path: str,
     output_gcs_path: str,
     years_to_keep: int,
     cleanup_old_versions: bool = True,
 ) -> None:
     """
-    Orquesta el proceso completo de preparación de datos.
+    1. Descarga Parquet OHLC,
+    2. Calcula indicadores técnicos,
+    3. Recorta ventana temporal,
+    4. Sube nuevo Parquet versionado a GCS.
     """
     try:
-        # 1. Cargar datos desde GCS
-        logger.info(f"Cargando datos desde: {input_gcs_path}")
+        # 1 ▸ Cargar datos ----------------------------------------------------
+        logger.info("📥 Descargando datos de: %s", input_gcs_path)
         with tempfile.TemporaryDirectory() as tmpdir:
-            local_path = gcs_utils.download_gcs_file(input_gcs_path, Path(tmpdir))
-            df = pd.read_parquet(local_path)
-        
-        if "timestamp" not in df.columns:
-            raise ValueError("La columna 'timestamp' es necesaria y no se encontró.")
-        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-        
-        logger.info(f"✔ Datos cargados: {len(df):,} filas")
-        df.dropna(subset=["open", "high", "low", "close"], inplace=True)
+            local_in = gcs_utils.download_gcs_file(input_gcs_path, Path(tmpdir))
+            df_raw = pd.read_parquet(local_in)
 
-        # 2. Calcular indicadores (de forma robusta)
-        # Se usa un set de hiperparámetros "dummy" solo para generar los indicadores.
-        # La optimización posterior elegirá los valores correctos.
+        df_raw = _validate_dataframe(df_raw)
+
+        # 2 ▸ Indicadores -----------------------------------------------------
         dummy_hp: Dict[str, int] = {
-            "sma_len": 50, "rsi_len": 14, "macd_fast": 12,
-            "macd_slow": 26, "stoch_len": 14
+            "sma_len": 50, "rsi_len": 14,
+            "macd_fast": 12, "macd_slow": 26,
+            "stoch_len": 14,
         }
-        df_indicators = indicators.build_indicators(df, dummy_hp, drop_na=True)
-        logger.info(f"🔧 Indicadores calculados -> {len(df_indicators):,} filas restantes tras limpiar NaNs.")
+        df_ind = indicators.build_indicators(df_raw, dummy_hp, drop_na=True)
 
-        # 3. Recortar a la ventana de N años
-        if not df_indicators.empty:
-            end_ts = df_indicators["timestamp"].max()
-            start_ts = end_ts - pd.DateOffset(years=years_to_keep)
-            df_window = df_indicators[df_indicators["timestamp"] >= start_ts].copy()
-            
-            if df_window.empty:
-                raise RuntimeError(f"La ventana de {years_to_keep} años resultó vacía. Revise el rango de fechas.")
-            
-            logger.info(
-                f"🗂️  Ventana de {years_to_keep} años ({start_ts.date()} -> {end_ts.date()}) "
-                f"seleccionada -> {len(df_window):,} filas."
-            )
-        else:
-             raise RuntimeError("El DataFrame quedó vacío después de calcular indicadores.")
+        if df_ind.empty:
+            raise RuntimeError("El DataFrame quedó vacío tras calcular indicadores.")
 
+        # 3 ▸ Recorte ventana -------------------------------------------------
+        end_ts   = df_ind["timestamp"].max()
+        start_ts = end_ts - pd.DateOffset(years=years_to_keep)
+        df_win   = df_ind[df_ind["timestamp"] >= start_ts].copy()
 
-        # 4. Guardar el Parquet filtrado en GCS
+        if df_win.empty:
+            raise RuntimeError(f"La ventana de {years_to_keep} años resultó vacía.")
+
+        logger.info("🗂️  Ventana %s → %s con %s filas",
+                    start_ts.date(), end_ts.date(), f"{len(df_win):,}")
+
+        # 4 ▸ Guardar / subir Parquet ----------------------------------------
         with tempfile.TemporaryDirectory() as tmpdir:
-            local_output_path = Path(tmpdir) / "prepared_data.parquet"
-            df_window.to_parquet(local_output_path, index=False, engine="pyarrow")
-            gcs_utils.upload_gcs_file(local_output_path, output_gcs_path)
+            local_out = Path(tmpdir) / "prepared_data.parquet"
+            df_win.to_parquet(local_out, index=False, engine="pyarrow")
+            gcs_utils.upload_gcs_file(local_out, output_gcs_path)
 
-        # 5. Limpiar versiones antiguas si está activado
+        logger.info("✅ Datos preparados subidos a: %s", output_gcs_path)
+
+        # 5 ▸ Limpieza de versiones antiguas (opcional) ----------------------
         if cleanup_old_versions and output_gcs_path.startswith("gs://"):
-            # La ruta base es el directorio padre del directorio versionado
-            # ej: .../data_filtered_for_opt_v3/<pair>/<tf>/
-            base_cleanup_path = "/".join(output_gcs_path.split("/")[:-2]) + "/"
-            _keep_only_latest_version(base_cleanup_path)
+            base_dir = "/".join(output_gcs_path.split("/")[:-2]) + "/"
+            _keep_only_latest_version(base_dir)
 
-    except Exception as e:
-        logger.critical(f"❌ Fallo crítico en la preparación de datos: {e}", exc_info=True)
+    except Exception as exc:
+        logger.critical("❌ Fallo crítico en preparación de datos: %s", exc, exc_info=True)
         raise
 
-
-# --- Punto de Entrada para Ejecución como Script ---
+# ─────────────────────────── CLI / Entrypoint ─────────────────────────
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Task de Preparación de Datos para KFP.")
+    p = argparse.ArgumentParser("Task de Preparación de Datos para HPO")
+    p.add_argument("--pair", required=True)
+    p.add_argument("--timeframe", required=True)
+    p.add_argument("--years-to-keep", type=int, default=5)
+    p.add_argument("--cleanup", type=lambda x: str(x).lower() == "true", default=True)
 
-    # Argumentos que el componente KFP le pasará
-    parser.add_argument("--pair", required=True)
-    parser.add_argument("--timeframe", required=True)
-    parser.add_argument("--years-to-keep", type=int, default=5)
-    parser.add_argument("--cleanup", type=lambda x: (str(x).lower() == 'true'))
-    
-    # Argumento para el archivo de salida
-    parser.add_argument("--prepared-data-path-output", type=Path, required=True, help="Ruta de archivo local donde se escribirá la ruta GCS de salida.")
-    
-    args = parser.parse_args()
-    
-    # Construir las rutas de entrada y salida usando las constantes
-    input_path = f"{constants.DATA_PATH}/{args.pair}/{args.timeframe}/{args.pair}_{args.timeframe}.parquet"
-    
-    timestamp_str = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    # Artefacto KFP: dónde escribir la ruta final
+    p.add_argument("--prepared-data-path-output", type=Path, required=True)
+
+    args = p.parse_args()
+
+    input_path = (
+        f"{constants.DATA_PATH}/{args.pair}/{args.timeframe}/"
+        f"{args.pair}_{args.timeframe}.parquet"
+    )
+    ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     output_path = (
         f"{constants.DATA_FILTERED_FOR_OPT_PATH}/{args.pair}/{args.timeframe}/"
-        f"{timestamp_str}/{args.pair}_{args.timeframe}_recent.parquet"
+        f"{ts}/{args.pair}_{args.timeframe}_recent.parquet"
     )
 
-    # Ejecutar la lógica principal
     run_preparation(
         input_gcs_path=input_path,
         output_gcs_path=output_path,
@@ -175,7 +169,6 @@ if __name__ == "__main__":
         cleanup_old_versions=args.cleanup,
     )
 
-    # Escribir la ruta de salida al archivo que KFP espera
-    logger.info(f"Escribiendo ruta de salida '{output_path}' a '{args.prepared_data_path_output}'")
+    logger.info("✍️  Escribiendo ruta de salida en %s", args.prepared_data_path_output)
     args.prepared_data_path_output.parent.mkdir(parents=True, exist_ok=True)
     args.prepared_data_path_output.write_text(output_path)
