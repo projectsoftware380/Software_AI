@@ -1,7 +1,6 @@
 # src/pipeline/main.py
-"""Pipeline v3 – ingestión → HPO → LSTM → RL → backtest → promoción.
-Lectura UTF-8 explícita para esquivar UnicodeDecodeError en Windows.
-"""
+"""Pipeline v3 – ingest → HPO → LSTM → RL → backtest → promoción."""
+
 from __future__ import annotations
 
 import argparse
@@ -18,25 +17,34 @@ from src.shared import constants
 
 # ───────────────────────────── CLI ──────────────────────────────
 parser = argparse.ArgumentParser("Compila y/o envía la pipeline")
-parser.add_argument("--common-image-uri", required=True,
-                    help="URI Docker (misma imagen) para TODOS los componentes")
+parser.add_argument(
+    "--common-image-uri",
+    required=True,
+    help="URI Docker (misma imagen) para TODOS los componentes",
+)
 args, _ = parser.parse_known_args()
 
 COMPONENTS_DIR = Path(__file__).parent.parent / "components"
+DEFAULT_BACKTEST_FEATURES_GCS_PATH = (
+    f"{constants.DATA_PATH}/{constants.DEFAULT_PAIR}/{constants.DEFAULT_TIMEFRAME}/"
+    f"{constants.DEFAULT_PAIR}_{constants.DEFAULT_TIMEFRAME}_unseen.parquet"
+)
+
 
 def load_utf8_component(rel_path: str):
     yaml_text = (COMPONENTS_DIR / rel_path).read_text(encoding="utf-8")
     return load_component_from_text(yaml_text)
 
+
 component_op_factory = {
-    "data_ingestion":      load_utf8_component("data_ingestion/component.yaml"),
-    "data_preparation":    load_utf8_component("data_preparation/component.yaml"),
-    "hyperparam_tuning":   load_utf8_component("hyperparam_tuning/component.yaml"),
+    "data_ingestion": load_utf8_component("data_ingestion/component.yaml"),
+    "data_preparation": load_utf8_component("data_preparation/component.yaml"),
+    "hyperparam_tuning": load_utf8_component("hyperparam_tuning/component.yaml"),
     "train_lstm_launcher": load_utf8_component("train_lstm_launcher/component.yaml"),
-    "prepare_rl_data":     load_utf8_component("prepare_rl_data/component.yaml"),
-    "train_rl":            load_utf8_component("train_rl/component.yaml"),
-    "backtest":            load_utf8_component("backtest/component.yaml"),
-    "model_promotion":     load_utf8_component("model_promotion/component.yaml"),
+    "prepare_rl_data": load_utf8_component("prepare_rl_data/component.yaml"),
+    "train_rl": load_utf8_component("train_rl/component.yaml"),
+    "backtest": load_utf8_component("backtest/component.yaml"),
+    "model_promotion": load_utf8_component("model_promotion/component.yaml"),
 }
 
 # Aplica la misma imagen a todos los contenedores-componente
@@ -53,10 +61,7 @@ def trading_pipeline(
     pair: str = constants.DEFAULT_PAIR,
     timeframe: str = constants.DEFAULT_TIMEFRAME,
     n_trials: int = constants.DEFAULT_N_TRIALS,
-    backtest_features_gcs_path: str = (
-        f"{constants.DATA_PATH}/{constants.DEFAULT_PAIR}/{constants.DEFAULT_TIMEFRAME}/"
-        f"{constants.DEFAULT_PAIR}_{constants.DEFAULT_TIMEFRAME}_unseen.parquet"
-    )
+    backtest_features_gcs_path: str = DEFAULT_BACKTEST_FEATURES_GCS_PATH,
 ):
     # 1 ▸ Ingestión ──────────────────────────────────────────────
     ingest_task = component_op_factory["data_ingestion"](
@@ -82,13 +87,14 @@ def trading_pipeline(
         timeframe=timeframe,
         n_trials=n_trials,
     )
-    (tuning_task
-        .set_cpu_limit("8")          # RAM/CPU explícitas
+    (
+        tuning_task.set_cpu_limit("8")
         .set_memory_limit("30G")
         .set_gpu_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT)
-        .set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE))
+        .set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE)
+    )
 
-    # 4 ▸ Entrenamiento LSTM (se lanza como CustomJob GPU) ─────
+    # 4 ▸ Entrenamiento LSTM (CustomJob GPU) ────────────────────
     train_lstm_task = component_op_factory["train_lstm_launcher"](
         vertex_training_image_uri=args.common_image_uri,
         project_id=constants.PROJECT_ID,
@@ -121,11 +127,12 @@ def trading_pipeline(
         output_gcs_base_dir=constants.RL_MODELS_PATH,
         tensorboard_logs_base_dir=constants.TENSORBOARD_LOGS_PATH,
     )
-    (train_rl_task
-        .set_cpu_limit("8")
+    (
+        train_rl_task.set_cpu_limit("8")
         .set_memory_limit("20G")
-        .set_gpu_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT)        # 🆕
-        .set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE)) # 🆕
+        .set_gpu_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT)
+        .set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE)
+    )
 
     # 7 ▸ Backtest ──────────────────────────────────────────────
     backtest_task = component_op_factory["backtest"](
@@ -146,6 +153,7 @@ def trading_pipeline(
         production_base_dir=constants.PRODUCTION_MODELS_PATH,
     )
 
+
 # ════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     PIPELINE_JSON = "algo_trading_mlops_modular_pipeline_v3.json"
@@ -155,7 +163,9 @@ if __name__ == "__main__":
 
     if os.getenv("SUBMIT_PIPELINE_TO_VERTEX", "true").lower() == "true":
         aip.init(project=constants.PROJECT_ID, location=constants.REGION)
-        display_name = f"algo-trading-v3-{constants.DEFAULT_PAIR}-{datetime.utcnow():%Y%m%d-%H%M%S}"
+        display_name = (
+            f"algo-trading-v3-{constants.DEFAULT_PAIR}-{datetime.utcnow():%Y%m%d-%H%M%S}"
+        )
         job = aip.PipelineJob(
             display_name=display_name,
             template_path=PIPELINE_JSON,
