@@ -56,7 +56,7 @@ def trading_pipeline(
     backtest_features_gcs_path: str = (
         f"{constants.DATA_PATH}/{constants.DEFAULT_PAIR}/{constants.DEFAULT_TIMEFRAME}/"
         f"{constants.DEFAULT_PAIR}_{constants.DEFAULT_TIMEFRAME}_unseen.parquet"
-    ),
+    )
 ):
     # 1 ▸ Ingestión ──────────────────────────────────────────────
     ingest_task = component_op_factory["data_ingestion"](
