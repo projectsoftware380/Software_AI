@@ -1,7 +1,7 @@
 # src/pipeline/main.py
-"""Pipeline v3 – ingest → HPO → LSTM → RL → backtest → promoción."""
-
-from __future__ import annotations
+"""Pipeline v3 – ingestión → HPO → LSTM → RL → backtest → promoción.
+Lectura UTF-8 explícita para esquivar UnicodeDecodeError en Windows.
+"""
 
 import argparse
 import os
@@ -143,7 +143,7 @@ def trading_pipeline(
         timeframe=timeframe,
     )
 
-    # 8 ▸ Promoción a Producción ───────────────────────────────
+    # 8 ▸ Promoción ─────────────────────────────────────────────
     component_op_factory["model_promotion"](
         new_metrics_dir=backtest_task.outputs["output_gcs_dir"],
         new_lstm_artifacts_dir=train_lstm_task.outputs["trained_lstm_dir_path"],
@@ -163,9 +163,7 @@ if __name__ == "__main__":
 
     if os.getenv("SUBMIT_PIPELINE_TO_VERTEX", "true").lower() == "true":
         aip.init(project=constants.PROJECT_ID, location=constants.REGION)
-        display_name = (
-            f"algo-trading-v3-{constants.DEFAULT_PAIR}-{datetime.utcnow():%Y%m%d-%H%M%S}"
-        )
+        display_name = f"algo-trading-v3-{constants.DEFAULT_PAIR}-{datetime.utcnow():%Y%m%d-%H%M%S}"
         job = aip.PipelineJob(
             display_name=display_name,
             template_path=PIPELINE_JSON,
