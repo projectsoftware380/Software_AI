@@ -9,7 +9,7 @@ import logging
 import os
 import sys
 from datetime import datetime, timezone
-from pathlib import Path                    # ✅ nuevo
+from pathlib import Path
 
 from google.cloud import aiplatform as aip
 
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 # ——— bucket de staging ————————————————————————————————
 STAGING_BUCKET = "gs://trading-ai-models-460823/staging_for_custom_jobs"
+
 
 # ───────────────────────── función principal ─────────────────────────
 def run_launcher(
@@ -93,9 +94,9 @@ def run_launcher(
 
     # ——— informar a KFP ——————————————————————————
     out_path = Path(trained_lstm_dir_path_output)
-    out_path.parent.mkdir(parents=True, exist_ok=True)        # ✅ crea carpeta si falta
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     logger.info("🔗 Guardando ruta del modelo entrenado en %s", out_path)
-    out_path.write_text(output_dir, encoding="utf-8")         # ✅ evita FileNotFoundError
+    out_path.write_text(output_dir, encoding="utf-8")
 
 
 # ──────────────────────────── CLI / Entrypoint ────────────────────────────
@@ -105,7 +106,7 @@ if __name__ == "__main__":
     p.add_argument("--region", required=True)
     p.add_argument("--pair", required=True)
     p.add_argument("--timeframe", required=True)
-    p.add_argument("--params-path", required=True)           # nombre que recibe KFP
+    p.add_argument("--params-path", required=True)          # nombre que recibe KFP
     p.add_argument("--features-gcs-path", required=True)
     p.add_argument("--output-gcs-base-dir", required=True)
     p.add_argument("--vertex-training-image-uri", required=True)
