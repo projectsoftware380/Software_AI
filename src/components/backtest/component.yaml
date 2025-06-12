@@ -13,7 +13,7 @@ inputs:
 
 outputs:
   - {name: output_gcs_dir,        type: String, description: "Carpeta GCS con CSV + metrics"}
-  - {name: kfp_metrics_artifact,  type: Metrics, description: "Ruta al JSON de métricas para Vertex UI"}
+  - {name: kfp_metrics_artifact,  type: String, description: "Ruta al JSON de métricas para Vertex UI"}
 
 implementation:
   container:
