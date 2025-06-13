@@ -65,9 +65,7 @@ def make_model(inp_sh, lr, dr, filt, units, heads):
 def download_gcs_file(uri: str, dest: str | Path):
     logger.info("Descargando %s → %s", uri, dest)
     bucket, blob = uri.replace("gs://", "").split("/", 1)
-    client = storage.Client(); storage.Client
-    storage.Client
-    storage.Client
+    client = storage.Client()
     client.bucket(bucket).blob(blob).download_to_filename(dest)
 
 def upload_local_directory_to_gcs(src: str | Path, uri: str):
@@ -115,7 +113,11 @@ def train_final_model(pair:str, timeframe:str, params_path:str,
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
     gcs_out = f"{output_gcs_base_dir}/{pair}/{timeframe}/{ts}"
     loc_dir = Path(f"/tmp/artifacts/{ts}"); loc_dir.mkdir(parents=True)
-    model.save(loc_dir/"model.h5"); joblib.dump(scaler, loc_dir/"scaler.pkl")
+    
+    # === AJUSTE CORREGIDO: Se cambia de .h5 a .keras ===
+    model.save(loc_dir/"model.keras"); joblib.dump(scaler, loc_dir/"scaler.pkl")
+    # ======================================================
+
     (loc_dir/"params.json").write_text(json.dumps(hp, indent=4))
     upload_local_directory_to_gcs(loc_dir, gcs_out)
     logger.info("✅ Artefactos subidos a %s", gcs_out)

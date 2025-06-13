@@ -42,7 +42,7 @@ COST_PIPS = 0.8        # comisión round-turn
 # ───────────────────── helpers utilitarios ──────────────────────
 def resolve_artifact_dir(base_dir: str) -> str:
     """
-    Devuelve la carpeta que contiene *model.h5*.  Si `base_dir`
+    Devuelve la carpeta que contiene *model.keras*.  Si `base_dir`
     ya la contiene, se devuelve sin cambios; de lo contrario busca
     un sub-path 1 nivel por debajo.
     """
@@ -51,19 +51,19 @@ def resolve_artifact_dir(base_dir: str) -> str:
     bucket = client.bucket(bucket_name)
 
     # caso 1: la carpeta ya apunta al modelo
-    if bucket.blob(f"{prefix.rstrip('/')}/model.h5").exists():
+    if bucket.blob(f"{prefix.rstrip('/')}/model.keras").exists():
         return base_dir.rstrip("/")
 
     # caso 2: buscamos 1 nivel más abajo
     for blob in bucket.list_blobs(prefix=prefix.rstrip("/") + "/", delimiter="/"):
         pp = PurePosixPath(blob.name)
-        if pp.name == "model.h5":
+        if pp.name == "model.keras":
             candidate = f"gs://{bucket_name}/{pp.parent.as_posix()}"
-            logger.info("✔ model.h5 hallado en %s", candidate)
+            logger.info("✔ model.keras hallado en %s", candidate)
             return candidate
 
     raise FileNotFoundError(
-        f"model.h5 no encontrado en {base_dir} ni en sus subdirectorios."
+        f"model.keras no encontrado en {base_dir} ni en sus subdirectorios."
     )
 
 
@@ -75,7 +75,7 @@ def _load_artifacts(lstm_model_dir: str, rl_model_path: str) -> Tuple[
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
         model = tf.keras.models.load_model(
-            gcs_utils.download_gcs_file(f"{lstm_model_dir}/model.h5", tmp),
+            gcs_utils.download_gcs_file(f"{lstm_model_dir}/model.keras", tmp),
             compile=False,
         )
         scaler = joblib.load(

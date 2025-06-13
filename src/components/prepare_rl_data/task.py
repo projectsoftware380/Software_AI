@@ -61,7 +61,7 @@ except Exception as exc:  # pragma: no cover
 # ───────────────────────── helpers utilitarios ─────────────────────
 def resolve_artifact_dir(base_dir: str) -> str:
     """
-    Si `base_dir` no contiene directamente `model.h5`, busca
+    Si `base_dir` no contiene directamente `model.keras`, busca
     recursivamente un nivel por debajo y devuelve la primera carpeta
     que sí lo contenga.  Lanza FileNotFoundError si no lo encuentra.
     """
@@ -70,22 +70,22 @@ def resolve_artifact_dir(base_dir: str) -> str:
     bucket = client.bucket(bucket_name)
 
     # ¿ya está completo?
-    if bucket.blob(f"{prefix.rstrip('/')}/model.h5").exists():
+    if bucket.blob(f"{prefix.rstrip('/')}/model.keras").exists():
         return base_dir.rstrip("/")
 
-    logger.info("🔎 Buscando model.h5 dentro de %s", base_dir)
+    logger.info("🔎 Buscando model.keras dentro de %s", base_dir)
     # Listamos blobs para detectar subcarpetas
     subdirs: set[str] = set()
     for blob in bucket.list_blobs(prefix=prefix.rstrip("/") + "/"):
         pp = PurePosixPath(blob.name)
-        if pp.name == "model.h5":
-            logger.info("✔ model.h5 hallado en %s", pp.parent.as_posix())
+        if pp.name == "model.keras":
+            logger.info("✔ model.keras hallado en %s", pp.parent.as_posix())
             return f"gs://{bucket_name}/{pp.parent.as_posix()}"
         if len(pp.parts) >= len(PurePosixPath(prefix).parts) + 2:
             subdirs.add("/".join(pp.parts[: len(PurePosixPath(prefix).parts) + 1]))
 
     raise FileNotFoundError(
-        f"No se encontró model.h5 en {base_dir} ni en sus subdirectorios: {subdirs}"
+        f"No se encontró model.keras en {base_dir} ni en sus subdirectorios: {subdirs}"
     )
 
 
@@ -117,9 +117,11 @@ def run_rl_data_preparation(
             tmp = Path(tmpdir)
 
             # ── artefactos LSTM ─────────────────────────────────────
+            # === AJUSTE CORREGIDO: Se cambia de .h5 a .keras ===
             model_path = gcs_utils.download_gcs_file(
-                f"{lstm_model_dir}/model.h5", tmp
+                f"{lstm_model_dir}/model.keras", tmp
             )
+            # ======================================================
             scaler_path = gcs_utils.download_gcs_file(
                 f"{lstm_model_dir}/scaler.pkl", tmp
             )

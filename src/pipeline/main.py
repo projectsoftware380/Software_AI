@@ -101,9 +101,8 @@ def trading_pipeline(
         tuning_task
         .set_cpu_limit("8")
         .set_memory_limit("30G")
-        .set_gpu_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT)
-        # ===== CORRECCIÓN DEFINITIVA =====
-        # El método correcto para especificar el tipo de GPU es `set_accelerator_type`.
+        # === AJUSTE CORREGIDO ===
+        .set_accelerator_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT)
         .set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE)
     )
 
@@ -144,8 +143,8 @@ def trading_pipeline(
         train_rl_task
         .set_cpu_limit("8")
         .set_memory_limit("20G")
-        .set_gpu_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT)
-        # ===== CORRECCIÓN DEFINITIVA =====
+        # === AJUSTE CORREGIDO ===
+        .set_accelerator_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT)
         .set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE)
     )
 
