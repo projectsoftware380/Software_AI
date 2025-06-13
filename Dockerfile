@@ -1,32 +1,33 @@
-# Dockerfile (Versión V5 - Habilitado para GPU con Python 3.10)
-# ---------------------------------------------------------------
-# 1. Usar una imagen base de TensorFlow con GPU y Python 3.10.
-#    NOTA: Esto ajusta la versión de TensorFlow a 2.13.0, que es la
-#    última versión oficial con soporte para Python 3.10 en GPU.
-FROM tensorflow/tensorflow:2.13.0-gpu
+# Imagen base: TF 2.16 + CUDA 12 + Python 3.11
+FROM tensorflow/tensorflow:2.16.1-gpu
 
-# 2. Mantener las variables de entorno para optimizar la ejecución.
-ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=on \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PYTHONPATH=/app
+ENV DEBIAN_FRONTEND=noninteractive
 
-# 3. Directorio de trabajo.
+# ── Paquetes de sistema ──────────────────────────────────────────────
+# build-essential      → gcc / g++ / make (necesario para compilar C)
+# pkg-config           → localiza las cflags/libs de cairo
+# libcairo2-dev        → cabeceras + pkg-config *.pc
+# libcairo2            → runtime (ya venía, pero lo incluimos por claridad)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        pkg-config \
+        libcairo2 \
+        libcairo2-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# ── Carpeta de trabajo ───────────────────────────────────────────────
 WORKDIR /app
 
-# 4. Copiar y modificar requirements.txt para un entorno GPU.
+# ── Dependencias Python ──────────────────────────────────────────────
 COPY requirements.txt .
 
-# 5. Ejecutar la instalación en un solo paso robusto.
-#    - El primer sed elimina la línea de 'tensorflow' para no reinstalarlo.
-#    - El segundo sed elimina el sufijo '+cpu' de torch para instalar la versión GPU.
-#    - Finalmente, se instalan los paquetes del archivo ya modificado.
-RUN sed -i '/tensorflow/d' requirements.txt && \
-    sed -i 's|+cpu||g' requirements.txt && \
+RUN sed -i '/^tensorflow/d' requirements.txt && \
     python -m pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt && \
+    pip check                       # Falla rápido si algo está roto
 
-# 6. Copia el código fuente a la imagen.
-COPY src/ ./src/
+# ── Copia del código (ajusta a tu estructura) ────────────────────────
+COPY . .
 
-# NO SE NECESITA ENTRYPOINT. La imagen estará lista para recibir cualquier comando.
+CMD ["python", "main.py"]

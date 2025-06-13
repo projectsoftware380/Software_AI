@@ -305,7 +305,7 @@
             "-m",
             "src.components.backtest.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250612-021510"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250612-202346"
         }
       },
       "exec-ingest-market-data": {
@@ -333,7 +333,7 @@
             "-m",
             "src.components.data_ingestion.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250612-021510"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250612-202346"
         }
       },
       "exec-launch-vertex-ai-lstm-training-job": {
@@ -371,7 +371,7 @@
             "-m",
             "src.components.train_lstm_launcher.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250612-021510"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250612-202346"
         }
       },
       "exec-model-promotion": {
@@ -395,7 +395,7 @@
             "-m",
             "src.components.model_promotion.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250612-021510"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250612-202346"
         }
       },
       "exec-optimize-lstm-hyperparameters": {
@@ -421,7 +421,7 @@
             "-m",
             "src.components.hyperparam_tuning.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250612-021510",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250612-202346",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -451,7 +451,7 @@
             "-m",
             "src.components.data_preparation.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250612-021510"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250612-202346"
         }
       },
       "exec-prepare-reinforcement-learning-data": {
@@ -473,7 +473,7 @@
             "-m",
             "src.components.prepare_rl_data.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250612-021510"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250612-202346"
         }
       },
       "exec-train-rl-agent": {
@@ -497,7 +497,7 @@
             "-m",
             "src.components.train_rl.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250612-021510",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250612-202346",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -580,7 +580,7 @@
             "parameters": {
               "end_date": {
                 "runtimeValue": {
-                  "constant": "2025-06-12"
+                  "constant": "2025-06-13"
                 }
               },
               "min_rows": {
@@ -683,7 +683,7 @@
               },
               "vertex_training_image_uri": {
                 "runtimeValue": {
-                  "constant": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250612-021510"
+                  "constant": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250612-202346"
                 }
               }
             }
