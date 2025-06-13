@@ -42,28 +42,29 @@ COST_PIPS = 0.8        # comisión round-turn
 # ───────────────────── helpers utilitarios ──────────────────────
 def resolve_artifact_dir(base_dir: str) -> str:
     """
-    Devuelve la carpeta que contiene *model.keras*.  Si `base_dir`
-    ya la contiene, se devuelve sin cambios; de lo contrario busca
-    un sub-path 1 nivel por debajo.
+    Si `base_dir` no contiene directamente `model.keras`, busca
+    recursivamente un nivel por debajo y devuelve la primera carpeta
+    que sí lo contenga.  Lanza FileNotFoundError si no lo encuentra.
     """
     client = storage.Client()
     bucket_name, prefix = base_dir.replace("gs://", "").split("/", 1)
     bucket = client.bucket(bucket_name)
 
-    # caso 1: la carpeta ya apunta al modelo
+    # ¿ya está completo?
     if bucket.blob(f"{prefix.rstrip('/')}/model.keras").exists():
         return base_dir.rstrip("/")
 
-    # caso 2: buscamos 1 nivel más abajo
-    for blob in bucket.list_blobs(prefix=prefix.rstrip("/") + "/", delimiter="/"):
+    logger.info("🔎 Buscando model.keras dentro de %s", base_dir)
+    # Listamos blobs para detectar subcarpetas
+    for blob in bucket.list_blobs(prefix=prefix.rstrip("/") + "/"):
         pp = PurePosixPath(blob.name)
         if pp.name == "model.keras":
-            candidate = f"gs://{bucket_name}/{pp.parent.as_posix()}"
-            logger.info("✔ model.keras hallado en %s", candidate)
-            return candidate
+            model_dir = f"gs://{bucket_name}/{pp.parent.as_posix()}"
+            logger.info("✔ model.keras hallado en %s", model_dir)
+            return model_dir
 
     raise FileNotFoundError(
-        f"model.keras no encontrado en {base_dir} ni en sus subdirectorios."
+        f"No se encontró model.keras en {base_dir} ni en sus subdirectorios."
     )
 
 

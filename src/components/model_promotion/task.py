@@ -35,24 +35,24 @@ WEIGHTS = dict(sharpe=0.35, dd=0.30, pf=0.25, win=0.05, exp=0.03, ntrades=0.02)
 # ───────────────────── helpers utilitarios ──────────────────────
 def resolve_artifact_dir(base_dir: str) -> str:
     """
-    Devuelve la carpeta que contiene model.h5.  Si `base_dir` ya la
+    Devuelve la carpeta que contiene model.keras. Si `base_dir` ya la
     contiene se devuelve tal cual; si no, busca 1 nivel por debajo.
     """
     client = storage.Client()
     bucket_name, prefix = base_dir.replace("gs://", "").split("/", 1)
     bucket = client.bucket(bucket_name)
 
-    if bucket.blob(f"{prefix.rstrip('/')}/model.h5").exists():
+    if bucket.blob(f"{prefix.rstrip('/')}/model.keras").exists():
         return base_dir.rstrip("/")
 
     for blob in bucket.list_blobs(prefix=prefix.rstrip("/") + "/", delimiter="/"):
         pp = PurePosixPath(blob.name)
-        if pp.name == "model.h5":
-            logger.info("✔ model.h5 hallado en %s", pp.parent.as_posix())
+        if pp.name == "model.keras":
+            logger.info("✔ model.keras hallado en %s", pp.parent.as_posix())
             return f"gs://{bucket_name}/{pp.parent.as_posix()}"
 
     raise FileNotFoundError(
-        f"model.h5 no encontrado en {base_dir} ni en subdirectorios."
+        f"model.keras no encontrado en {base_dir} ni en subdirectorios."
     )
 
 
@@ -155,7 +155,7 @@ def run_promotion_decision(
     lstm_dir_final = resolve_artifact_dir(new_lstm_artifacts_dir)
     dest_dir = f"{production_base_dir.rstrip('/')}/{pair}/{timeframe}"
 
-    for fname in ("model.h5", "scaler.pkl", "params.json"):
+    for fname in ("model.keras", "scaler.pkl", "params.json"):
         gcs_utils.copy_gcs_object(f"{lstm_dir_final}/{fname}", f"{dest_dir}/{fname}")
     gcs_utils.copy_gcs_object(new_rl_model_path, f"{dest_dir}/ppo_filter_model.zip")
     gcs_utils.copy_gcs_object(new_metrics_path, f"{dest_dir}/metrics_production.json")

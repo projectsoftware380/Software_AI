@@ -75,17 +75,15 @@ def resolve_artifact_dir(base_dir: str) -> str:
 
     logger.info("🔎 Buscando model.keras dentro de %s", base_dir)
     # Listamos blobs para detectar subcarpetas
-    subdirs: set[str] = set()
     for blob in bucket.list_blobs(prefix=prefix.rstrip("/") + "/"):
         pp = PurePosixPath(blob.name)
         if pp.name == "model.keras":
-            logger.info("✔ model.keras hallado en %s", pp.parent.as_posix())
-            return f"gs://{bucket_name}/{pp.parent.as_posix()}"
-        if len(pp.parts) >= len(PurePosixPath(prefix).parts) + 2:
-            subdirs.add("/".join(pp.parts[: len(PurePosixPath(prefix).parts) + 1]))
+            model_dir = f"gs://{bucket_name}/{pp.parent.as_posix()}"
+            logger.info("✔ model.keras hallado en %s", model_dir)
+            return model_dir
 
     raise FileNotFoundError(
-        f"No se encontró model.keras en {base_dir} ni en sus subdirectorios: {subdirs}"
+        f"No se encontró model.keras en {base_dir} ni en sus subdirectorios."
     )
 
 
@@ -117,11 +115,9 @@ def run_rl_data_preparation(
             tmp = Path(tmpdir)
 
             # ── artefactos LSTM ─────────────────────────────────────
-            # === AJUSTE CORREGIDO: Se cambia de .h5 a .keras ===
             model_path = gcs_utils.download_gcs_file(
                 f"{lstm_model_dir}/model.keras", tmp
             )
-            # ======================================================
             scaler_path = gcs_utils.download_gcs_file(
                 f"{lstm_model_dir}/scaler.pkl", tmp
             )
