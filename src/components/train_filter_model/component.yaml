@@ -1,0 +1,48 @@
+# src/components/train_filter_model/component.yaml
+name: Train Filter Model
+description: >
+  Trains a LightGBM classifier to filter LSTM signals, replacing the RL agent.
+  The model learns to predict if a signal will hit its Take Profit or Stop Loss.
+
+inputs:
+  - name: lstm_model_dir
+    type: String
+    description: 'The GCS path to the directory of the trained LSTM model.'
+  - name: features_path
+    type: String
+    description: 'The GCS path to the Parquet file with features for training the filter.'
+  - name: pair
+    type: String
+    description: 'The trading pair to process, e.g., EURUSD.'
+  - name: timeframe
+    type: String
+    description: 'The timeframe of the data, e.g., 15minute.'
+  - name: output_gcs_base_dir
+    type: String
+    description: 'Base GCS directory to save the trained filter model.'
+
+outputs:
+  - name: trained_filter_model_path
+    type: String
+    description: 'The GCS path to the trained LightGBM model (.pkl) and its params (.json).'
+
+implementation:
+  container:
+    image: placeholder-image
+    command:
+      - python
+      - -m
+      - src.components.train_filter_model.task
+    args:
+      - --lstm-model-dir
+      - {inputValue: lstm_model_dir}
+      - --features-path
+      - {inputValue: features_path}
+      - --pair
+      - {inputValue: pair}
+      - --timeframe
+      - {inputValue: timeframe}
+      - --output-gcs-base-dir
+      - {inputValue: output_gcs_base_dir}
+      - --trained-filter-model-path-output
+      - {outputPath: trained_filter_model_path}
