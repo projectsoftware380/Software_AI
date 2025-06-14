@@ -98,7 +98,6 @@ def trading_pipeline_v5(
 
     # 2 ▸ Preparación de datos (con hold-out)
     prepare_opt_data_task = component_op_factory["data_preparation"](
-        project_id=constants.PROJECT_ID,
         pair="ALL",  # Procesa todas las divisas para la fase de optimización
         timeframe=timeframe,
         years_to_keep=backtest_years_to_keep,
@@ -189,4 +188,15 @@ if __name__ == "__main__":
     if os.getenv("SUBMIT_PIPELINE_TO_VERTEX", "true").lower() == "true":
         aip.init(project=constants.PROJECT_ID, location=constants.REGION)
         display_name = f"algo-trading-v5-supervised-filter-{datetime.utcnow():%Y%m%d-%H%M%S}"
-        job = aip.Pipeline
+        
+        # MODIFICACIÓN: Usar aip.PipelineJob y llamar a .run()
+        job = aip.PipelineJob(
+            display_name=display_name,
+            template_path=PIPELINE_JSON,
+            pipeline_root=constants.PIPELINE_ROOT,
+            enable_caching=True # Habilitar caché para re-ejecuciones más rápidas
+        )
+        job.run() # Lanza la pipeline en Vertex AI
+        print(f"🚀 Pipeline lanzada con Display Name: {display_name}")
+    else:
+        print("⏭️ La pipeline no se envió a Vertex AI (SUBMIT_PIPELINE_TO_VERTEX está en 'false').")

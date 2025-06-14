@@ -73,7 +73,9 @@ def _validate_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 # --- Tarea Principal ---
 def run_preparation(
     *,
-    input_gcs_path: str,
+    # Eliminamos input_gcs_path ya que se construirá internamente
+    # input_gcs_path: str,
+    timeframe: str, # Añadimos timeframe directamente como argumento
     output_gcs_path_main: str,
     output_gcs_path_holdout: str,
     years_to_keep: int,
@@ -84,12 +86,32 @@ def run_preparation(
     Orquesta la preparación y división de los datos.
     """
     try:
-        # 1. Cargar y validar datos
-        logger.info("📥 Descargando datos crudos de: %s", input_gcs_path)
-        with tempfile.TemporaryDirectory() as tmpdir:
-            local_in = gcs_utils.download_gcs_file(input_gcs_path, Path(tmpdir))
-            df_raw = pd.read_parquet(local_in)
+        # 1. Cargar y validar datos - MODIFICADO PARA CARGAR TODOS LOS PARES
+        all_dfs = []
+        pairs_to_process = list(constants.SPREADS_PIP.keys())
+        
+        if not pairs_to_process:
+            raise RuntimeError("No se encontraron pares de divisas en constants.SPREADS_PIP para procesar.")
+
+        for single_pair in pairs_to_process:
+            pair_input_path = f"{constants.DATA_PATH}/{single_pair}/{timeframe}/{single_pair}_{timeframe}.parquet"
+            logger.info("📥 Descargando datos crudos para %s de: %s", single_pair, pair_input_path)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                try:
+                    local_in = gcs_utils.download_gcs_file(pair_input_path, Path(tmpdir))
+                    df_pair = pd.read_parquet(local_in)
+                    all_dfs.append(df_pair)
+                except Exception as e:
+                    logger.warning(f"⚠️ No se pudieron cargar datos para {single_pair} desde {pair_input_path}: {e}")
+                    continue
+        
+        if not all_dfs:
+            raise RuntimeError("No se descargó ningún dato para los pares especificados.")
+
+        df_raw = pd.concat(all_dfs, ignore_index=True)
         df_raw = _validate_dataframe(df_raw)
+        logger.info("✔ Datos combinados y validados. Total de filas: %s", len(df_raw))
+
 
         # 2. Calcular indicadores
         dummy_hp: Dict[str, int] = {
@@ -148,7 +170,9 @@ def run_preparation(
 # --- Punto de Entrada / CLI ---
 if __name__ == "__main__":
     p = argparse.ArgumentParser("Task de Preparación y División de Datos")
-    p.add_argument("--pair", required=True)
+    # El argumento 'pair' ahora se usa como un indicador (ej. "ALL")
+    # pero ya no se usa para construir una ruta de entrada única.
+    p.add_argument("--pair", required=True) 
     p.add_argument("--timeframe", required=True)
     p.add_argument("--years-to-keep", type=int, default=5)
     p.add_argument("--holdout-months", type=int, default=3)
@@ -160,11 +184,11 @@ if __name__ == "__main__":
 
     args = p.parse_args()
 
-    # Construir rutas de entrada y salida
-    input_path = f"{constants.DATA_PATH}/{args.pair}/{args.timeframe}/{args.pair}_{args.timeframe}.parquet"
+    # Construir rutas de salida (la entrada se gestiona internamente)
     ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     
     # Ruta para el archivo principal (entrenamiento/optimización)
+    # Mantener el 'pair' en la ruta de salida para la estructura de carpetas
     output_path_main = (
         f"{constants.DATA_FILTERED_FOR_OPT_PATH}/{args.pair}/{args.timeframe}/"
         f"{ts}/{args.pair}_{args.timeframe}_train_opt.parquet"
@@ -176,7 +200,8 @@ if __name__ == "__main__":
     )
 
     run_preparation(
-        input_gcs_path=input_path,
+        # Ya no se pasa input_gcs_path
+        timeframe=args.timeframe, # Pasar timeframe directamente
         output_gcs_path_main=output_path_main,
         output_gcs_path_holdout=output_path_holdout,
         years_to_keep=args.years_to_keep,

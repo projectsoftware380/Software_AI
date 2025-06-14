@@ -36,6 +36,8 @@ RL_DATA_INPUTS_PATH         = f"{PARAMS_PATH}/rl_inputs_v3"
 # Rutas de modelos
 LSTM_MODELS_PATH      = f"{MODELS_PATH}/LSTM_v3"
 RL_MODELS_PATH        = f"{MODELS_PATH}/RL_v3"
+# AÑADE ESTA LÍNEA para definir la ruta del modelo de filtro
+FILTER_MODELS_PATH    = f"{MODELS_PATH}/Filter_v5"
 PRODUCTION_MODELS_PATH = f"{MODELS_PATH}/production_v3"
 
 # ==============================================================================

@@ -1,51 +1,46 @@
+# ────────────────────────────────────────────────────────────────
 # src/components/data_ingestion/component.yaml
+# ────────────────────────────────────────────────────────────────
 name: ingest-market-data-for-all-pairs
-description: |
-  Descarga o actualiza OHLC histórico desde Polygon.io para todos los pares
-  definidos, lo guarda en GCS como archivos Parquet y devuelve un mensaje de
-  finalización.  Si algún par falla se devuelve un código de salida ≠ 0.
+description: >
+  Descarga/actualiza datos OHLC históricos desde Polygon.io para todos los
+  pares de divisas y guarda los Parquet en GCS.
 
 inputs:
   - name: project_id
     type: String
-    description: ID del proyecto de Google Cloud.
   - name: timeframe
     type: String
-    description: Timeframe de las velas (ej. 15minute, 1hour, 4hour…).
-  - name: polygon_api_key_secret_name      # ← nuevo nombre
+  - name: polygon_secret_name        # ← coincide con main.py y task.py
     type: String
-    description: Nombre del secreto en Secret Manager que contiene la API-Key.
   - name: start_date
     type: String
-    description: Fecha de inicio (YYYY-MM-DD). Opcional.
-    default: "2003-01-01"
+    default: "2010-01-01"
   - name: end_date
     type: String
-    description: Fecha final (YYYY-MM-DD). Por defecto hoy.
     default: "2100-01-01"
   - name: min_rows
     type: Integer
-    description: Mínimo de filas descargadas para considerar éxito.
-    default: 1000
+    default: 100000
 
 outputs:
   - name: completion_message
     type: String
-    description: Mensaje de éxito / fallo agregado por el script.
 
 implementation:
   container:
     image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
     command:
       - python
-      - /src/components/data_ingestion/task.py
+      - -m                           # ← módulo, no ruta de archivo
+      - src.components.data_ingestion.task
     args:
       - --project-id
       - {inputValue: project_id}
       - --timeframe
       - {inputValue: timeframe}
-      - --polygon-api-key-secret-name       # ← coincide con el input
-      - {inputValue: polygon_api_key_secret_name}
+      - --polygon-secret-name
+      - {inputValue: polygon_secret_name}
       - --start-date
       - {inputValue: start_date}
       - --end-date

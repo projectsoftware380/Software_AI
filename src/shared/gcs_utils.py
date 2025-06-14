@@ -14,18 +14,23 @@ Funciones:
 - `delete_gcs_blob()`: Elimina un objeto específico de GCS.
 - `ensure_gcs_path_and_get_local()`: Descarga un archivo si es de GCS;
   de lo contrario, devuelve la ruta local.
+- `list_gcs_files()`: Lista archivos en un prefijo GCS.
+- `find_latest_gcs_file_in_timestamped_dirs()`: Encuentra la última versión de un archivo en directorios con timestamp.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import re # Necesario para expresiones regulares
 import tempfile
 from pathlib import Path
+from typing import List
 
 from google.api_core import exceptions
 from google.cloud import storage
 from google.oauth2 import service_account
+import gcsfs # Importar gcsfs para listar directorios
 
 # Configuración del logger para este módulo
 logger = logging.getLogger(__name__)
@@ -178,3 +183,97 @@ def ensure_gcs_path_and_get_local(path_or_uri: str) -> Path:
     if not local_path.exists():
         raise FileNotFoundError(f"La ruta local especificada no existe: {local_path}")
     return local_path
+
+def list_gcs_files(gcs_prefix: str, suffix: str = "") -> List[str]:
+    """
+    Lista todos los archivos dentro de un prefijo de GCS, opcionalmente filtrando por sufijo.
+
+    Args:
+        gcs_prefix (str): La ruta GCS (ej. 'gs://your-bucket/your-folder').
+        suffix (str): Sufijo opcional para filtrar archivos (ej. '.parquet').
+
+    Returns:
+        List[str]: Una lista de URIs GCS de los archivos encontrados.
+    """
+    if not gcs_prefix.startswith("gs://"):
+        raise ValueError(f"El prefijo GCS debe comenzar con 'gs://': {gcs_prefix}")
+
+    # Es importante usar el project_id correcto si no está en la variable de entorno
+    # Usaremos os.getenv("GOOGLE_CLOUD_PROJECT") o una constante como constants.PROJECT_ID
+    # Para este ejemplo, asumiremos que GOOGLE_CLOUD_PROJECT está configurado o lo manejamos.
+    fs = gcsfs.GCSFileSystem(project=os.getenv("GOOGLE_CLOUD_PROJECT")) 
+    
+    # Asegurarse de que el prefijo termina en '/' para listar contenido de carpeta
+    if not gcs_prefix.endswith("/"):
+        gcs_prefix += "/"
+
+    files = []
+    try:
+        # fs.ls devuelve rutas relativas al bucket, ej. 'bucket-name/folder/file.txt'
+        # Necesitamos reconstruir la URI completa 'gs://bucket-name/folder/file.txt'
+        bucket_name = gcs_prefix.split("gs://")[1].split("/")[0]
+        for path in fs.ls(gcs_prefix, detail=False):
+            if fs.isfile(path) and path.endswith(suffix):
+                files.append(f"gs://{path}")
+    except Exception as e:
+        logger.error(f"❌ Error al listar archivos en GCS en {gcs_prefix}: {e}")
+        raise
+        
+    return files
+
+def find_latest_gcs_file_in_timestamped_dirs(base_gcs_path: str, filename: str) -> str | None:
+    """
+    Encuentra la ruta completa de la última versión de un archivo
+    dentro de un conjunto de subdirectorios con marca de tiempo.
+
+    Ejemplo: busca 'best_params.json' en 'gs://bucket/params/pair/YYYYMMDDHHMMSS/'
+
+    Args:
+        base_gcs_path (str): La ruta base que contiene los directorios con timestamp (ej. 'gs://bucket/params/LSTM_v3/EURUSD/').
+        filename (str): El nombre del archivo a buscar (ej. 'best_params.json').
+
+    Returns:
+        str | None: La URI completa del archivo más reciente, o None si no se encuentra.
+    """
+    if not base_gcs_path.startswith("gs://"):
+        raise ValueError(f"La ruta base GCS debe comenzar con 'gs://': {base_gcs_path}")
+
+    fs = gcsfs.GCSFileSystem(project=os.getenv("GOOGLE_CLOUD_PROJECT"))
+    
+    # Asegurarse de que el prefijo termina en '/'
+    if not base_gcs_path.endswith("/"):
+        base_gcs_path += "/"
+
+    timestamp_dirs = []
+    try:
+        # Listar subdirectorios que coincidan con el patrón de marca de tiempo (YYYYMMDDHHMMSS)
+        # fs.ls devuelve rutas relativas al bucket, ej. 'bucket/path/timestamp_dir'
+        for path in fs.ls(base_gcs_path, detail=False):
+            dir_name = Path(path).name # Obtener solo el nombre del directorio (la marca de tiempo)
+            if re.fullmatch(r'\d{14}', dir_name) and fs.isdir(path):
+                timestamp_dirs.append(path)
+    except Exception as e:
+        logger.warning(f"No se pudieron listar directorios en {base_gcs_path}: {e}")
+        return None
+
+    if not timestamp_dirs:
+        logger.warning(f"No se encontraron subdirectorios con marca de tiempo en {base_gcs_path}")
+        return None
+
+    # Ordenar los directorios por timestamp (el más reciente al final)
+    timestamp_dirs.sort()
+
+    # Construir la ruta al archivo en el directorio más reciente
+    latest_dir_path = timestamp_dirs[-1]
+    full_file_path_relative = f"{latest_dir_path}/{filename}"
+    
+    # Reconstruir la URI GCS completa
+    bucket_name = base_gcs_path.split("gs://")[1].split("/")[0]
+    final_gcs_uri = f"gs://{full_file_path_relative}"
+
+    if gcs_path_exists(final_gcs_uri):
+        logger.info(f"✔ Encontrado el archivo más reciente: {final_gcs_uri}")
+        return final_gcs_uri
+    else:
+        logger.warning(f"El archivo {filename} no se encontró en la última carpeta con timestamp: {final_gcs_uri}")
+        return None
