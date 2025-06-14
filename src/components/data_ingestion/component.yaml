@@ -1,11 +1,8 @@
 # src/components/data_ingestion/component.yaml
-name: Ingest Market Data
-description: Fetches and updates raw OHLC market data from Polygon.io and stores it in GCS as a Parquet file.
+name: Ingest Market Data for All Pairs
+description: Fetches and updates raw OHLC market data from Polygon.io for a predefined list of currency pairs and stores them in GCS as Parquet files.
 
 inputs:
-  - name: pair
-    type: String
-    description: 'The trading pair to ingest, e.g., EURUSD.'
   - name: timeframe
     type: String
     description: 'The timeframe for the data, e.g., 15minute.'
@@ -17,11 +14,11 @@ inputs:
     description: 'Name of the secret in Secret Manager containing the Polygon API key.'
   - name: start_date
     type: String
-    description: 'Start date for data fetching in yyyy-MM-DD format.'
+    description: 'Start date for data fetching in YYYY-MM-DD format.'
     default: '2010-01-01'
   - name: end_date
     type: String
-    description: 'End date for data fetching in yyyy-MM-DD format. Defaults to today.'
+    description: 'End date for data fetching in YYYY-MM-DD format. Defaults to today.'
   - name: min_rows
     type: Integer
     description: 'Minimum number of rows required for the download to be considered successful.'
@@ -30,7 +27,7 @@ inputs:
 outputs:
   - name: completion_message
     type: String
-    description: 'A message indicating the result of the ingestion task.'
+    description: 'A message indicating the result of the ingestion task for all pairs.'
 
 implementation:
   container:
@@ -42,8 +39,6 @@ implementation:
       - -m
       - src.components.data_ingestion.task
     args:
-      - --pair
-      - {inputValue: pair}
       - --timeframe
       - {inputValue: timeframe}
       - --project-id
