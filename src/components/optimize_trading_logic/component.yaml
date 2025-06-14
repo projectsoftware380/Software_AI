@@ -1,0 +1,45 @@
+# src/components/optimize_trading_logic/component.yaml
+name: Optimize Trading Logic
+description: >
+  Takes a fixed model architecture and finds the best trading logic parameters
+  (indicators, risk/reward, thresholds) by maximizing the Sharpe Ratio.
+  Runs for each currency pair found.
+
+inputs:
+  - name: features_path
+    type: String
+    description: 'The GCS path to the directory containing Parquet files prepared for optimization.'
+  - name: architecture_params_dir
+    type: String
+    description: 'The GCS path to the directory containing the best architecture JSON files for each pair.'
+  - name: n_trials
+    type: Integer
+    description: 'The number of optimization trials to run in Optuna for each currency pair.'
+    default: 25
+
+outputs:
+  - name: best_params_dir
+    type: String
+    description: 'The GCS directory path containing the final best_params.json files for each pair.'
+  - name: optimization_metrics
+    type: Metrics
+    description: 'Metrics related to the optimization process, like the best trial score.'
+
+implementation:
+  container:
+    image: placeholder-image
+    command:
+      - python
+      - -m
+      - src.components.optimize_trading_logic.task
+    args:
+      - --features-path
+      - {inputValue: features_path}
+      - --architecture-params-dir
+      - {inputValue: architecture_params_dir}
+      - --n-trials
+      - {inputValue: n_trials}
+      - --best-params-dir-output
+      - {outputPath: best_params_dir}
+      - --optimization-metrics-output
+      - {outputPath: optimization_metrics}

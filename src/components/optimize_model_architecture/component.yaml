@@ -1,0 +1,34 @@
+# src/components/optimize_model_architecture/component.yaml
+name: Optimize Model Architecture
+description: >
+  Uses Optuna to find the best LSTM model architecture (layers, units, learning rate, etc.)
+  by minimizing the validation loss. This runs for each pair found in the input data path.
+
+inputs:
+  - name: features_path
+    type: String
+    description: 'The GCS path to the directory containing Parquet files prepared for optimization.'
+  - name: n_trials
+    type: Integer
+    description: 'The number of optimization trials to run in Optuna for each currency pair.'
+    default: 20
+
+outputs:
+  - name: best_architecture_dir
+    type: String
+    description: 'The GCS directory path containing the best_architecture.json files for each pair.'
+
+implementation:
+  container:
+    image: placeholder-image
+    command:
+      - python
+      - -m
+      - src.components.optimize_model_architecture.task
+    args:
+      - --features-path
+      - {inputValue: features_path}
+      - --n-trials
+      - {inputValue: n_trials}
+      - --best-architecture-dir-output
+      - {outputPath: best_architecture_dir}
