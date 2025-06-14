@@ -1,24 +1,23 @@
 # src/components/backtest/component.yaml
-name: backtest-strategy
+name: Perform Final Backtest
 description: >
-  Ejecuta el backtest combinando las predicciones del LSTM y el filtro PPO.
-  Sube los CSV de trades y un JSON con métricas a GCS.
+  Runs a comprehensive backtest on the hold-out dataset. It compares the
+  base strategy (LSTM only) against the filtered strategy (LSTM + LightGBM).
+  Generates a detailed HTML report with QuantStats, CSVs, and metrics.
 
 inputs:
-  - {name: lstm_model_dir,   type: String,  description: "gs://…/…/…/LSTM/<timestamp>"}
-  - {name: rl_model_path,    type: String,  description: "gs://…/ppo_filter_model.zip"}
-  - {name: features_path,    type: String,  description: "gs://…_unseen.parquet"}
-  - {name: pair,             type: String}
-  - {name: timeframe,        type: String}
+  - {name: lstm_model_dir, type: String, description: "GCS path to the trained LSTM model directory."}
+  - {name: filter_model_path, type: String, description: "GCS path to the trained LightGBM filter model directory."}
+  - {name: features_path, type: String, description: "GCS path to the hold-out dataset (.parquet)."}
+  - {name: pair, type: String}
+  - {name: timeframe, type: String}
 
 outputs:
-  - {name: output_gcs_dir,        type: String, description: "Carpeta GCS con CSV + metrics"}
-  - {name: kfp_metrics_artifact,  type: String, description: "Ruta al JSON de métricas para Vertex UI"}
+  - {name: output_gcs_dir, type: String, description: "GCS folder with the full backtest report (HTML, CSVs, metrics)."}
+  - {name: kfp_metrics_artifact, type: String, description: "Path to the metrics JSON for the Vertex AI UI."}
 
 implementation:
   container:
-    # Se añade un placeholder para que KFP pueda cargar el componente.
-    # El script de la pipeline (main.py) lo sobreescribirá con la imagen real.
     image: placeholder-image
     command:
       - python
@@ -27,8 +26,8 @@ implementation:
     args:
       - --lstm-model-dir
       - {inputValue: lstm_model_dir}
-      - --rl-model-path
-      - {inputValue: rl_model_path}
+      - --filter-model-path
+      - {inputValue: filter_model_path}
       - --features-path
       - {inputValue: features_path}
       - --pair
