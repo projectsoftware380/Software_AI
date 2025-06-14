@@ -32,6 +32,9 @@ from google.cloud import storage
 from google.oauth2 import service_account
 import gcsfs # Importar gcsfs para listar directorios
 
+# Importar constantes para el ID del proyecto (¡NUEVO!)
+import src.shared.constants as constants
+
 # Configuración del logger para este módulo
 logger = logging.getLogger(__name__)
 
@@ -198,10 +201,8 @@ def list_gcs_files(gcs_prefix: str, suffix: str = "") -> List[str]:
     if not gcs_prefix.startswith("gs://"):
         raise ValueError(f"El prefijo GCS debe comenzar con 'gs://': {gcs_prefix}")
 
-    # Es importante usar el project_id correcto si no está en la variable de entorno
-    # Usaremos os.getenv("GOOGLE_CLOUD_PROJECT") o una constante como constants.PROJECT_ID
-    # Para este ejemplo, asumiremos que GOOGLE_CLOUD_PROJECT está configurado o lo manejamos.
-    fs = gcsfs.GCSFileSystem(project=os.getenv("GOOGLE_CLOUD_PROJECT")) 
+    # MODIFICACIÓN: Usar constants.PROJECT_ID para asegurar el proyecto correcto
+    fs = gcsfs.GCSFileSystem(project=constants.PROJECT_ID)
     
     # Asegurarse de que el prefijo termina en '/' para listar contenido de carpeta
     if not gcs_prefix.endswith("/"):
@@ -212,9 +213,11 @@ def list_gcs_files(gcs_prefix: str, suffix: str = "") -> List[str]:
         # fs.ls devuelve rutas relativas al bucket, ej. 'bucket-name/folder/file.txt'
         # Necesitamos reconstruir la URI completa 'gs://bucket-name/folder/file.txt'
         bucket_name = gcs_prefix.split("gs://")[1].split("/")[0]
-        for path in fs.ls(gcs_prefix, detail=False):
-            if fs.isfile(path) and path.endswith(suffix):
-                files.append(f"gs://{path}")
+        for path in fs.ls(gcs_prefix, detail=False): # detail=False para obtener solo la ruta
+            # Asegurarse de que 'path' es el nombre completo del blob, no solo el nombre del archivo
+            full_blob_path = path # fs.ls ya devuelve el path completo desde el root del bucket
+            if fs.isfile(full_blob_path) and full_blob_path.endswith(suffix):
+                files.append(f"gs://{full_blob_path}")
     except Exception as e:
         logger.error(f"❌ Error al listar archivos en GCS en {gcs_prefix}: {e}")
         raise
@@ -238,7 +241,8 @@ def find_latest_gcs_file_in_timestamped_dirs(base_gcs_path: str, filename: str) 
     if not base_gcs_path.startswith("gs://"):
         raise ValueError(f"La ruta base GCS debe comenzar con 'gs://': {base_gcs_path}")
 
-    fs = gcsfs.GCSFileSystem(project=os.getenv("GOOGLE_CLOUD_PROJECT"))
+    # MODIFICACIÓN: Usar constants.PROJECT_ID para asegurar el proyecto correcto
+    fs = gcsfs.GCSFileSystem(project=constants.PROJECT_ID)
     
     # Asegurarse de que el prefijo termina en '/'
     if not base_gcs_path.endswith("/"):
@@ -251,7 +255,7 @@ def find_latest_gcs_file_in_timestamped_dirs(base_gcs_path: str, filename: str) 
         for path in fs.ls(base_gcs_path, detail=False):
             dir_name = Path(path).name # Obtener solo el nombre del directorio (la marca de tiempo)
             if re.fullmatch(r'\d{14}', dir_name) and fs.isdir(path):
-                timestamp_dirs.append(path)
+                timestamp_dirs.append(path) # path es ya 'bucket/path/timestamp_dir'
     except Exception as e:
         logger.warning(f"No se pudieron listar directorios en {base_gcs_path}: {e}")
         return None
@@ -264,12 +268,13 @@ def find_latest_gcs_file_in_timestamped_dirs(base_gcs_path: str, filename: str) 
     timestamp_dirs.sort()
 
     # Construir la ruta al archivo en el directorio más reciente
-    latest_dir_path = timestamp_dirs[-1]
-    full_file_path_relative = f"{latest_dir_path}/{filename}"
+    latest_dir_path_full_blob = timestamp_dirs[-1] # Esto es algo como 'bucket/params/LSTM_v3/EURUSD/YYYYMMDDHHMMSS'
+    
+    full_file_path_relative_to_bucket = f"{latest_dir_path_full_blob}/{filename}"
     
     # Reconstruir la URI GCS completa
-    bucket_name = base_gcs_path.split("gs://")[1].split("/")[0]
-    final_gcs_uri = f"gs://{full_file_path_relative}"
+    # El bucket_name ya no es necesario obtenerlo de base_gcs_path si path de fs.ls es completo
+    final_gcs_uri = f"gs://{full_file_path_relative_to_bucket}"
 
     if gcs_path_exists(final_gcs_uri):
         logger.info(f"✔ Encontrado el archivo más reciente: {final_gcs_uri}")
