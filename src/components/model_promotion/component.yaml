@@ -1,24 +1,24 @@
 # src/components/model_promotion/component.yaml
-name: model-promotion
-description: |
-  Decide si el nuevo modelo (LSTM + PPO) debe promoverse a producción
-  comparando métricas de back-test con el modelo actual.
+name: Model Promotion Gate
+description: >
+  Decides if the new model (LSTM + Filter) should be promoted to production.
+  It performs a 3-step check: 1) Is the filtered strategy profitable?
+  2) Does the filter significantly improve the base strategy? 3) Is the new
+  filtered strategy better than the current production model?
 
 inputs:
-  - {name: new_metrics_dir,        type: String}
+  - {name: new_metrics_dir, type: String}
   - {name: new_lstm_artifacts_dir, type: String}
-  - {name: new_rl_model_path,      type: String}
-  - {name: pair,                   type: String}
-  - {name: timeframe,              type: String}
-  - {name: production_base_dir,    type: String}
+  - {name: new_filter_model_path, type: String, description: "GCS path to the trained filter model directory."}
+  - {name: pair, type: String}
+  - {name: timeframe, type: String}
+  - {name: production_base_dir, type: String}
 
 outputs:
-  - {name: model_promoted,         type: String, description: "true/false"}
+  - {name: model_promoted, type: String, description: "'true' if the model is promoted, 'false' otherwise."}
 
 implementation:
   container:
-    # Se añade un placeholder para que KFP pueda cargar el componente.
-    # El script de la pipeline (main.py) lo sobreescribirá con la imagen real.
     image: placeholder-image
     command:
       - python
@@ -29,8 +29,8 @@ implementation:
       - {inputValue: new_metrics_dir}
       - --new-lstm-artifacts-dir
       - {inputValue: new_lstm_artifacts_dir}
-      - --new-rl-model-path
-      - {inputValue: new_rl_model_path}
+      - --new-filter-model-path
+      - {inputValue: new_filter_model_path}
       - --pair
       - {inputValue: pair}
       - --timeframe
