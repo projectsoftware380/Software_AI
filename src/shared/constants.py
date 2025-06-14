@@ -77,6 +77,21 @@ DEFAULT_N_TRIALS   = 2
 DEFAULT_PAIR       = "EURUSD"
 DEFAULT_TIMEFRAME  = "15minute"
 
+# +++ INICIO DE LA NUEVA SECCIÓN: CONFIGURACIÓN DE TRADING +++
+
+# Diccionario de spreads promedio por par en pips.
+# Esto centraliza los costos de transacción para que sean escalables.
+SPREADS_PIP = {
+    "EURUSD": 0.8,
+    #"GBPUSD": 1.0,
+    #"USDJPY": 0.9,
+    #"AUDUSD": 1.1,
+    #"USDCAD": 1.2,
+    # Se pueden añadir más pares aquí a futuro
+}
+
+# +++ FIN DE LA NUEVA SECCIÓN +++
+
 # ──────────────────── SECRET MANAGER ───────────────────────
 POLYGON_API_KEY_SECRET_NAME    = "polygon-api-key"
 POLYGON_API_KEY_SECRET_VERSION = "latest"
