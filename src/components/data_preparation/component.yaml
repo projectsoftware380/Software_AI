@@ -1,6 +1,9 @@
 # src/components/data_preparation/component.yaml
-name: Prepare Optimization Data
-description: Loads raw data, computes indicators, filters for the last N years, and saves the result to be used for hyperparameter optimization.
+name: Prepare Training and Holdout Data
+description: >
+  Loads raw data, computes indicators, and splits the recent data into two sets:
+  1. A main set for optimization and training.
+  2. A final hold-out set for backtesting, using the most recent data.
 
 inputs:
   - name: pair
@@ -11,8 +14,12 @@ inputs:
     description: 'The timeframe of the data, e.g., 15minute.'
   - name: years_to_keep
     type: Integer
-    description: 'Number of recent years of data to keep for the optimization set.'
+    description: 'Total number of recent years of data to consider for the split.'
     default: 5
+  - name: holdout_months
+    type: Integer
+    description: 'Number of recent months to reserve for the final hold-out set.'
+    default: 3
   - name: cleanup_old_versions
     type: Boolean
     description: 'If true, old versioned directories will be removed to save space.'
@@ -21,7 +28,10 @@ inputs:
 outputs:
   - name: prepared_data_path
     type: String
-    description: 'The GCS path to the resulting Parquet file, ready for optimization.'
+    description: 'The GCS path to the Parquet file for optimization/training.'
+  - name: holdout_data_path
+    type: String
+    description: 'The GCS path to the final hold-out Parquet file for backtesting.'
 
 implementation:
   container:
@@ -39,7 +49,11 @@ implementation:
       - {inputValue: timeframe}
       - --years-to-keep
       - {inputValue: years_to_keep}
+      - --holdout-months
+      - {inputValue: holdout_months}
       - --cleanup
       - {inputValue: cleanup_old_versions}
       - --prepared-data-path-output
       - {outputPath: prepared_data_path}
+      - --holdout-data-path-output
+      - {outputPath: holdout_data_path}
