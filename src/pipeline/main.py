@@ -2,18 +2,18 @@
 """
 Pipeline v5 – Final. Reemplaza el filtro RL por un clasificador supervisado (LightGBM).
 
-**Ajustes 2025‑06‑14**
+**Ajustes 2025-06-14**
 ─────────────────────
 1.  Se corrige la llamada al componente **data_ingestion** añadiendo los argumentos
-    requeridos (`project_id`, `polygon_secret_name`, `end_date`).
+    requeridos (`project_id`, `polygon_api_key_secret_name`, `end_date`).
 2.  Se corrige la llamada al componente **data_preparation** añadiendo el argumento
     obligatorio `pair` (se usa "ALL" por defecto para procesar el conjunto
     completo de datos antes del bucle paralelo).
 3.  No se altera ninguna otra lógica de la pipeline.
 
-IMPORTANTE → Revisa que la constante `POLYGON_SECRET_NAME` exista en
-`src/shared/constants.py`.  Si aún no existe, añádela con el nombre de tu
-Secret Manager que guarda la API‑Key de Polygon.io.
+IMPORTANTE → Verifica que `POLYGON_API_KEY_SECRET_NAME` exista en
+`src/shared/constants.py` (es el nombre correcto del secreto con la API‑Key de
+Polygon.io).
 """
 
 import argparse
@@ -43,7 +43,7 @@ COMPONENTS_DIR = Path(__file__).parent.parent / "components"
 
 
 def load_utf8_component(rel_path: str):
-    """Carga un componente YAML preservando UTF‑8 (Windows‑safe)."""
+    """Carga un componente YAML preservando UTF-8 (Windows-safe)."""
     yaml_text = (COMPONENTS_DIR / rel_path).read_text(encoding="utf-8")
     return load_component_from_text(yaml_text)
 
@@ -91,12 +91,12 @@ def trading_pipeline_v5(
     # 1 ▸ Ingestión de datos
     ingest_task = component_op_factory["data_ingestion"](
         project_id=constants.PROJECT_ID,
-        polygon_secret_name=constants.POLYGON_SECRET_NAME,
+        polygon_secret_name=constants.POLYGON_API_KEY_SECRET_NAME,
         end_date=datetime.utcnow().strftime("%Y-%m-%d"),
         timeframe=timeframe,
     )
 
-    # 2 ▸ Preparación de datos (con hold‑out)
+    # 2 ▸ Preparación de datos (con hold-out)
     prepare_opt_data_task = component_op_factory["data_preparation"](
         project_id=constants.PROJECT_ID,
         pair="ALL",  # Procesa todas las divisas para la fase de optimización
@@ -111,7 +111,7 @@ def trading_pipeline_v5(
         n_trials=n_trials_arch,
     )
 
-    # 4 ▸ Optimizar lógica de trading (umbrales, hiper‑parámetros, etc.)
+    # 4 ▸ Optimizar lógica de trading (umbrales, hiper-parámetros, etc.)
     optimize_logic_task = component_op_factory["optimize_trading_logic"](
         features_path=prepare_opt_data_task.outputs["prepared_data_path"],
         architecture_params_dir=optimize_arch_task.outputs["best_architecture_dir"],
@@ -157,7 +157,7 @@ def trading_pipeline_v5(
             output_gcs_base_dir=constants.FILTER_MODELS_PATH,
         )
 
-        # 7 ▸ Backtest final sobre el hold‑out
+        # 7 ▸ Backtest final sobre el hold-out
         backtest_task = component_op_factory["backtest"](
             lstm_model_dir=train_lstm_task.outputs["trained_lstm_dir_path"],
             filter_model_path=train_filter_task.outputs["trained_filter_model_path"],
@@ -189,15 +189,4 @@ if __name__ == "__main__":
     if os.getenv("SUBMIT_PIPELINE_TO_VERTEX", "true").lower() == "true":
         aip.init(project=constants.PROJECT_ID, location=constants.REGION)
         display_name = f"algo-trading-v5-supervised-filter-{datetime.utcnow():%Y%m%d-%H%M%S}"
-        job = aip.PipelineJob(
-            display_name=display_name,
-            template_path=PIPELINE_JSON,
-            pipeline_root=constants.PIPELINE_ROOT,
-            enable_caching=False,
-            parameter_values={
-                "timeframe": constants.DEFAULT_TIMEFRAME,
-            },
-        )
-        print(f"🚀 Enviando PipelineJob '{display_name}'")
-        job.run()
-        print("📊 Sigue el progreso en Vertex AI → Pipelines")
+        job = aip.Pipeline

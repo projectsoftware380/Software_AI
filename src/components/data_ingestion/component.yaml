@@ -1,50 +1,51 @@
 # src/components/data_ingestion/component.yaml
-name: Ingest Market Data for All Pairs
-description: Fetches and updates raw OHLC market data from Polygon.io for a predefined list of currency pairs and stores them in GCS as Parquet files.
+name: ingest-market-data-for-all-pairs
+description: |
+  Descarga o actualiza OHLC histórico desde Polygon.io para todos los pares
+  definidos, lo guarda en GCS como archivos Parquet y devuelve un mensaje de
+  finalización.  Si algún par falla se devuelve un código de salida ≠ 0.
 
 inputs:
-  - name: timeframe
-    type: String
-    description: 'The timeframe for the data, e.g., 15minute.'
   - name: project_id
     type: String
-    description: 'The Google Cloud Project ID where the component is running.'
-  - name: polygon_secret_name
+    description: ID del proyecto de Google Cloud.
+  - name: timeframe
     type: String
-    description: 'Name of the secret in Secret Manager containing the Polygon API key.'
+    description: Timeframe de las velas (ej. 15minute, 1hour, 4hour…).
+  - name: polygon_api_key_secret_name      # ← nuevo nombre
+    type: String
+    description: Nombre del secreto en Secret Manager que contiene la API-Key.
   - name: start_date
     type: String
-    description: 'Start date for data fetching in YYYY-MM-DD format.'
-    default: '2010-01-01'
+    description: Fecha de inicio (YYYY-MM-DD). Opcional.
+    default: "2003-01-01"
   - name: end_date
     type: String
-    description: 'End date for data fetching in YYYY-MM-DD format. Defaults to today.'
+    description: Fecha final (YYYY-MM-DD). Por defecto hoy.
+    default: "2100-01-01"
   - name: min_rows
     type: Integer
-    description: 'Minimum number of rows required for the download to be considered successful.'
-    default: 100000
+    description: Mínimo de filas descargadas para considerar éxito.
+    default: 1000
 
 outputs:
   - name: completion_message
     type: String
-    description: 'A message indicating the result of the ingestion task for all pairs.'
+    description: Mensaje de éxito / fallo agregado por el script.
 
 implementation:
   container:
-    # Se añade un placeholder para que KFP pueda cargar el componente.
-    # El script de la pipeline (main.py) lo sobreescribirá con la imagen real.
-    image: placeholder-image
+    image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
     command:
       - python
-      - -m
-      - src.components.data_ingestion.task
+      - /src/components/data_ingestion/task.py
     args:
-      - --timeframe
-      - {inputValue: timeframe}
       - --project-id
       - {inputValue: project_id}
-      - --polygon-secret-name
-      - {inputValue: polygon_secret_name}
+      - --timeframe
+      - {inputValue: timeframe}
+      - --polygon-api-key-secret-name       # ← coincide con el input
+      - {inputValue: polygon_api_key_secret_name}
       - --start-date
       - {inputValue: start_date}
       - --end-date
