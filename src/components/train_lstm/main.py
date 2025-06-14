@@ -1,15 +1,19 @@
 # RUTA: src/components/train_lstm/main.py
-# 𝐂𝐎́𝐃𝐈𝐆𝐎 𝐀𝐂𝐓𝐔𝐀𝐋𝐈𝐙𝐀𝐃𝐎 — aborta si no hay GPU
+# 𝐂𝐎́𝐃𝐈𝐆𝐎 𝐀𝐂𝐓𝐔𝐀𝐋𝐈𝐙𝐀𝐃𝐎 — con limpieza de versiones antiguas
 
 from __future__ import annotations
-import argparse, json, logging, os, random, sys
+import argparse, json, logging, os, random, sys, re
 from datetime import datetime, timezone
 from pathlib import Path
 
 import joblib, numpy as np, pandas as pd, pandas_ta as ta, tensorflow as tf
 from google.cloud import storage
+import gcsfs
 from sklearn.preprocessing import RobustScaler
 from tensorflow.keras import callbacks, layers, models, mixed_precision
+
+# Importar constantes para el ID del proyecto
+from src.shared import constants
 
 logging.basicConfig(level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s", stream=sys.stdout)
@@ -29,6 +33,30 @@ def setup_environment() -> None:
     mixed_precision.set_global_policy("mixed_float16")
     logger.info("🚀 GPUs: %s | mixed_precision: %s",
                 [g.name for g in gpus], mixed_precision.global_policy().name)
+
+# ─────────── LÓGICA DE LIMPIEZA AÑADIDA ───────────────
+def _keep_only_latest_version(base_gcs_prefix: str) -> None:
+    """
+    Mantiene sólo el sub-directorio con timestamp (YYYYMMDDHHMMSS)
+    más reciente y borra el resto.
+    """
+    try:
+        fs = gcsfs.GCSFileSystem(project=constants.PROJECT_ID)
+        if not base_gcs_prefix.endswith("/"):
+            base_gcs_prefix += "/"
+
+        ts_re = re.compile(r"/(\d{14})/?$")
+        dirs = [p for p in fs.ls(base_gcs_prefix) if fs.isdir(p) and ts_re.search(p)]
+
+        if len(dirs) <= 1:
+            return
+
+        dirs.sort(key=lambda p: ts_re.search(p).group(1), reverse=True)
+        for old in dirs[1:]:
+            logger.info("🗑️  Eliminando versión de modelo antigua: gs://%s", old)
+            fs.rm(old, recursive=True)
+    except Exception as exc:
+        logger.warning("No se pudo limpiar versiones de modelo antiguas: %s", exc)
 
 # ─────────── helpers de features y secuencias ───────────────
 def build_indicators(df, sma_len, rsi_len, macf, macs, stoch_len, atr_len):
@@ -114,13 +142,15 @@ def train_final_model(pair:str, timeframe:str, params_path:str,
     gcs_out = f"{output_gcs_base_dir}/{pair}/{timeframe}/{ts}"
     loc_dir = Path(f"/tmp/artifacts/{ts}"); loc_dir.mkdir(parents=True)
     
-    # === AJUSTE CORREGIDO: Se cambia de .h5 a .keras ===
     model.save(loc_dir/"model.keras"); joblib.dump(scaler, loc_dir/"scaler.pkl")
-    # ======================================================
 
     (loc_dir/"params.json").write_text(json.dumps(hp, indent=4))
     upload_local_directory_to_gcs(loc_dir, gcs_out)
     logger.info("✅ Artefactos subidos a %s", gcs_out)
+
+    # --- LLAMADA A LA LIMPIEZA AÑADIDA ---
+    base_cleanup_path = f"{output_gcs_base_dir}/{pair}/{timeframe}"
+    _keep_only_latest_version(base_cleanup_path)
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()

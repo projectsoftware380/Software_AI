@@ -1,11 +1,17 @@
 # src/components/prepare_rl_data/task.py
 """
 Prepara los datos que el agente PPO usará para filtrar las señales del LSTM.
-1. Localiza y descarga (modelo, escalador, params) entrenados por el LSTM.
-2. Construye indicadores, escala y crea secuencias.
-3. Obtiene predicciones y embeddings LSTM.
-4. Genera la señal 'raw_signal'.
-5. Guarda `obs`, `raw_signal` y `closes` en un .npz y lo sube a GCS.
+
+Flujo Corregido:
+1. Ignora la ruta del modelo de entrada (que puede ser incorrecta).
+2. Construye la ruta correcta del directorio de modelos para el par/timeframe actual.
+3. Encuentra el modelo más reciente (último timestamp) en ese directorio.
+4. Localiza y descarga (modelo, escalador, params) del directorio correcto.
+5. Construye indicadores, escala y crea secuencias.
+6. Obtiene predicciones y embeddings LSTM.
+7. Genera la señal 'raw_signal'.
+8. Guarda `obs`, `raw_signal` y `closes` en un .npz y lo sube a GCS.
+9. Limpia las versiones antiguas de los datos de RL para el par/timeframe actual.
 """
 
 from __future__ import annotations
@@ -15,19 +21,21 @@ import json
 import logging
 import os
 import random
+import re
 import sys
 import tempfile
 from collections import deque
 from datetime import datetime
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Deque
 
+import gcsfs
 import joblib
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 from google.cloud import storage
-from tensorflow.keras import models  # pylint: disable=import-error
+from tensorflow.keras import models
 
 from src.shared import constants, gcs_utils, indicators
 
@@ -55,37 +63,56 @@ try:
         logger.info("🚀 GPU(s) habilitadas: %s", [g.name for g in gpus])
     else:
         logger.info("ℹ️ No se detectaron GPUs; se usará CPU.")
-except Exception as exc:  # pragma: no cover
+except Exception as exc:
     logger.warning("⚠️ No se pudo configurar la GPU: %s", exc)
 
 # ───────────────────────── helpers utilitarios ─────────────────────
-def resolve_artifact_dir(base_dir: str) -> str:
+
+def _keep_only_latest_version(base_gcs_prefix: str) -> None:
     """
-    Si `base_dir` no contiene directamente `model.keras`, busca
-    recursivamente un nivel por debajo y devuelve la primera carpeta
-    que sí lo contenga.  Lanza FileNotFoundError si no lo encuentra.
+    Mantiene sólo el sub-directorio con timestamp (YYYYMMDDHHMMSS)
+    más reciente y borra el resto.
     """
-    client = storage.Client()
-    bucket_name, prefix = base_dir.replace("gs://", "").split("/", 1)
+    try:
+        fs = gcsfs.GCSFileSystem(project=constants.PROJECT_ID)
+        if not base_gcs_prefix.endswith("/"):
+            base_gcs_prefix += "/"
+
+        ts_re = re.compile(r"/(\d{14})/?$")
+        dirs = [p for p in fs.ls(base_gcs_prefix) if fs.isdir(p) and ts_re.search(p)]
+
+        if len(dirs) <= 1:
+            return
+
+        dirs.sort(key=lambda p: ts_re.search(p).group(1), reverse=True)
+        for old in dirs[1:]:
+            logger.info("🗑️  Borrando versión de datos RL antigua: gs://%s", old)
+            fs.rm(old, recursive=True)
+    except Exception as exc:
+        logger.warning("No se pudo limpiar versiones antiguas de datos RL: %s", exc)
+
+
+def find_latest_model_dir(base_path: str) -> str:
+    """
+    Busca dentro de un directorio base en GCS (ej. .../EURUSD/15minute/)
+    y devuelve la subcarpeta con el timestamp más reciente.
+    """
+    client = storage.Client(project=constants.PROJECT_ID)
+    bucket_name, prefix = base_path.replace("gs://", "").split("/", 1)
     bucket = client.bucket(bucket_name)
 
-    # ¿ya está completo?
-    if bucket.blob(f"{prefix.rstrip('/')}/model.keras").exists():
-        return base_dir.rstrip("/")
+    # Usamos el delimitador para listar solo los directorios de primer nivel
+    blobs = bucket.list_blobs(prefix=f"{prefix.rstrip('/')}/", delimiter="/")
+    
+    # El iterador devuelve los directorios en 'prefixes'
+    dirs = [p for p in blobs.prefixes]
 
-    logger.info("🔎 Buscando model.keras dentro de %s", base_dir)
-    # Listamos blobs para detectar subcarpetas
-    for blob in bucket.list_blobs(prefix=prefix.rstrip("/") + "/"):
-        pp = PurePosixPath(blob.name)
-        if pp.name == "model.keras":
-            model_dir = f"gs://{bucket_name}/{pp.parent.as_posix()}"
-            logger.info("✔ model.keras hallado en %s", model_dir)
-            return model_dir
+    if not dirs:
+        raise FileNotFoundError(f"No se encontraron directorios de modelo versionados en {base_path}")
 
-    raise FileNotFoundError(
-        f"No se encontró model.keras en {base_dir} ni en sus subdirectorios."
-    )
-
+    # Ordenar los directorios (que son strings de rutas) y devolver el último
+    latest_dir = sorted(dirs, reverse=True)[0]
+    return f"gs://{bucket_name}/{latest_dir.rstrip('/')}"
 
 def make_sequences(arr: np.ndarray, win: int) -> np.ndarray:
     """Convierte array 2-D en una pila 3-D de ventanas deslizantes."""
@@ -98,7 +125,7 @@ def make_sequences(arr: np.ndarray, win: int) -> np.ndarray:
 
 # ───────────────────────── función principal ───────────────────────
 def run_rl_data_preparation(
-    lstm_model_dir: str,
+    lstm_model_dir: str,  # Este parámetro se ignora, pero se mantiene por compatibilidad
     pair: str,
     timeframe: str,
     output_gcs_base_dir: str,
@@ -107,23 +134,22 @@ def run_rl_data_preparation(
     Devuelve la URI GCS donde se cargó el `.npz` con:
         obs, raw_signal, closes
     """
-    logger.info("➡️  Preparación RL - input dir: %s", lstm_model_dir)
-    lstm_model_dir = resolve_artifact_dir(lstm_model_dir)
-
     try:
+        # --- CORRECCIÓN: CONSTRUIR LA RUTA CORRECTA E IGNORAR LA DE ENTRADA ---
+        actual_model_parent_dir = f"{constants.LSTM_MODELS_PATH}/{pair}/{timeframe}"
+        logger.info("Buscando el modelo más reciente en la ruta correcta: %s", actual_model_parent_dir)
+        
+        # Encontrar el directorio del modelo con el último timestamp
+        correct_lstm_model_dir = find_latest_model_dir(actual_model_parent_dir)
+        logger.info("✅ Directorio de modelo más reciente encontrado: %s", correct_lstm_model_dir)
+
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
 
-            # ── artefactos LSTM ─────────────────────────────────────
-            model_path = gcs_utils.download_gcs_file(
-                f"{lstm_model_dir}/model.keras", tmp
-            )
-            scaler_path = gcs_utils.download_gcs_file(
-                f"{lstm_model_dir}/scaler.pkl", tmp
-            )
-            params_path = gcs_utils.download_gcs_file(
-                f"{lstm_model_dir}/params.json", tmp
-            )
+            # Descargar artefactos desde el directorio correcto
+            model_path = gcs_utils.download_gcs_file(f"{correct_lstm_model_dir}/model.keras", tmp)
+            scaler_path = gcs_utils.download_gcs_file(f"{correct_lstm_model_dir}/scaler.pkl", tmp)
+            params_path = gcs_utils.download_gcs_file(f"{correct_lstm_model_dir}/params.json", tmp)
 
             lstm_model = models.load_model(model_path, compile=False)
             scaler = joblib.load(scaler_path)
@@ -133,13 +159,8 @@ def run_rl_data_preparation(
         logger.info("✔ Artefactos LSTM cargados y modelo de embeddings listo.")
 
         # ── datos crudos OHLC ───────────────────────────────────────
-        raw_data_path = (
-            f"{constants.DATA_PATH}/{pair}/{timeframe}/{pair}_{timeframe}.parquet"
-        )
+        raw_data_path = f"{constants.DATA_PATH}/{pair}/{timeframe}/{pair}_{timeframe}.parquet"
         local_raw_path = gcs_utils.ensure_gcs_path_and_get_local(raw_data_path)
-
-        if not Path(local_raw_path).exists():
-            raise FileNotFoundError(f"Parquet no encontrado: {raw_data_path}")
 
         df_raw = pd.read_parquet(local_raw_path)
         if df_raw.empty:
@@ -152,17 +173,7 @@ def run_rl_data_preparation(
         logger.info("✔ Indicadores calculados (%s filas).", len(df_ind))
 
         # ── escala y secuencias ────────────────────────────────────
-        try:
-            feature_cols = list(scaler.feature_names_in_)  # scikit-learn ≥ 1.0
-        except AttributeError:  # compat con versiones <1.0
-            feature_cols = list(
-                df_ind.select_dtypes(include="number")
-                .columns.difference(["timestamp"])
-            )
-            logger.warning(
-                "Scaler sin feature_names_in_; usando columnas numéricas detectadas."
-            )
-
+        feature_cols = list(scaler.feature_names_in_)
         X_scaled = scaler.transform(df_ind[feature_cols])
         X_seq = make_sequences(X_scaled, win=hp["win"])
         if X_seq.shape[0] == 0:
@@ -171,18 +182,10 @@ def run_rl_data_preparation(
         logger.info("✔ Secuencias generadas: %s", X_seq.shape)
 
         # ── predicciones y embeddings ──────────────────────────────
-        with tf.device(
-            "/GPU:0" if tf.config.list_physical_devices("GPU") else "/CPU:0"
-        ):
+        with tf.device("/GPU:0" if gpus else "/CPU:0"):
             preds = lstm_model.predict(X_seq, verbose=0).astype(np.float32)
             embs = emb_model.predict(X_seq, verbose=0).astype(np.float32)
 
-        if preds.shape[0] != embs.shape[0]:
-            raise ValueError(
-                "Predicciones y embeddings con longitudes distintas."
-            )
-
-        # ── construcción de OBS ────────────────────────────────────
         OBS = np.hstack([preds, embs]).astype(np.float32)
         logger.info("✔ OBS creado: %s", OBS.shape)
 
@@ -194,31 +197,16 @@ def run_rl_data_preparation(
         for i, (u, d) in enumerate(zip(pred_up, pred_dn)):
             mag, diff = max(u, d), abs(u - d)
             raw_dir = 1 if u > d else -1
-            cond = (
-                (
-                    (raw_dir == 1 and mag >= hp["min_thr_up"])
-                    or (raw_dir == -1 and mag >= hp["min_thr_dn"])
-                )
-                and diff >= hp["delta_min"]
-            )
+            cond = ((raw_dir == 1 and mag >= hp["min_thr_up"]) or (raw_dir == -1 and mag >= hp["min_thr_dn"])) and diff >= hp["delta_min"]
             dq.append(raw_dir if cond else 0)
             buys, sells = dq.count(1), dq.count(-1)
-            raw_signal[i] = (
-                1
-                if buys > hp["smooth_win"] // 2
-                else -1
-                if sells > hp["smooth_win"] // 2
-                else 0
-            )
+            raw_signal[i] = 1 if buys > hp["smooth_win"] // 2 else -1 if sells > hp["smooth_win"] // 2 else 0
 
         closes = df_ind.close.values[hp["win"] :].astype(np.float32)
 
         # ── subida del .npz a GCS ──────────────────────────────────
         ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-        final_uri = (
-            f"{output_gcs_base_dir.rstrip('/')}/{pair}/{timeframe}/{ts}"
-            "/ppo_input_data.npz"
-        )
+        final_uri = f"{output_gcs_base_dir.rstrip('/')}/{pair}/{timeframe}/{ts}/ppo_input_data.npz"
 
         with tempfile.TemporaryDirectory() as tmpdir:
             local_npz = Path(tmpdir) / "ppo_input_data.npz"
@@ -226,33 +214,25 @@ def run_rl_data_preparation(
             gcs_utils.upload_gcs_file(local_npz, final_uri)
 
         logger.info("🎉 Datos RL preparados y subidos a %s", final_uri)
+        
+        # --- LLAMADA A LA LIMPIEZA AÑADIDA ---
+        base_cleanup_path = f"{output_gcs_base_dir.rstrip('/')}/{pair}/{timeframe}"
+        _keep_only_latest_version(base_cleanup_path)
+        
         return final_uri
 
-    except Exception as exc:  # pragma: no cover
+    except Exception as exc:
         logger.critical("❌ Fallo en preparación RL: %s", exc, exc_info=True)
         raise
-
 
 # ───────────────────────── CLI / entrypoint ─────────────────────────
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Task de Preparación de Datos para RL")
-    parser.add_argument(
-        "--lstm-model-dir",
-        required=True,
-        help="Ruta GCS al directorio base del modelo LSTM entrenado.",
-    )
+    parser.add_argument("--lstm-model-dir", required=True)
     parser.add_argument("--pair", required=True)
     parser.add_argument("--timeframe", required=True)
-    parser.add_argument(
-        "--output-gcs-base-dir", default=constants.RL_DATA_INPUTS_PATH
-    )
-    parser.add_argument(
-        "--rl-data-path-output",
-        type=Path,
-        required=True,
-        help="Archivo local para escribir la ruta GCS final del .npz",
-    )
-
+    parser.add_argument("--output-gcs-base-dir", default=constants.RL_DATA_INPUTS_PATH)
+    parser.add_argument("--rl-data-path-output", type=Path, required=True)
     args = parser.parse_args()
 
     final_output_path = run_rl_data_preparation(
