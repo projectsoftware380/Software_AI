@@ -136,8 +136,13 @@ def _run_backtest_simulation_from_signals(
         final_signal = base_signal if accept_mask[i] else 0
 
         if final_signal != 0:
-            entry_time = pd.to_datetime(df_aligned["timestamp"].iloc[i], unit="ms")
-            exit_time = pd.to_datetime(df_aligned["timestamp"].iloc[i + horizon], unit="ms")
+            # --- CORRECCIÓN APLICADA AQUÍ ---
+            # Se elimina la llamada redundante a pd.to_datetime, ya que los valores
+            # en la columna df_aligned["timestamp"] ya son del tipo datetime correcto.
+            entry_time = df_aligned["timestamp"].iloc[i]
+            exit_time = df_aligned["timestamp"].iloc[i + horizon]
+            # --- FIN DE LA CORRECCIÓN ---
+            
             pnl_pips = ((closes[i + horizon] - closes[i]) / tick) * final_signal - constants.SPREADS_PIP.get(pair, 0.8)
             trades.append({"entry_time": entry_time, "exit_time": exit_time, "direction": final_signal, "pnl_pips": pnl_pips})
 
