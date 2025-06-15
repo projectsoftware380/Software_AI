@@ -1,38 +1,18 @@
-# src/components/train_lstm_launcher/task.py
-"""
-Lanza un Custom Job en Vertex AI que entrena el LSTM y escribe la ruta
-final del modelo en un archivo de salida para Kubeflow.
-
-Corrección 2025-06-14 — Se unifica el formato del timestamp a 14 dígitos
-(YYYYMMDDHHMMSS) para que coincida con la carpeta generada por
-src.components.train_lstm.main y evitar errores 404 en train_filter_model.
-"""
+# src/components/train_lstm_launcher/task.py  (VERSIÓN COMPLETA CORREGIDA)
 
 from __future__ import annotations
-
-import argparse
-import logging
-import os
-import sys
+import argparse, logging, os, sys
 from datetime import datetime, timezone
 from pathlib import Path
-
 from google.cloud import aiplatform as aip
-
 from src.shared import gcs_utils
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    stream=sys.stdout,
+    level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s", stream=sys.stdout
 )
 logger = logging.getLogger(__name__)
-
 STAGING_BUCKET = "gs://trading-ai-models-460823/staging_for_custom_jobs"
 
-
-# --------------------------------------------------------------------------- #
-#  FUNCIÓN PRINCIPAL                                                          #
 # --------------------------------------------------------------------------- #
 def run_launcher(
     *,
@@ -50,37 +30,22 @@ def run_launcher(
     vertex_service_account: str,
     trained_lstm_dir_path_output: str,
 ) -> None:
-    """Crea y ejecuta el Custom Job que entrena el LSTM."""
 
     aip.init(project=project_id, location=region)
 
-    # Timestamp UNIFICADO → 14 dígitos sin guion (YYYYMMDDHHMMSS)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    # Nombre visible del Job – sólo para Vertex AI
+    ts_disp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    display_name = f"train-lstm-{pair.lower()}-{timeframe.lower()}-{ts_disp}"
 
-    # Nombre visible del job (puede llevar guion o no; aquí sin guion)
-    display_name = f"train-lstm-{pair.lower()}-{timeframe.lower()}-{ts}"
-
-    # Carpeta definitiva donde se guardará el modelo
-    # Coincide 100 % con la ruta usada por src.components.train_lstm.main
-    model_dir = f"{output_gcs_base_dir}/{pair}/{timeframe}/{ts}"
-    logger.info("El modelo se guardará en: %s", model_dir)
-
-    # ------------------------------------------------------------------ #
-    #  Localizar el best_params.json más reciente                        #
-    # ------------------------------------------------------------------ #
+    # ---------- localizar best_params.json ----------
     best_params = gcs_utils.find_latest_gcs_file_in_timestamped_dirs(
-        base_gcs_path=f"{params_path}/{pair}",
-        filename="best_params.json",
+        base_gcs_path=f"{params_path}/{pair}", filename="best_params.json"
     )
     if best_params is None:
-        raise RuntimeError(
-            f"No se encontró best_params.json en {params_path}/{pair}"
-        )
+        raise RuntimeError(f"No se encontró best_params.json en {params_path}/{pair}")
     logger.info("✔ Parámetros: %s", best_params)
 
-    # ------------------------------------------------------------------ #
-    #  Definición del Custom Job                                         #
-    # ------------------------------------------------------------------ #
+    # ---------- definir Custom Job ----------
     worker_pool_specs = [
         {
             "machine_spec": {
@@ -106,7 +71,7 @@ def run_launcher(
     job = aip.CustomJob(
         display_name=display_name,
         worker_pool_specs=worker_pool_specs,
-        base_output_dir=model_dir,  # Directorio unificado sin guion
+        base_output_dir=f"{output_gcs_base_dir}/{pair}/{timeframe}/temp-{ts_disp}",
         project=project_id,
         location=region,
         staging_bucket=STAGING_BUCKET,
@@ -116,39 +81,46 @@ def run_launcher(
     job.run(service_account=vertex_service_account, sync=True)
 
     state = getattr(job.state, "name", str(job.state))
-    logger.info("🏁 Estado final: %s", state)
     if state != "JOB_STATE_SUCCEEDED":
-        logger.error("Custom Job falló — revisa Vertex AI → Training")
+        logger.error("Custom Job falló — revisa Vertex AI › Training")
         sys.exit(1)
 
-    # ------------------------------------------------------------------ #
-    #  Propagar la ruta para el siguiente paso de la pipeline            #
-    # ------------------------------------------------------------------ #
+    # ---------- identificar la carpeta real del modelo ----------
+    latest_model_file = gcs_utils.find_latest_gcs_file_in_timestamped_dirs(
+        base_gcs_path=f"{output_gcs_base_dir}/{pair}/{timeframe}", filename="model.keras"
+    )
+    if latest_model_file is None:
+        raise RuntimeError(
+            "El Custom Job terminó pero no se encontró model.keras en la carpeta de salida"
+        )
+
+    # ✅ conserva el esquema completo
+    model_dir = latest_model_file.rsplit("/", 1)[0]
+    logger.info("✅ Carpeta final del modelo: %s", model_dir)
+
     dest = Path(trained_lstm_dir_path_output)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(model_dir, encoding="utf-8")
-    logger.info("🔗 Ruta del modelo guardada en %s", dest)
+    logger.info("🔗 Ruta propagada a la pipeline: %s", model_dir)
 
 
-# --------------------------------------------------------------------------- #
-#  ENTRYPOINT CLI                                                             #
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--project-id", required=True)
-    parser.add_argument("--region", required=True)
-    parser.add_argument("--pair", required=True)
-    parser.add_argument("--timeframe", required=True)
-    parser.add_argument("--params-path", required=True)
-    parser.add_argument("--features-gcs-path", required=True)
-    parser.add_argument("--output-gcs-base-dir", required=True)
-    parser.add_argument("--vertex-training-image-uri", required=True)
-    parser.add_argument("--vertex-machine-type", required=True)
-    parser.add_argument("--vertex-accelerator-type", required=True)
-    parser.add_argument("--vertex-accelerator-count", type=int, required=True)
-    parser.add_argument("--vertex-service-account", required=True)
-    parser.add_argument("--trained-lstm-dir-path-output", required=True)
-    args = parser.parse_args()
+    p = argparse.ArgumentParser()
+    p.add_argument("--project-id", required=True)
+    p.add_argument("--region", required=True)
+    p.add_argument("--pair", required=True)
+    p.add_argument("--timeframe", required=True)
+    p.add_argument("--params-path", required=True)
+    p.add_argument("--features-gcs-path", required=True)
+    p.add_argument("--output-gcs-base-dir", required=True)
+    p.add_argument("--vertex-training-image-uri", required=True)
+    p.add_argument("--vertex-machine-type", required=True)
+    p.add_argument("--vertex-accelerator-type", required=True)
+    p.add_argument("--vertex-accelerator-count", type=int, required=True)
+    p.add_argument("--vertex-service-account", required=True)
+    p.add_argument("--trained-lstm-dir-path-output", required=True)
+    args = p.parse_args()
 
     run_launcher(
         project_id=args.project_id,
