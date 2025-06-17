@@ -9,94 +9,73 @@ from __future__ import annotations
 
 # ──────────────────── CONFIG GLOBAL GCP ────────────────────
 PROJECT_ID: str = "trading-ai-460823"
-REGION: str = "europe-west1"          # Coincide con Artifact Registry
+REGION: str = "europe-west1"
 GCS_BUCKET_NAME: str = "trading-ai-models-460823"
+BASE_GCS_PATH = f"gs://{GCS_BUCKET_NAME}"
 
-# ──────────────────── SERVICE ACCOUNTS ─────────────────────
+# ──────────────────── RUTAS DE ARTEFACTOS ───────────────────────
+# AJUSTE: Rutas reorganizadas por función para mayor claridad y mantenimiento.
+
+# Rutas de ejecución de la pipeline
+PIPELINE_ROOT = f"{BASE_GCS_PATH}/pipeline_root_v3"
+STAGING_PATH = f"{BASE_GCS_PATH}/staging_for_custom_jobs"
+TENSORBOARD_LOGS_PATH = f"{BASE_GCS_PATH}/tensorboard_logs_v3"
+
+# Rutas de datos
+DATA_PATH = f"{BASE_GCS_PATH}/data"
+DATA_FILTERED_FOR_OPT_PATH = f"{BASE_GCS_PATH}/params/data_filtered_for_opt_v3"
+
+# Rutas de parámetros y optimización
+PARAMS_PATH = f"{BASE_GCS_PATH}/params"
+# AJUSTE: Se añaden rutas específicas para cada etapa de optimización.
+ARCHITECTURE_PARAMS_PATH = f"{PARAMS_PATH}/architecture_v3"
+LOGIC_PARAMS_PATH = f"{PARAMS_PATH}/LSTM_v3"  # Contiene los parámetros de lógica de trading
+RL_DATA_INPUTS_PATH = f"{PARAMS_PATH}/rl_inputs_v3" # Se mantiene por si se reutiliza
+
+# Rutas de modelos
+MODELS_PATH = f"{BASE_GCS_PATH}/models"
+LSTM_MODELS_PATH = f"{MODELS_PATH}/LSTM_v3"
+FILTER_MODELS_PATH = f"{MODELS_PATH}/Filter_v5"
+PRODUCTION_MODELS_PATH = f"{MODELS_PATH}/production_v3"
+RL_MODELS_PATH = f"{MODELS_PATH}/RL_v3" # Se mantiene por si se reutiliza
+
+# Rutas de resultados
+BACKTEST_RESULTS_PATH = f"{BASE_GCS_PATH}/backtest_results_v3"
+
+# ──────────────────── SERVICE ACCOUNTS Y SECRETS ─────────────────────
 VERTEX_LSTM_SERVICE_ACCOUNT: str = (
     "data-ingestion-agent@trading-ai-460823.iam.gserviceaccount.com"
 )
-
-# ──────────────────── RUTAS GCS BASE ───────────────────────
-PIPELINE_ROOT = f"gs://{GCS_BUCKET_NAME}/pipeline_root_v3"
-BASE_GCS_PATH = f"gs://{GCS_BUCKET_NAME}"
-
-DATA_PATH = f"{BASE_GCS_PATH}/data"
-MODELS_PATH = f"{BASE_GCS_PATH}/models"
-STAGING_PATH = f"{BASE_GCS_PATH}/staging_for_custom_jobs"
-TENSORBOARD_LOGS_PATH = f"{BASE_GCS_PATH}/tensorboard_logs_v3"
-BACKTEST_RESULTS_PATH = f"{BASE_GCS_PATH}/backtest_results_v3"
-PARAMS_PATH = f"{BASE_GCS_PATH}/params"
-
-# Rutas específicas
-DATA_FILTERED_FOR_OPT_PATH = f"{PARAMS_PATH}/data_filtered_for_opt_v3"
-LSTM_PARAMS_PATH            = f"{PARAMS_PATH}/LSTM_v3"
-RL_DATA_INPUTS_PATH         = f"{PARAMS_PATH}/rl_inputs_v3"
-
-# Rutas de modelos
-LSTM_MODELS_PATH      = f"{MODELS_PATH}/LSTM_v3"
-RL_MODELS_PATH        = f"{MODELS_PATH}/RL_v3"
-# AÑADE ESTA LÍNEA para definir la ruta del modelo de filtro
-FILTER_MODELS_PATH    = f"{MODELS_PATH}/Filter_v5"
-PRODUCTION_MODELS_PATH = f"{MODELS_PATH}/production_v3"
-
-# ==============================================================================
-# === AJUSTE CLAVE: Se elimina la URI completa y específica de la imagen. ===
-# El script `run_pipeline.ps1` y `main.py` ahora se encargan de construir
-# y pasar la URI completa y versionada dinámicamente.
-#
-# Ya no necesitamos una constante para la URI de la imagen aquí.
-# Si necesitaras las partes base para construir la URI en otro lugar,
-# podrías definirlas así:
-DOCKER_REPO_NAME: str = "data-ingestion-repo"
-DOCKER_IMAGE_NAME: str = "data-ingestion-agent"
-# ==============================================================================
+POLYGON_API_KEY_SECRET_NAME: str = "polygon-api-key"
+POLYGON_API_KEY_SECRET_VERSION = "latest"
 
 # ──────────────────── VERTEX AI DEFAULTS ───────────────────
-
-# +++ INICIO DE LA MODIFICACIÓN: Centralización de Hardware +++
-
-# --- Configuración para CPU (para tareas de datos o como opción base) ---
+# AJUSTE: Configuración de hardware centralizada y consistente.
+DEFAULT_VERTEX_GPU_MACHINE_TYPE = "n1-standard-8"
+DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE = "NVIDIA_TESLA_T4"
+DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT = 1
 DEFAULT_VERTEX_CPU_MACHINE_TYPE = "n1-standard-4"
 
-# --- Configuración para GPU (la nueva configuración centralizada para entrenamiento) ---
-DEFAULT_VERTEX_GPU_MACHINE_TYPE      = "n1-standard-8"
-DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE  = "NVIDIA_TESLA_T4"
-DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT = 1
+# ──────────────────── PIPELINE & TRADING DEFAULTS ────────────────────
+DEFAULT_TIMEFRAME = "15minute"
 
-# --- Valores por defecto para la pipeline ---
-# Estos son los valores que se usaban antes. Puedes mantenerlos o actualizarlos
-# para que la GPU sea la opción por defecto si lo deseas.
-DEFAULT_VERTEX_LSTM_MACHINE_TYPE     = "n1-standard-4"
-DEFAULT_VERTEX_LSTM_ACCELERATOR_TYPE = "ACCELERATOR_TYPE_UNSPECIFIED"
-DEFAULT_VERTEX_LSTM_ACCELERATOR_COUNT = 0
-
-# +++ FIN DE LA MODIFICACIÓN +++
-
-
-# ──────────────────── PIPELINE DEFAULTS ────────────────────
-DEFAULT_N_TRIALS   = 2
-DEFAULT_PAIR       = "EURUSD"
-DEFAULT_TIMEFRAME  = "15minute"
-
-# +++ INICIO DE LA NUEVA SECCIÓN: CONFIGURACIÓN DE TRADING +++
-
-# Diccionario de spreads promedio por par en pips.
-# Esto centraliza los costos de transacción para que sean escalables.
 SPREADS_PIP = {
     "EURUSD": 0.8,
-    #"GBPUSD": 1.0,
-    #"USDJPY": 0.9,
-    #"AUDUSD": 1.1,
-    #"USDCAD": 1.2,
-    # Se pueden añadir más pares aquí a futuro
+    "GBPUSD": 1.0,
+    "USDJPY": 0.9,
+    "AUDUSD": 1.1,
+    "USDCAD": 1.2,
 }
 
-# +++ FIN DE LA NUEVA SECCIÓN +++
-
-# ──────────────────── SECRET MANAGER ───────────────────────
-POLYGON_API_KEY_SECRET_NAME    = "polygon-api-key"
-POLYGON_API_KEY_SECRET_VERSION = "latest"
+# AJUSTE: Se añaden parámetros dummy para la fase de preparación de datos,
+# evitando hardcodear valores en los componentes.
+DUMMY_INDICATOR_PARAMS = {
+    "sma_len": 50,
+    "rsi_len": 14,
+    "macd_fast": 12,
+    "macd_slow": 26,
+    "stoch_len": 14,
+}
 
 # ──────────────────── PUB/SUB TOPICS ───────────────────────
 SUCCESS_TOPIC_ID = "data-ingestion-success"

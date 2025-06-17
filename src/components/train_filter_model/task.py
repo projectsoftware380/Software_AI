@@ -3,16 +3,12 @@
 Entrena un clasificador LightGBM para filtrar las señales del LSTM.
 
 Flujo de Trabajo:
-1.  Carga el modelo LSTM entrenado y los datos preparados.
-2.  Genera las "features" para el filtro: predicciones y embeddings del LSTM,
-    más características de riesgo y de calendario.
-3.  Genera las "etiquetas" (labels): simula cada operación para determinar si
-    hubiera alcanzado el Take Profit (1) o el Stop Loss (0).
-4.  Maneja el desbalance de clases y entrena un modelo LightGBM.
-5.  Valida el modelo y encuentra el umbral de probabilidad óptimo que
-    maximiza la Expectativa Matemática en un set de validación.
-6.  Guarda el modelo entrenado y sus parámetros (incluyendo el umbral) en GCS.
-7.  Limpia versiones antiguas para mantener solo la más reciente.
+1.  Carga el modelo LSTM entrenado y los datos preparados desde rutas exactas.
+2.  Genera "features" y "labels" para el filtro.
+3.  Entrena un modelo LightGBM para predecir operaciones exitosas.
+4.  Encuentra un umbral de probabilidad óptimo en un set de validación.
+5.  Guarda el modelo y sus parámetros en una nueva ruta GCS versionada.
+6.  Propaga la ruta exacta del directorio del modelo al siguiente componente.
 """
 from __future__ import annotations
 
@@ -27,7 +23,6 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-import gcsfs
 import joblib
 import lightgbm as lgb
 import numpy as np
@@ -49,22 +44,7 @@ np.random.seed(SEED)
 tf.random.set_seed(SEED)
 
 # --- Helpers ---
-
-def _keep_only_latest_version(base_gcs_prefix: str) -> None:
-    """Mantiene solo la versión más reciente y borra el resto."""
-    try:
-        fs = gcsfs.GCSFileSystem(project=constants.PROJECT_ID)
-        if not base_gcs_prefix.endswith("/"): base_gcs_prefix += "/"
-        ts_re = re.compile(r"/(\d{14})/?$")
-        dirs = [p for p in fs.ls(base_gcs_prefix) if fs.isdir(p) and ts_re.search(p)]
-        if len(dirs) <= 1: return
-        dirs.sort(key=lambda p: ts_re.search(p).group(1), reverse=True)
-        for old in dirs[1:]:
-            logger.info("🗑️  Borrando versión de filtro antigua: gs://%s", old)
-            fs.rm(old, recursive=True)
-    except Exception as exc:
-        logger.warning("No se pudo limpiar versiones antiguas de filtro: %s", exc)
-
+# La lógica de _generate_features_and_labels no necesita cambios funcionales.
 def _generate_features_and_labels(df_raw: pd.DataFrame, lstm_model: tf.keras.Model, scaler, hp: dict, pair: str):
     """Genera el dataset completo (features y labels) para el clasificador."""
     
@@ -123,11 +103,8 @@ def _generate_features_and_labels(df_raw: pd.DataFrame, lstm_model: tf.keras.Mod
         else:
             labels.append(-1) # No resuelta
     
-    # Alineamos features y labels
     features_df = features_df.iloc[:len(labels)].copy()
     features_df['label'] = labels
-    
-    # Filtramos las no resueltas
     dataset = features_df[features_df['label'] != -1].copy()
     
     X = dataset.drop('label', axis=1)
@@ -136,21 +113,22 @@ def _generate_features_and_labels(df_raw: pd.DataFrame, lstm_model: tf.keras.Mod
     return X, y
 
 # --- Función Principal ---
-
 def run_filter_training(
     *,
     lstm_model_dir: str,
     features_path: str,
     pair: str,
     timeframe: str,
-    output_gcs_base_dir: str
-) -> str:
+    output_gcs_base_dir: str,
+    trained_filter_model_path_output: Path,
+) -> None:
     """Orquesta el entrenamiento del clasificador de filtro."""
     
     # 1. Cargar artefactos LSTM
     logger.info("Cargando artefactos del modelo LSTM desde %s", lstm_model_dir)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
+        # AJUSTE: Se asume que el directorio lstm_model_dir ya es la ruta exacta y versionada.
         model_path = gcs_utils.download_gcs_file(f"{lstm_model_dir}/model.keras", tmp)
         scaler_path = gcs_utils.download_gcs_file(f"{lstm_model_dir}/scaler.pkl", tmp)
         params_path = gcs_utils.download_gcs_file(f"{lstm_model_dir}/params.json", tmp)
@@ -164,20 +142,13 @@ def run_filter_training(
     
     logger.info("Generando features y labels para el filtro...")
     X, y = _generate_features_and_labels(df_raw, lstm_model, scaler, hp, pair)
-    logger.info(f"Dataset generado con {len(X)} muestras. Distribución de clases:\n{y.value_counts(normalize=True)}")
+    logger.info(f"Dataset generado con {len(X)} muestras. Distribución:\n{y.value_counts(normalize=True)}")
 
     # 3. Entrenar el modelo LightGBM
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, shuffle=False)
-    
     n_neg, n_pos = y_train.value_counts().sort_index()
     scale_pos_weight = n_neg / n_pos if n_pos > 0 else 1
-
-    lgb_clf = lgb.LGBMClassifier(
-        objective='binary',
-        scale_pos_weight=scale_pos_weight,
-        random_state=SEED,
-        n_jobs=-1
-    )
+    lgb_clf = lgb.LGBMClassifier(objective='binary', scale_pos_weight=scale_pos_weight, random_state=SEED, n_jobs=-1)
     
     logger.info("Entrenando el modelo de filtro LightGBM...")
     lgb_clf.fit(X_train, y_train, eval_set=[(X_val, y_val)], eval_metric='f1', callbacks=[lgb.early_stopping(10)])
@@ -185,35 +156,23 @@ def run_filter_training(
     # 4. Seleccionar umbral óptimo
     logger.info("Buscando umbral de probabilidad óptimo...")
     y_pred_probs = lgb_clf.predict_proba(X_val)[:, 1]
-    
-    best_expectancy = -np.inf
-    best_threshold = 0.5
-    
+    best_expectancy, best_threshold = -np.inf, 0.5
     for threshold in np.arange(0.5, 0.9, 0.01):
-        y_pred_class = (y_pred_probs >= threshold).astype(int)
-        
-        accepted_trades = X_val[y_pred_class == 1]
-        if len(accepted_trades) == 0: continue
-        
-        pnl = np.where(y_val[y_pred_class == 1] == 1, accepted_trades['tp_pips'], -accepted_trades['sl_pips'])
-        expectancy = pnl.mean()
-        
-        if expectancy > best_expectancy:
-            best_expectancy = expectancy
+        accepted_trades = X_val[(y_pred_probs >= threshold)]
+        if accepted_trades.empty: continue
+        pnl = np.where(y_val[y_pred_probs >= threshold] == 1, accepted_trades['tp_pips'], -accepted_trades['sl_pips'])
+        if pnl.mean() > best_expectancy:
+            best_expectancy = pnl.mean()
             best_threshold = threshold
-            
-    logger.info(f"Mejor umbral encontrado: {best_threshold:.2f} con una Expectativa de {best_expectancy:.2f} pips")
+    logger.info(f"Mejor umbral: {best_threshold:.2f} (Expectativa: {best_expectancy:.2f} pips)")
 
-    # 5. Guardar artefactos del filtro
+    # AJUSTE: Crear una ruta de salida única y versionada para este entrenamiento.
     ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     output_gcs_dir = f"{output_gcs_base_dir}/{pair}/{timeframe}/{ts}"
     
-    filter_params = {
-        "best_threshold": best_threshold,
-        "f1_score_val": f1_score(y_val, (y_pred_probs >= best_threshold).astype(int)),
-        "model_type": "lightgbm"
-    }
+    filter_params = {"best_threshold": best_threshold, "model_type": "lightgbm"}
     
+    # 5. Guardar artefactos en la ruta versionada
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
         joblib.dump(lgb_clf, tmp_path / "filter_model.pkl")
@@ -225,9 +184,12 @@ def run_filter_training(
     logger.info("✅ Modelo de filtro y parámetros guardados en %s", output_gcs_dir)
     
     # 6. Limpiar versiones antiguas
-    _keep_only_latest_version(f"{output_gcs_base_dir}/{pair}/{timeframe}")
+    gcs_utils.keep_only_latest_version(f"{output_gcs_base_dir}/{pair}/{timeframe}")
     
-    return output_gcs_dir
+    # AJUSTE CRÍTICO: Propagar la ruta del DIRECTORIO versionado al siguiente componente.
+    trained_filter_model_path_output.parent.mkdir(parents=True, exist_ok=True)
+    trained_filter_model_path_output.write_text(output_gcs_dir)
+    logger.info("✍️  Ruta de salida del directorio del filtro (%s) escrita para KFP.", output_gcs_dir)
 
 # --- Punto de Entrada ---
 if __name__ == "__main__":
@@ -236,20 +198,15 @@ if __name__ == "__main__":
     parser.add_argument("--features-path", required=True)
     parser.add_argument("--pair", required=True)
     parser.add_argument("--timeframe", required=True)
-    parser.add_argument("--output-gcs-base-dir", default=constants.FILTER_MODELS_PATH) # Necesitarás añadir FILTER_MODELS_PATH a constants.py
+    parser.add_argument("--output-gcs-base-dir", required=True)
     parser.add_argument("--trained-filter-model-path-output", type=Path, required=True)
     args = parser.parse_args()
 
-    # Añade esto a tu src/shared/constants.py:
-    # FILTER_MODELS_PATH = f"{MODELS_PATH}/filter_v1"
-
-    final_output_path = run_filter_training(
+    run_filter_training(
         lstm_model_dir=args.lstm_model_dir,
         features_path=args.features_path,
         pair=args.pair,
         timeframe=args.timeframe,
         output_gcs_base_dir=args.output_gcs_base_dir,
+        trained_filter_model_path_output=args.trained_filter_model_path_output,
     )
-    
-    args.trained_filter_model_path_output.parent.mkdir(parents=True, exist_ok=True)
-    args.trained_filter_model_path_output.write_text(final_output_path)

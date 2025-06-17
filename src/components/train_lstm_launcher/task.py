@@ -1,4 +1,4 @@
-# src/components/train_lstm_launcher/task.py (VERSIÓN CORREGIDA Y ROBUSTA)
+# src/components/train_lstm_launcher/task.py (VERSIÓN CORREGIDA Y DEFINITIVA)
 
 from __future__ import annotations
 import argparse
@@ -9,13 +9,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from google.cloud import aiplatform as aip
-from src.shared import gcs_utils
+
+# AJUSTE: Se importan las constantes y utilidades de GCS para una operación robusta.
+from src.shared import constants, gcs_utils
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s", stream=sys.stdout
 )
 logger = logging.getLogger(__name__)
-STAGING_BUCKET = "gs://trading-ai-models-460823/staging_for_custom_jobs"
 
 # --------------------------------------------------------------------------- #
 def run_launcher(
@@ -34,19 +35,26 @@ def run_launcher(
     vertex_service_account: str,
     trained_lstm_dir_path_output: str,
 ) -> None:
+    """Orquesta el lanzamiento de un CustomJob en Vertex AI para el entrenamiento."""
 
-    aip.init(project=project_id, location=region)
+    aip.init(project=project_id, location=region, staging_bucket=constants.STAGING_PATH)
 
     ts_disp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     display_name = f"train-lstm-{pair.lower()}-{timeframe.lower()}-{ts_disp}"
 
+    # AJUSTE CLAVE 1: Construir la RUTA DE SALIDA FINAL y ÚNICA para este trabajo.
+    # Esta es ahora la "única fuente de verdad" para la ubicación del modelo.
+    # La ruta incluye el par, el timeframe y el nombre único del job.
+    final_model_output_dir = f"{output_gcs_base_dir}/{pair}/{timeframe}/{display_name}"
+    logger.info("Ruta de salida final del modelo definida: %s", final_model_output_dir)
+
     # ---------- Localizar el best_params.json más reciente ----------
-    best_params = gcs_utils.find_latest_gcs_file_in_timestamped_dirs(
+    best_params_uri = gcs_utils.find_latest_gcs_file_in_timestamped_dirs(
         base_gcs_path=f"{params_path}/{pair}", filename="best_params.json"
     )
-    if best_params is None:
-        raise RuntimeError(f"No se encontró best_params.json en {params_path}/{pair}")
-    logger.info("✔ Parámetros de trading encontrados: %s", best_params)
+    if not best_params_uri:
+        raise FileNotFoundError(f"No se encontró best_params.json en la ruta base: {params_path}/{pair}")
+    logger.info("✔ Parámetros de trading más recientes encontrados: %s", best_params_uri)
 
     # ---------- Definir el Custom Job de Vertex AI ----------
     worker_pool_specs = [
@@ -63,9 +71,11 @@ def run_launcher(
                 "args": [
                     f"--pair={pair}",
                     f"--timeframe={timeframe}",
-                    f"--params={best_params}",
+                    f"--params={best_params_uri}",
                     f"--features-gcs-path={features_gcs_path}",
-                    f"--output-gcs-base-dir={output_gcs_base_dir}",
+                    # AJUSTE CLAVE 2: Pasar la RUTA FINAL Y EXACTA directamente al script de entrenamiento.
+                    # El script de entrenamiento ya no construye rutas, solo usa esta.
+                    f"--output-gcs-final-dir={final_model_output_dir}",
                 ],
             },
         }
@@ -74,11 +84,8 @@ def run_launcher(
     job = aip.CustomJob(
         display_name=display_name,
         worker_pool_specs=worker_pool_specs,
-        # Dejamos que Vertex gestione la carpeta de salida para evitar conflictos.
-        base_output_dir=None, 
         project=project_id,
         location=region,
-        staging_bucket=STAGING_BUCKET,
     )
 
     logger.info("⏳ Lanzando Custom Job '%s' para entrenar el modelo LSTM...", display_name)
@@ -89,40 +96,19 @@ def run_launcher(
         logger.error("❌ El Custom Job de entrenamiento LSTM falló. Revisa los logs en Vertex AI > Training.")
         sys.exit(1)
 
-    # --- INICIO DE LA CORRECCIÓN CLAVE ---
-    # Obtener la ruta de salida directamente del objeto del job, que es la fuente de verdad.
-    # El script 'train_lstm.main' crea una subcarpeta con timestamp DENTRO de este directorio.
+    logger.info("✅ El Custom Job de entrenamiento finalizó con éxito.")
     
-    job_output_dir = job.job_spec.base_output_directory
-    logger.info("Directorio de salida base del job: %s", job_output_dir)
-
-    # El script de entrenamiento crea una única carpeta con timestamp dentro del directorio base.
-    # La buscamos para obtener la ruta final y precisa del modelo.
-    latest_model_file = gcs_utils.find_latest_gcs_file_in_timestamped_dirs(
-        base_gcs_path=f"{job_output_dir}/{pair}/{timeframe}",
-        filename="model.keras"
-    )
-
-    if latest_model_file is None:
-        raise RuntimeError(
-            "El Custom Job terminó pero no se encontró 'model.keras' en la carpeta de salida esperada."
-        )
-
-    # Extraer solo la ruta del directorio
-    final_model_path = latest_model_file.rsplit("/", 1)[0]
-    logger.info("✅ Carpeta final del modelo identificada: %s", final_model_path)
-    # --- FIN DE LA CORRECCIÓN CLAVE ---
-
-    # Propagar la ruta correcta al siguiente paso de la pipeline
+    # AJUSTE CLAVE 3: Propagar la ruta conocida y exacta al siguiente paso de la pipeline.
+    # Ya no es necesario buscar ni adivinar, sabemos exactamente dónde debe estar el modelo.
     dest = Path(trained_lstm_dir_path_output)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(final_model_path, encoding="utf-8")
-    logger.info("🔗 Ruta del modelo '%s' propagada con éxito a la pipeline.", final_model_path)
+    dest.write_text(final_model_output_dir, encoding="utf-8")
+    logger.info("🔗 Ruta del modelo '%s' propagada con éxito a la pipeline.", final_model_output_dir)
 
 
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":
-    p = argparse.ArgumentParser()
+    p = argparse.ArgumentParser(description="Lanzador de trabajos de entrenamiento LSTM en Vertex AI.")
     p.add_argument("--project-id", required=True)
     p.add_argument("--region", required=True)
     p.add_argument("--pair", required=True)

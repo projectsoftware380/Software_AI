@@ -1,19 +1,7 @@
 # src/pipeline/main.py
 """
 Pipeline v5 – Final. Reemplaza el filtro RL por un clasificador supervisado (LightGBM).
-
-**Ajustes 2025-06-14**
-─────────────────────
-1.  Se corrige la llamada al componente **data_ingestion** añadiendo los argumentos
-    requeridos (`project_id`, `polygon_api_key_secret_name`, `end_date`).
-2.  Se corrige la llamada al componente **data_preparation** añadiendo el argumento
-    obligatorio `pair` (se usa "ALL" por defecto para procesar el conjunto
-    completo de datos antes del bucle paralelo).
-3.  No se altera ninguna otra lógica de la pipeline.
-
-IMPORTANTE → Verifica que `POLYGON_API_KEY_SECRET_NAME` exista en
-`src/shared/constants.py` (es el nombre correcto del secreto con la API‑Key de
-Polygon.io).
+Implementa una gestión de rutas centralizada y robusta.
 """
 
 import argparse
@@ -25,6 +13,7 @@ import google.cloud.aiplatform as aip
 from kfp import compiler, dsl
 from kfp.components import load_component_from_text
 
+# AJUSTE: Se asegura que 'constants' sea la única fuente de configuración.
 from src.shared import constants
 
 # ───────────────────────────── CLI ──────────────────────────────
@@ -38,7 +27,7 @@ parser.add_argument(
 )
 args, _ = parser.parse_known_args()
 
-# ─────────────────────── Infra y utilidades ─────────────────────
+# ─────────────────────── Carga de Componentes ─────────────────────
 COMPONENTS_DIR = Path(__file__).parent.parent / "components"
 
 
@@ -70,15 +59,13 @@ for comp in component_op_factory.values():
     if hasattr(impl, "container") and impl.container:
         impl.container.image = args.common_image_uri
 
-# ───────────────────────── Definición PIPELINE v5 ─────────────────────────
+# ───────────────────────── Definición de la Pipeline ─────────────────────────
+# AJUSTE: Se actualiza el nombre y la descripción para reflejar la versión corregida.
 @dsl.pipeline(
-    name="algo-trading-mlops-pipeline-v5-supervised-filter",
-    description=(
-        "Versión final: HPO Secuencial → LSTM → Filtro LightGBM → Backtest → Promoción"
-    ),
+    name="algo-trading-mlops-pipeline-v5-robust-paths",
+    description="Versión final con gestión de rutas centralizada, versionada y robusta.",
     pipeline_root=constants.PIPELINE_ROOT,
 )
-
 def trading_pipeline_v5(
     timeframe: str = constants.DEFAULT_TIMEFRAME,
     n_trials_arch: int = 20,
@@ -98,7 +85,9 @@ def trading_pipeline_v5(
 
     # 2 ▸ Preparación de datos (con hold-out)
     prepare_opt_data_task = component_op_factory["data_preparation"](
-        pair="ALL",  # Procesa todas las divisas para la fase de optimización
+        # AJUSTE: Se pasa 'ALL' para que el componente procese todos los pares definidos
+        # en `constants.py` para la fase de optimización.
+        pair="ALL",
         timeframe=timeframe,
         years_to_keep=backtest_years_to_keep,
         holdout_months=holdout_months,
@@ -139,6 +128,8 @@ def trading_pipeline_v5(
             timeframe=timeframe,
             params_path=optimize_logic_task.outputs['best_params_dir'],
             features_gcs_path=prepare_opt_data_task.outputs["prepared_data_path"],
+            # AJUSTE: Se pasa la RUTA BASE. El componente se encargará de crear
+            # el subdirectorio final versionado con timestamp.
             output_gcs_base_dir=constants.LSTM_MODELS_PATH,
             vertex_training_image_uri=args.common_image_uri,
             vertex_machine_type=constants.DEFAULT_VERTEX_GPU_MACHINE_TYPE,
@@ -164,13 +155,11 @@ def trading_pipeline_v5(
             pair=pair,
             timeframe=timeframe,
         )
-
-        # ▼▼▼ CORRECCIÓN APLICADA AQUÍ ▼▼▼
+        # Se asignan recursos de GPU al backtest, ya que carga modelos TF.
         backtest_task.set_cpu_limit("8") \
             .set_memory_limit("30G") \
             .set_accelerator_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT) \
             .set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE)
-        # ▲▲▲ FIN DE LA CORRECCIÓN ▲▲▲
 
         # 8 ▸ Promoción a producción si el backtest pasa los umbrales
         component_op_factory["model_promotion"](
@@ -185,16 +174,18 @@ def trading_pipeline_v5(
 
 # ════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    PIPELINE_JSON = "algo_trading_mlops_pipeline_v5.json"
+    # AJUSTE: Se cambia el nombre del archivo de salida para no sobrescribir el antiguo.
+    PIPELINE_JSON = "algo_trading_mlops_pipeline_v5_corrected.json"
 
     # 1 ▸ Compilar
     compiler.Compiler().compile(trading_pipeline_v5, PIPELINE_JSON)
-    print(f"✅ Pipeline v5 compilada a {PIPELINE_JSON}")
+    print(f"✅ Pipeline v5 (rutas corregidas) compilada a {PIPELINE_JSON}")
 
     # 2 ▸ Enviar a Vertex AI (si la variable de entorno lo permite)
     if os.getenv("SUBMIT_PIPELINE_TO_VERTEX", "true").lower() == "true":
         aip.init(project=constants.PROJECT_ID, location=constants.REGION)
-        display_name = f"algo-trading-v5-supervised-filter-{datetime.utcnow():%Y%m%d-%H%M%S}"
+        # AJUSTE: Se actualiza el nombre del job para mayor claridad en la UI de Vertex.
+        display_name = f"algo-trading-v5-robust-{datetime.utcnow():%Y%m%d-%H%M%S}"
         
         job = aip.PipelineJob(
             display_name=display_name,

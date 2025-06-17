@@ -1,5 +1,5 @@
 # RUTA: src/components/train_lstm/main.py
-# 𝐂𝐎́𝐃𝐈𝐆𝐎 𝐀𝐂𝐓𝐔𝐀𝐋𝐈𝐙𝐀𝐃𝐎 — con limpieza de versiones antiguas
+# 𝐂𝐎́𝐃𝐈𝐆𝐎 𝐂𝐎𝐑𝐑𝐄𝐆𝐈𝐃𝐎 — Se adhiere estrictamente a la ruta de salida proporcionada.
 
 from __future__ import annotations
 import argparse, json, logging, os, random, sys, re
@@ -8,12 +8,11 @@ from pathlib import Path
 
 import joblib, numpy as np, pandas as pd, pandas_ta as ta, tensorflow as tf
 from google.cloud import storage
-import gcsfs
 from sklearn.preprocessing import RobustScaler
 from tensorflow.keras import callbacks, layers, models, mixed_precision
 
-# Importar constantes para el ID del proyecto
-from src.shared import constants
+# AJUSTE: Se importa gcs_utils para usar sus funciones estandarizadas.
+from src.shared import constants, gcs_utils
 
 logging.basicConfig(level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s", stream=sys.stdout)
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # ────────────────────────────────────────────────────────────
 def setup_environment() -> None:
-    """Semillas + **fail-fast** si Vertex arrancó sin GPU."""
+    """Configura semillas y el entorno de GPU."""
     np.random.seed(42); tf.random.set_seed(42); random.seed(42)
     os.environ["TF_DETERMINISTIC_OPS"] = "1"
 
@@ -34,31 +33,7 @@ def setup_environment() -> None:
     logger.info("🚀 GPUs: %s | mixed_precision: %s",
                 [g.name for g in gpus], mixed_precision.global_policy().name)
 
-# ─────────── LÓGICA DE LIMPIEZA AÑADIDA ───────────────
-def _keep_only_latest_version(base_gcs_prefix: str) -> None:
-    """
-    Mantiene sólo el sub-directorio con timestamp (YYYYMMDDHHMMSS)
-    más reciente y borra el resto.
-    """
-    try:
-        fs = gcsfs.GCSFileSystem(project=constants.PROJECT_ID)
-        if not base_gcs_prefix.endswith("/"):
-            base_gcs_prefix += "/"
-
-        ts_re = re.compile(r"/(\d{14})/?$")
-        dirs = [p for p in fs.ls(base_gcs_prefix) if fs.isdir(p) and ts_re.search(p)]
-
-        if len(dirs) <= 1:
-            return
-
-        dirs.sort(key=lambda p: ts_re.search(p).group(1), reverse=True)
-        for old in dirs[1:]:
-            logger.info("🗑️  Eliminando versión de modelo antigua: gs://%s", old)
-            fs.rm(old, recursive=True)
-    except Exception as exc:
-        logger.warning("No se pudo limpiar versiones de modelo antiguas: %s", exc)
-
-# ─────────── helpers de features y secuencias ───────────────
+# ─────────── Helpers de features y secuencias (sin cambios) ───────────────
 def build_indicators(df, sma_len, rsi_len, macf, macs, stoch_len, atr_len):
     out = df.copy()
     out[f"sma_{sma_len}"]   = ta.sma(out.close,  length=sma_len)
@@ -89,75 +64,88 @@ def make_model(inp_sh, lr, dr, filt, units, heads):
     mdl.compile(optimizer=tf.keras.optimizers.Adam(lr), loss="mae")
     return mdl
 
-# ────────────── utilidades GCS (sin cambios) ────────────────
-def download_gcs_file(uri: str, dest: str | Path):
-    logger.info("Descargando %s → %s", uri, dest)
-    bucket, blob = uri.replace("gs://", "").split("/", 1)
-    client = storage.Client()
-    client.bucket(bucket).blob(blob).download_to_filename(dest)
-
-def upload_local_directory_to_gcs(src: str | Path, uri: str):
-    logger.info("Subiendo %s → %s", src, uri)
-    bucket, prefix = uri.replace("gs://", "").split("/", 1)
-    client = storage.Client(); src = Path(src)
-    for f in src.rglob("*"):
-        if f.is_file():
-            client.bucket(bucket).blob(f"{prefix}/{f.relative_to(src)}").upload_from_filename(f)
-
-# ───────────────────── pipeline de entrenamiento ────────────
-def train_final_model(pair:str, timeframe:str, params_path:str,
-                      features_gcs_path:str, output_gcs_base_dir:str):
+# ───────────────────── Lógica de entrenamiento principal ────────────
+# AJUSTE: La función ahora recibe la ruta de salida final y exacta.
+def train_final_model(
+    pair: str,
+    timeframe: str,
+    params_path: str,
+    features_gcs_path: str,
+    output_gcs_final_dir: str # <- Argumento corregido
+):
+    """
+    Ejecuta el pipeline de entrenamiento completo y guarda los artefactos en la
+    ruta GCS final proporcionada.
+    """
     setup_environment()
 
-    tmp = Path("/tmp/data"); tmp.mkdir(exist_ok=True)
-    loc_params = tmp/"params.json";   download_gcs_file(params_path, loc_params)
-    hp         = json.loads(loc_params.read_text())
-    loc_feat   = tmp/Path(features_gcs_path).name; download_gcs_file(features_gcs_path, loc_feat)
-    df_raw     = pd.read_parquet(loc_feat).reset_index(drop=True)
-    logger.info("Features parquet cargado — shape %s", df_raw.shape)
+    # Descarga de artefactos necesarios
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        loc_params = gcs_utils.download_gcs_file(params_path, tmp_path)
+        hp = json.loads(loc_params.read_text())
+        
+        loc_feat = gcs_utils.download_gcs_file(features_gcs_path, tmp_path)
+        df_raw = pd.read_parquet(loc_feat).reset_index(drop=True)
+        logger.info("Features parquet cargado — shape %s", df_raw.shape)
 
-    tick = 0.01 if pair.endswith("JPY") else 0.0001
-    df_b = build_indicators(df_raw, hp["sma_len"], hp["rsi_len"],
-                            hp["macd_fast"], hp["macd_slow"], hp["stoch_len"], 14)
+        # Lógica de preparación de datos y entrenamiento (sin cambios)
+        tick = 0.01 if pair.endswith("JPY") else 0.0001
+        df_b = build_indicators(df_raw, hp["sma_len"], hp["rsi_len"],
+                                hp["macd_fast"], hp["macd_slow"], hp["stoch_len"], 14)
 
-    clo, atr = df_b.close.values, df_b["atr_14"].values / tick
-    fut      = np.roll(clo, -hp["horizon"]); fut[-hp["horizon"]:] = np.nan
-    diff     = (fut - clo) / tick
-    up, dn   = np.maximum(diff, 0)/atr, np.maximum(-diff, 0)/atr
-    mask     = (~np.isnan(diff))
+        clo, atr = df_b.close.values, df_b["atr_14"].values / tick
+        fut = np.roll(clo, -hp["horizon"]); fut[-hp["horizon"]:] = np.nan
+        diff = (fut - clo) / tick
+        up, dn = np.maximum(diff, 0)/atr, np.maximum(-diff, 0)/atr
+        mask = (~np.isnan(diff))
 
-    feat_cols = df_b.columns.difference([c for c in df_b.columns if "atr_" in c] + ["timestamp"])
-    X_raw = df_b.loc[mask, feat_cols].select_dtypes(include=np.number).astype(np.float32)
-    scaler = RobustScaler(); X_scaled = scaler.fit_transform(X_raw)
+        feat_cols = df_b.columns.difference([c for c in df_b.columns if "atr_" in c] + ["timestamp"])
+        X_raw = df_b.loc[mask, feat_cols].select_dtypes(include=np.number).astype(np.float32)
+        scaler = RobustScaler(); X_scaled = scaler.fit_transform(X_raw)
 
-    X_seq, y_up, y_dn = to_sequences(X_scaled, up[mask], dn[mask], hp["win"])
-    logger.info("Dataset final: X=%s", X_seq.shape)
+        X_seq, y_up, y_dn = to_sequences(X_scaled, up[mask], dn[mask], hp["win"])
+        logger.info("Dataset final: X=%s", X_seq.shape)
 
-    model = make_model(X_seq.shape[1:], hp["lr"], hp["dr"], hp["filt"], hp["units"], hp["heads"])
-    model.fit(X_seq, np.vstack([y_up, y_dn]).T, epochs=60, batch_size=128,
-              callbacks=[callbacks.EarlyStopping(patience=5, restore_best_weights=True)],
-              verbose=1)
+        model = make_model(X_seq.shape[1:], hp["lr"], hp["dr"], hp["filt"], hp["units"], hp["heads"])
+        model.fit(X_seq, np.vstack([y_up, y_dn]).T, epochs=60, batch_size=128,
+                  callbacks=[callbacks.EarlyStopping(patience=5, restore_best_weights=True)],
+                  verbose=1)
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-    gcs_out = f"{output_gcs_base_dir}/{pair}/{timeframe}/{ts}"
-    loc_dir = Path(f"/tmp/artifacts/{ts}"); loc_dir.mkdir(parents=True)
-    
-    model.save(loc_dir/"model.keras"); joblib.dump(scaler, loc_dir/"scaler.pkl")
+        # AJUSTE: Guardar artefactos localmente antes de subirlos.
+        loc_artifacts_dir = tmp_path / "artifacts"
+        loc_artifacts_dir.mkdir(parents=True, exist_ok=True)
+        
+        model.save(loc_artifacts_dir / "model.keras")
+        joblib.dump(scaler, loc_artifacts_dir / "scaler.pkl")
+        (loc_artifacts_dir / "params.json").write_text(json.dumps(hp, indent=4))
+        
+        # AJUSTE: Subir el directorio de artefactos a la RUTA FINAL EXACTA proporcionada.
+        gcs_utils.upload_local_directory_to_gcs(loc_artifacts_dir, output_gcs_final_dir)
+        logger.info("✅ Artefactos subidos a %s", output_gcs_final_dir)
 
-    (loc_dir/"params.json").write_text(json.dumps(hp, indent=4))
-    upload_local_directory_to_gcs(loc_dir, gcs_out)
-    logger.info("✅ Artefactos subidos a %s", gcs_out)
-
-    # --- LLAMADA A LA LIMPIEZA AÑADIDA ---
-    base_cleanup_path = f"{output_gcs_base_dir}/{pair}/{timeframe}"
-    _keep_only_latest_version(base_cleanup_path)
+# AJUSTE: La lógica de limpieza se elimina de este script.
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--params", required=True)
-    ap.add_argument("--output-gcs-base-dir", required=True)
+    ap.add_argument("--params", required=True, help="Ruta GCS al archivo de parámetros.")
     ap.add_argument("--pair", required=True)
     ap.add_argument("--timeframe", required=True)
-    ap.add_argument("--features-gcs-path", required=True)
+    ap.add_argument("--features-gcs-path", required=True, help="Ruta GCS al parquet de features.")
+    
+    # AJUSTE: El argumento de salida ahora es la ruta final y exacta.
+    ap.add_argument(
+        "--output-gcs-final-dir",
+        required=True,
+        help="Ruta GCS final y exacta donde se guardarán los artefactos del modelo."
+    )
+    
     a = ap.parse_args()
-    train_final_model(a.pair, a.timeframe, a.params, a.features_gcs_path, a.output_gcs_base_dir)
+    
+    train_final_model(
+        pair=a.pair,
+        timeframe=a.timeframe,
+        params_path=a.params,
+        features_gcs_path=a.features_gcs_path,
+        output_gcs_final_dir=a.output_gcs_final_dir
+    )
