@@ -134,9 +134,11 @@ def run_preparation(
 
         # 5. Limpieza de versiones antiguas (si está activado)
         if cleanup_old_versions:
-            # AJUSTE: La función de limpieza ahora debe estar en gcs_utils para ser reutilizable.
-            # Se asume que existe gcs_utils.keep_only_latest_version(directory_path).
-            parent_dir = str(Path(output_base_dir).parent)
+            # === INICIO DE LA CORRECCIÓN ===
+            # Se obtiene el directorio padre manipulando la cadena de texto,
+            # lo que es seguro para rutas GCS.
+            parent_dir = '/'.join(output_base_dir.split('/')[:-1])
+            # === FIN DE LA CORRECCIÓN ===
             gcs_utils.keep_only_latest_version(parent_dir)
 
         # AJUSTE: Escribir las rutas de salida a los archivos que KFP espera.
