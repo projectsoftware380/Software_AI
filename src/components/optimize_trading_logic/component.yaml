@@ -9,9 +9,9 @@ inputs:
   - name: features_path
     type: String
     description: 'The GCS path to the directory containing Parquet files prepared for optimization.'
-  - name: architecture_params_dir
+  - name: architecture_params_file # Renombrado para reflejar el argumento de task.py
     type: String
-    description: 'The GCS path to the directory containing the best architecture JSON files for each pair.'
+    description: 'The GCS path to the exact best architecture JSON file for the pair.'
   - name: n_trials
     type: Integer
     description: 'The number of optimization trials to run in Optuna for each currency pair.'
@@ -35,8 +35,8 @@ implementation:
     args:
       - --features-path
       - {inputValue: features_path}
-      - --architecture-params-dir
-      - {inputValue: architecture_params_dir}
+      - --architecture-params-file # Nombre de argumento corregido para task.py
+      - {inputValue: architecture_params_file} # Valor de entrada corregido
       - --n-trials
       - {inputValue: n_trials}
       - --best-params-dir-output

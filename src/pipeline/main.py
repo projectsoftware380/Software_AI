@@ -100,8 +100,13 @@ def trading_pipeline_v5(
     optimize_logic_task = component_op_factory["optimize_trading_logic"](
         features_path=prepare_opt_data_task.outputs["prepared_data_path"],
         # --- AJUSTE CLAVE ---
-        # Se pasa la RUTA EXACTA del directorio de arquitectura, no una ruta base.
-        architecture_params_dir=optimize_arch_task.outputs["best_architecture_dir"],
+        # Construir la ruta EXACTA al archivo JSON de arquitectura para el par
+        architecture_params_file=dsl.concat(
+            optimize_arch_task.outputs["best_architecture_dir"], # Este es el directorio GCS base como gs://bucket/path/TIMESTAMP
+            '/',
+            pair, # El par actual en el bucle paralelo
+            '/best_architecture.json' # El nombre del archivo específico
+        ),
         n_trials=n_trials_logic,
     )
 
