@@ -61,10 +61,10 @@ DEFAULT_TIMEFRAME = "15minute"
 
 SPREADS_PIP = {
     "EURUSD": 0.8,
-    "GBPUSD": 1.0,
-    "USDJPY": 0.9,
-    "AUDUSD": 1.1,
-    "USDCAD": 1.2,
+    #"GBPUSD": 1.0,
+    #"USDJPY": 0.9,
+    #"AUDUSD": 1.1,
+    #"USDCAD": 1.2,
 }
 
 # AJUSTE: Se añaden parámetros dummy para la fase de preparación de datos,
