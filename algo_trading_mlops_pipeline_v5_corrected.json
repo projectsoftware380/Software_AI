@@ -61,7 +61,7 @@
                 },
                 "vertex_training_image_uri": {
                   "runtimeValue": {
-                    "constant": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250616-224635"
+                    "constant": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250616-233335"
                   }
                 }
               }
@@ -520,7 +520,7 @@
             "-m",
             "src.components.data_ingestion.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250616-224635"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250616-233335"
         }
       },
       "exec-launch-vertex-ai-lstm-training-job": {
@@ -558,7 +558,7 @@
             "-m",
             "src.components.train_lstm_launcher.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250616-224635"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250616-233335"
         }
       },
       "exec-model-promotion-gate": {
@@ -582,7 +582,7 @@
             "-m",
             "src.components.model_promotion.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250616-224635"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250616-233335"
         }
       },
       "exec-optimize-model-architecture": {
@@ -600,7 +600,7 @@
             "-m",
             "src.components.optimize_model_architecture.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250616-224635",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250616-233335",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -634,7 +634,7 @@
             "-m",
             "src.components.optimize_trading_logic.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250616-224635",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250616-233335",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -668,7 +668,7 @@
             "-m",
             "src.components.backtest.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250616-224635",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250616-233335",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -706,7 +706,7 @@
             "-m",
             "src.components.data_preparation.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250616-224635"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250616-233335"
         }
       },
       "exec-train-filter-model": {
@@ -730,7 +730,7 @@
             "-m",
             "src.components.train_filter_model.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250616-224635"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250616-233335"
         }
       }
     }
@@ -778,7 +778,7 @@
           "parameterIterator": {
             "itemInput": "pipelinechannel--loop-item-param-1",
             "items": {
-              "raw": "[\"EURUSD\", \"GBPUSD\", \"USDJPY\", \"AUDUSD\", \"USDCAD\"]"
+              "raw": "[\"EURUSD\"]"
             }
           },
           "taskInfo": {

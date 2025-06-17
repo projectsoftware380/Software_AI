@@ -83,12 +83,21 @@ def optuna_pruning_callback(trial: optuna.Trial, epoch: int, logs: dict):
     if trial.should_prune():
         raise optuna.exceptions.TrialPruned()
 
+def to_sequences(mat, up, dn, win):
+    """Convierte una matriz de features en secuencias para el LSTM."""
+    X, y_up, y_dn = [], [], []
+    for i in range(win, len(mat)):
+        X.append(mat[i - win:i])
+        y_up.append(up[i])
+        y_dn.append(dn[i])
+    return np.asarray(X, np.float32), np.asarray(y_up, np.float32), np.asarray(y_dn, np.float32)
+
 # --- Función Principal de la Tarea ---
 def run_architecture_optimization(
     *,
     features_path: str,
     n_trials: int,
-    output_gcs_dir_base: str, # AJUSTE: Recibe la ruta base ya versionada.
+    output_gcs_dir_base: str,
     best_architecture_dir_output: Path,
 ) -> None:
     """
@@ -96,26 +105,17 @@ def run_architecture_optimization(
     """
     logger.info("🚀 Iniciando HPO de Arquitectura con %d trials por par...", n_trials)
 
-    # AJUSTE: La lógica de encontrar el archivo de features ahora está en gcs_utils
-    # para mayor robustez y reutilización.
     local_features_path = gcs_utils.ensure_gcs_path_and_get_local(features_path)
     df_full = pd.read_parquet(local_features_path)
-    
-    # Asume que los datos contienen una columna 'pair' o se puede inferir del nombre.
-    # Para este ejemplo, se asume que se procesa un archivo consolidado.
-    # Si cada par tiene su archivo, la lógica de bucle se mantiene.
     
     all_pairs = list(constants.SPREADS_PIP.keys())
     
     for pair in all_pairs:
         logger.info(f"--- Optimizando arquitectura para el par: {pair} ---")
-        # Aquí se podría filtrar df_full si contiene datos de múltiples pares
-        # df_raw = df_full[df_full['pair'] == pair]
-        df_raw = df_full # Asumimos que el archivo de entrada ya está filtrado o es para todos.
+        df_raw = df_full.copy()
         df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"], unit="ms", errors="coerce")
 
         def objective(trial: optuna.Trial) -> float:
-            # ... (Lógica interna de `objective` no se modifica)
             tf.keras.backend.clear_session()
             gc.collect()
 
@@ -126,10 +126,61 @@ def run_architecture_optimization(
                 "filt": trial.suggest_categorical("filt", [16, 32, 64]),
                 "units": trial.suggest_categorical("units", [32, 64, 128]),
                 "heads": trial.suggest_categorical("heads", [2, 4, 8]),
+                # Incluir otros hiperparámetros de indicadores
+                **constants.DUMMY_INDICATOR_PARAMS
             }
             
-            df_ind = indicators.build_indicators(df_raw.copy(), constants.DUMMY_INDICATOR_PARAMS, atr_len=14)
-            # ... (resto de la lógica de preparación de datos y entrenamiento)
+            df_ind = indicators.build_indicators(df_raw.copy(), p, atr_len=14)
+            
+            tick = 0.01 if pair.endswith("JPY") else 0.0001
+            horizon = p.get("horizon", 20) # Usar un valor por defecto si no está
+            
+            closes = df_ind.close.values
+            atr_vals = df_ind[f"atr_14"].values / tick
+            
+            future_prices = np.roll(closes, -horizon)
+            future_prices[-horizon:] = np.nan
+            
+            price_diffs = (future_prices - closes) / tick
+            
+            up_targets = np.maximum(price_diffs, 0) / atr_vals
+            dn_targets = np.maximum(-price_diffs, 0) / atr_vals
+            
+            valid_mask = ~np.isnan(price_diffs)
+            
+            feature_cols = [c for c in df_ind.columns if "atr_" not in c and c != "timestamp"]
+            X_data = df_ind.loc[valid_mask, feature_cols].select_dtypes(include=np.number).astype(np.float32)
+            
+            scaler = RobustScaler()
+            X_scaled = scaler.fit_transform(X_data)
+            
+            X_seq, y_up_seq, y_dn_seq = to_sequences(
+                X_scaled, up_targets[valid_mask], dn_targets[valid_mask], p["win"]
+            )
+            
+            if len(X_seq) == 0:
+                raise ValueError("No se generaron secuencias, revisa los parámetros y los datos.")
+
+            X_train, X_val, y_up_train, y_up_val, y_dn_train, y_dn_val = train_test_split(
+                X_seq, y_up_seq, y_dn_seq, test_size=0.2, shuffle=False
+            )
+
+            model = make_model(X_train.shape[1:], p["lr"], p["dr"], p["filt"], p["units"], p["heads"])
+            
+            # **CORRECCIÓN APLICADA AQUÍ**
+            # Se asigna el resultado de model.fit a la variable 'history'.
+            history = model.fit(
+                X_train, np.vstack((y_up_train, y_dn_train)).T,
+                validation_data=(X_val, np.vstack((y_up_val, y_dn_val)).T),
+                epochs=40,
+                batch_size=128,
+                verbose=0,
+                callbacks=[
+                    callbacks.EarlyStopping(patience=5, restore_best_weights=True),
+                    callbacks.LambdaCallback(on_epoch_end=lambda epoch, logs: optuna_pruning_callback(trial, epoch, logs))
+                ]
+            )
+            
             return min(history.history['val_loss'])
 
         study = optuna.create_study(
@@ -142,7 +193,6 @@ def run_architecture_optimization(
         best_architecture_params = study.best_params
         best_architecture_params["best_val_loss"] = study.best_value
 
-        # AJUSTE: La ruta de salida para este par se construye dentro de la ruta base versionada.
         pair_output_gcs_path = f"{output_gcs_dir_base}/{pair}/best_architecture.json"
         
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -152,11 +202,9 @@ def run_architecture_optimization(
         
         logger.info(f"✅ Arquitectura para {pair} guardada. Mejor val_loss: {study.best_value:.4f}")
 
-    # Limpieza de versiones antiguas
     parent_dir = str(Path(output_gcs_dir_base).parent)
     gcs_utils.keep_only_latest_version(parent_dir)
 
-    # AJUSTE: Propaga la ruta del directorio de salida (versionado) al siguiente componente.
     best_architecture_dir_output.parent.mkdir(parents=True, exist_ok=True)
     best_architecture_dir_output.write_text(output_gcs_dir_base)
     logger.info("✍️  Ruta de salida %s escrita para KFP.", output_gcs_dir_base)
@@ -171,7 +219,6 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
 
-    # AJUSTE: Construye la ruta de salida base y versionada aquí, una sola vez.
     ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     output_dir_gcs = f"{constants.ARCHITECTURE_PARAMS_PATH}/{ts}"
 

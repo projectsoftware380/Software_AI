@@ -1,4 +1,4 @@
-# src/components/train_lstm_launcher/task.py (VERSIÓN CORREGIDA Y DEFINITIVA)
+# src/components/train_lstm_launcher/task.py
 
 from __future__ import annotations
 import argparse
@@ -10,7 +10,7 @@ from pathlib import Path
 
 from google.cloud import aiplatform as aip
 
-# AJUSTE: Se importan las constantes y utilidades de GCS para una operación robusta.
+# Se importan las constantes y utilidades de GCS para una operación robusta.
 from src.shared import constants, gcs_utils
 
 logging.basicConfig(
@@ -44,11 +44,11 @@ def run_launcher(
 
     # AJUSTE CLAVE 1: Construir la RUTA DE SALIDA FINAL y ÚNICA para este trabajo.
     # Esta es ahora la "única fuente de verdad" para la ubicación del modelo.
-    # La ruta incluye el par, el timeframe y el nombre único del job.
     final_model_output_dir = f"{output_gcs_base_dir}/{pair}/{timeframe}/{display_name}"
     logger.info("Ruta de salida final del modelo definida: %s", final_model_output_dir)
 
-    # ---------- Localizar el best_params.json más reciente ----------
+    # AJUSTE: Se elimina la búsqueda frágil. Se asume que `params_path` es la ruta
+    # al directorio que contiene los `best_params.json` para cada par.
     best_params_uri = gcs_utils.find_latest_gcs_file_in_timestamped_dirs(
         base_gcs_path=f"{params_path}/{pair}", filename="best_params.json"
     )
@@ -74,7 +74,6 @@ def run_launcher(
                     f"--params={best_params_uri}",
                     f"--features-gcs-path={features_gcs_path}",
                     # AJUSTE CLAVE 2: Pasar la RUTA FINAL Y EXACTA directamente al script de entrenamiento.
-                    # El script de entrenamiento ya no construye rutas, solo usa esta.
                     f"--output-gcs-final-dir={final_model_output_dir}",
                 ],
             },
