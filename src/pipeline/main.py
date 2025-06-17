@@ -137,7 +137,6 @@ def trading_pipeline_v5(
             region=constants.REGION,
             pair=pair,
             timeframe=timeframe,
-            # MODIFICACIÓN CLAVE AQUÍ: Pasar solo la ruta base de los parámetros
             params_path=optimize_logic_task.outputs['best_params_dir'],
             features_gcs_path=prepare_opt_data_task.outputs["prepared_data_path"],
             output_gcs_base_dir=constants.LSTM_MODELS_PATH,
@@ -166,6 +165,13 @@ def trading_pipeline_v5(
             timeframe=timeframe,
         )
 
+        # ▼▼▼ CORRECCIÓN APLICADA AQUÍ ▼▼▼
+        backtest_task.set_cpu_limit("8") \
+            .set_memory_limit("30G") \
+            .set_accelerator_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT) \
+            .set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE)
+        # ▲▲▲ FIN DE LA CORRECCIÓN ▲▲▲
+
         # 8 ▸ Promoción a producción si el backtest pasa los umbrales
         component_op_factory["model_promotion"](
             new_metrics_dir=backtest_task.outputs["output_gcs_dir"],
@@ -190,14 +196,13 @@ if __name__ == "__main__":
         aip.init(project=constants.PROJECT_ID, location=constants.REGION)
         display_name = f"algo-trading-v5-supervised-filter-{datetime.utcnow():%Y%m%d-%H%M%S}"
         
-        # MODIFICACIÓN: Usar aip.PipelineJob y llamar a .run()
         job = aip.PipelineJob(
             display_name=display_name,
             template_path=PIPELINE_JSON,
             pipeline_root=constants.PIPELINE_ROOT,
-            enable_caching=True # Habilitar caché para re-ejecuciones más rápidas
+            enable_caching=True
         )
-        job.run() # Lanza la pipeline en Vertex AI
+        job.run()
         print(f"🚀 Pipeline lanzada con Display Name: {display_name}")
     else:
         print("⏭️ La pipeline no se envió a Vertex AI (SUBMIT_PIPELINE_TO_VERTEX está en 'false').")

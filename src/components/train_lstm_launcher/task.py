@@ -1,9 +1,13 @@
-# src/components/train_lstm_launcher/task.py  (VERSIÓN COMPLETA CORREGIDA)
+# src/components/train_lstm_launcher/task.py (VERSIÓN CORREGIDA Y ROBUSTA)
 
 from __future__ import annotations
-import argparse, logging, os, sys
+import argparse
+import logging
+import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
 from google.cloud import aiplatform as aip
 from src.shared import gcs_utils
 
@@ -33,19 +37,18 @@ def run_launcher(
 
     aip.init(project=project_id, location=region)
 
-    # Nombre visible del Job – sólo para Vertex AI
     ts_disp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     display_name = f"train-lstm-{pair.lower()}-{timeframe.lower()}-{ts_disp}"
 
-    # ---------- localizar best_params.json ----------
+    # ---------- Localizar el best_params.json más reciente ----------
     best_params = gcs_utils.find_latest_gcs_file_in_timestamped_dirs(
         base_gcs_path=f"{params_path}/{pair}", filename="best_params.json"
     )
     if best_params is None:
         raise RuntimeError(f"No se encontró best_params.json en {params_path}/{pair}")
-    logger.info("✔ Parámetros: %s", best_params)
+    logger.info("✔ Parámetros de trading encontrados: %s", best_params)
 
-    # ---------- definir Custom Job ----------
+    # ---------- Definir el Custom Job de Vertex AI ----------
     worker_pool_specs = [
         {
             "machine_spec": {
@@ -71,37 +74,50 @@ def run_launcher(
     job = aip.CustomJob(
         display_name=display_name,
         worker_pool_specs=worker_pool_specs,
-        base_output_dir=f"{output_gcs_base_dir}/{pair}/{timeframe}/temp-{ts_disp}",
+        # Dejamos que Vertex gestione la carpeta de salida para evitar conflictos.
+        base_output_dir=None, 
         project=project_id,
         location=region,
         staging_bucket=STAGING_BUCKET,
     )
 
-    logger.info("⏳ Lanzando Custom Job %s", display_name)
+    logger.info("⏳ Lanzando Custom Job '%s' para entrenar el modelo LSTM...", display_name)
     job.run(service_account=vertex_service_account, sync=True)
 
     state = getattr(job.state, "name", str(job.state))
     if state != "JOB_STATE_SUCCEEDED":
-        logger.error("Custom Job falló — revisa Vertex AI › Training")
+        logger.error("❌ El Custom Job de entrenamiento LSTM falló. Revisa los logs en Vertex AI > Training.")
         sys.exit(1)
 
-    # ---------- identificar la carpeta real del modelo ----------
+    # --- INICIO DE LA CORRECCIÓN CLAVE ---
+    # Obtener la ruta de salida directamente del objeto del job, que es la fuente de verdad.
+    # El script 'train_lstm.main' crea una subcarpeta con timestamp DENTRO de este directorio.
+    
+    job_output_dir = job.job_spec.base_output_directory
+    logger.info("Directorio de salida base del job: %s", job_output_dir)
+
+    # El script de entrenamiento crea una única carpeta con timestamp dentro del directorio base.
+    # La buscamos para obtener la ruta final y precisa del modelo.
     latest_model_file = gcs_utils.find_latest_gcs_file_in_timestamped_dirs(
-        base_gcs_path=f"{output_gcs_base_dir}/{pair}/{timeframe}", filename="model.keras"
+        base_gcs_path=f"{job_output_dir}/{pair}/{timeframe}",
+        filename="model.keras"
     )
+
     if latest_model_file is None:
         raise RuntimeError(
-            "El Custom Job terminó pero no se encontró model.keras en la carpeta de salida"
+            "El Custom Job terminó pero no se encontró 'model.keras' en la carpeta de salida esperada."
         )
 
-    # ✅ conserva el esquema completo
-    model_dir = latest_model_file.rsplit("/", 1)[0]
-    logger.info("✅ Carpeta final del modelo: %s", model_dir)
+    # Extraer solo la ruta del directorio
+    final_model_path = latest_model_file.rsplit("/", 1)[0]
+    logger.info("✅ Carpeta final del modelo identificada: %s", final_model_path)
+    # --- FIN DE LA CORRECCIÓN CLAVE ---
 
+    # Propagar la ruta correcta al siguiente paso de la pipeline
     dest = Path(trained_lstm_dir_path_output)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(model_dir, encoding="utf-8")
-    logger.info("🔗 Ruta propagada a la pipeline: %s", model_dir)
+    dest.write_text(final_model_path, encoding="utf-8")
+    logger.info("🔗 Ruta del modelo '%s' propagada con éxito a la pipeline.", final_model_path)
 
 
 # --------------------------------------------------------------------------- #

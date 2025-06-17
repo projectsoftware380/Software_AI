@@ -1,7 +1,14 @@
 # src/components/backtest/task.py
 """
-Back-test comparativo: genera reporte QuantStats, CSV de trades,
-JSON de métricas y artefacto KFP para Vertex AI.
+Back-test comparativo: simula operaciones (base y filtradas),
+calcula métricas con Empyrical y genera un tear-sheet con PyFolio.
+
+Produce:
+- trades_base.csv / trades_filtered.csv
+- metrics.json
+- report_filtered.png (o .txt si la serie es insuficiente)
+- kfp_metrics.json  (métricas para UI de Vertex AI)
+- output parameter  output_gcs_dir  (→ /tmp/outputs/output_gcs_dir/data)
 """
 from __future__ import annotations
 
@@ -15,21 +22,29 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Tuple
 
+# ▼▼▼ INICIO DE LA CORRECCIÓN ▼▼▼
+# Se fuerza a TensorFlow a utilizar únicamente la CPU para evitar errores de CUDA/GPU.
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+# ▲▲▲ FIN DE LA CORRECCIÓN ▲▲▲
+
 import joblib
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
-import quantstats as qs
+import pyfolio as pf
+import empyrical as emp
+import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow.keras import models
 
 from src.shared import constants, gcs_utils, indicators
 
 # ───────────────────────── Configuración global ────────────────────────────
-os.environ["QS_NO_IPYTHON"] = "1"  # evita dependencia de IPython en QuantStats
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+os.environ["PYFOLIO_SUPPRESS_ERRORS"] = "1"
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s"
+)
 logger = logging.getLogger(__name__)
-qs.extend_pandas()
 
 # ─────────────────────────────── Helpers ───────────────────────────────────
 def _load_artifacts(
@@ -42,11 +57,21 @@ def _load_artifacts(
             gcs_utils.download_gcs_file(f"{lstm_model_dir}/model.keras", tmp),
             compile=False,
         )
-        scaler = joblib.load(gcs_utils.download_gcs_file(f"{lstm_model_dir}/scaler.pkl", tmp))
-        hp = json.loads(gcs_utils.download_gcs_file(f"{lstm_model_dir}/params.json", tmp).read_text())
-        filter_model = joblib.load(gcs_utils.download_gcs_file(f"{filter_model_path}/filter_model.pkl", tmp))
+        scaler = joblib.load(
+            gcs_utils.download_gcs_file(f"{lstm_model_dir}/scaler.pkl", tmp)
+        )
+        hp = json.loads(
+            gcs_utils.download_gcs_file(
+                f"{lstm_model_dir}/params.json", tmp
+            ).read_text()
+        )
+        filter_model = joblib.load(
+            gcs_utils.download_gcs_file(f"{filter_model_path}/filter_model.pkl", tmp)
+        )
         filter_params = json.loads(
-            gcs_utils.download_gcs_file(f"{filter_model_path}/filter_params.json", tmp).read_text()
+            gcs_utils.download_gcs_file(
+                f"{filter_model_path}/filter_params.json", tmp
+            ).read_text()
         )
     logger.info("✔ Artefactos LSTM y filtro LightGBM cargados.")
     return model, scaler, hp, filter_model, filter_params
@@ -73,11 +98,10 @@ def _generate_features_for_filter(
     pair: str,
 ):
     """Genera embeddings LSTM + features adicionales para el filtro."""
-    feature_cols = list(scaler.feature_names_in_)
-    X_scaled = scaler.transform(df[feature_cols].values)
-    X_seq = np.stack([X_scaled[i - hp["win"] : i] for i in range(hp["win"], len(X_scaled))]).astype(
-        np.float32
-    )
+    X_scaled = scaler.transform(df[scaler.feature_names_in_].values)
+    X_seq = np.stack(
+        [X_scaled[i - hp["win"] : i] for i in range(hp["win"], len(X_scaled))]
+    ).astype(np.float32)
 
     emb_model = models.Model(lstm_model.input, lstm_model.layers[-2].output)
     preds = lstm_model.predict(X_seq, verbose=0, batch_size=1024)
@@ -126,46 +150,67 @@ def _run_backtest_simulation_from_signals(
         raw_dir = 1 if u > d else -1
         diff = abs(u - d)
 
-        cond_base = ((raw_dir == 1 and u >= hp["min_thr_up"]) or (raw_dir == -1 and d >= hp["min_thr_dn"])) and (
-            diff >= hp["delta_min"]
+        cond_base = (
+            ((raw_dir == 1 and u >= hp["min_thr_up"])
+             or (raw_dir == -1 and d >= hp["min_thr_dn"]))
+            and (diff >= hp["delta_min"])
         )
 
         dq.append(raw_dir if cond_base else 0)
         buys, sells = dq.count(1), dq.count(-1)
-        base_signal = 1 if buys > hp["smooth_win"] // 2 else -1 if sells > hp["smooth_win"] // 2 else 0
+        base_signal = (
+            1 if buys > hp["smooth_win"] // 2
+            else -1 if sells > hp["smooth_win"] // 2
+            else 0
+        )
         final_signal = base_signal if accept_mask[i] else 0
 
-        if final_signal != 0:
-            # --- CORRECCIÓN APLICADA AQUÍ ---
-            # Se elimina la llamada redundante a pd.to_datetime, ya que los valores
-            # en la columna df_aligned["timestamp"] ya son del tipo datetime correcto.
+        if final_signal:
             entry_time = df_aligned["timestamp"].iloc[i]
             exit_time = df_aligned["timestamp"].iloc[i + horizon]
-            # --- FIN DE LA CORRECCIÓN ---
-            
-            pnl_pips = ((closes[i + horizon] - closes[i]) / tick) * final_signal - constants.SPREADS_PIP.get(pair, 0.8)
-            trades.append({"entry_time": entry_time, "exit_time": exit_time, "direction": final_signal, "pnl_pips": pnl_pips})
+            pnl_pips = (
+                (closes[i + horizon] - closes[i]) / tick
+            ) * final_signal - constants.SPREADS_PIP.get(pair, 0.8)
+            trades.append(
+                dict(
+                    entry_time=entry_time,
+                    exit_time=exit_time,
+                    direction=final_signal,
+                    pnl_pips=pnl_pips,
+                )
+            )
 
     return pd.DataFrame(trades)
 
 
-def _calculate_metrics(trades_df: pd.DataFrame) -> Dict[str, float]:
-    """Calcula métricas QS a partir del DataFrame de trades."""
-    if trades_df.empty:
-        return {k: 0.0 for k in ["trades", "win_rate", "total_pips", "sharpe", "calmar", "max_drawdown"]}
+def _calculate_metrics_emp(
+    returns: pd.Series, trades_df: pd.DataFrame
+) -> Dict[str, float]:
+    """Calcula métricas clave usando Empyrical."""
+    if returns.empty:
+        return {
+            k: 0.0
+            for k in (
+                "trades",
+                "win_rate",
+                "total_pips",
+                "sharpe",
+                "calmar",
+                "max_drawdown",
+            )
+        }
 
-    idx = pd.to_datetime(trades_df["exit_time"], utc=False)
-    returns = pd.Series(trades_df["pnl_pips"] / 10000, index=idx)
+    returns = returns.tz_localize(None)
 
-    metrics = {
-        "trades": len(returns),
-        "win_rate": float((returns > 0).mean()),
-        "total_pips": float(trades_df["pnl_pips"].sum()),
-        "avg_pips": float(trades_df["pnl_pips"].mean()),
-        "sharpe": float(qs.stats.sharpe(returns, periods=252 * (24 * 60 / 15))),
-        "calmar": float(qs.stats.calmar(returns)),
-        "max_drawdown": float(qs.stats.max_drawdown(returns)),
-    }
+    metrics = dict(
+        trades=len(returns),
+        win_rate=float((returns > 0).mean()),
+        total_pips=float(trades_df["pnl_pips"].sum()),
+        avg_pips=float(trades_df["pnl_pips"].mean()),
+        sharpe=float(emp.sharpe_ratio(returns, annualization=252)),
+        calmar=float(emp.calmar_ratio(returns)),
+        max_drawdown=float(emp.max_drawdown(returns)),
+    )
     return {k: (v if np.isfinite(v) else 0.0) for k, v in metrics.items()}
 
 
@@ -178,31 +223,54 @@ def run_backtest(
     pair: str,
     timeframe: str,
 ) -> Tuple[str, str]:
-    """Ejecuta back-test, sube artefactos y devuelve ruta + metrics path."""
-    lstm_model, scaler, hp, filter_model, filter_params = _load_artifacts(lstm_model_dir, filter_model_path)
+    """Ejecuta back-test, sube artefactos y devuelve ruta + contenido de métricas."""
+    lstm_model, scaler, hp, filter_model, filter_params = _load_artifacts(
+        lstm_model_dir, filter_model_path
+    )
     df_bt = _prepare_backtest_data(features_path, hp)
     df_aligned = df_bt.iloc[hp["win"] :].copy().reset_index(drop=True)
-    # ➜ Garantizamos que el timestamp sea datetime para la simulación
     df_aligned["timestamp"] = pd.to_datetime(df_aligned["timestamp"], unit="ms")
 
-    features_df, up_preds, dn_preds = _generate_features_for_filter(df_bt, lstm_model, scaler, hp, pair)
-
-    accept_mask = filter_model.predict_proba(features_df)[:, 1] >= filter_params["best_threshold"]
-
-    logger.info("Simulando estrategia BASE …")
-    base_trades = _run_backtest_simulation_from_signals(
-        df_aligned, up_preds, dn_preds, hp, pair, np.ones_like(accept_mask, dtype=bool)
+    features_df, up_preds, dn_preds = _generate_features_for_filter(
+        df_bt, lstm_model, scaler, hp, pair
     )
-    logger.info("Simulando estrategia FILTRADA …")
-    filtered_trades = _run_backtest_simulation_from_signals(df_aligned, up_preds, dn_preds, hp, pair, accept_mask)
+    accept_mask = (
+        filter_model.predict_proba(features_df)[:, 1] >= filter_params["best_threshold"]
+    )
 
-    metrics = {"base": _calculate_metrics(base_trades), "filtered": _calculate_metrics(filtered_trades)}
+    base_trades = _run_backtest_simulation_from_signals(
+        df_aligned,
+        up_preds,
+        dn_preds,
+        hp,
+        pair,
+        np.ones_like(accept_mask, bool),
+    )
+    filtered_trades = _run_backtest_simulation_from_signals(
+        df_aligned, up_preds, dn_preds, hp, pair, accept_mask
+    )
+
+    ret_series = pd.Series(
+        filtered_trades["pnl_pips"] / 10000,
+        index=pd.to_datetime(filtered_trades["exit_time"]),
+    )
+
+    metrics = dict(
+        base=_calculate_metrics_emp(
+            pd.Series(
+                base_trades["pnl_pips"] / 10000,
+                index=pd.to_datetime(base_trades["exit_time"]),
+            ),
+            base_trades,
+        ),
+        filtered=_calculate_metrics_emp(ret_series, filtered_trades),
+    )
     logger.info("Métricas filtrada: %s", metrics["filtered"])
 
     ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     output_dir = f"{constants.BACKTEST_RESULTS_PATH}/{pair}/{timeframe}/{ts}"
-
-    # -------------------------- manejo de archivos --------------------------
+    
+    kfp_metrics_content = ""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
 
@@ -211,30 +279,42 @@ def run_backtest(
             gcs_utils.upload_gcs_file(tmp / "trades_base.csv", f"{output_dir}/trades_base.csv")
 
         if not filtered_trades.empty:
-            df_rep = filtered_trades.copy()
-            df_rep["returns"] = df_rep["pnl_pips"] / 10000
-            df_rep["entry_time"] = pd.to_datetime(df_rep["entry_time"])  # índice datetime para QuantStats
-            df_rep.set_index("entry_time", inplace=True)
+            if ret_series.dropna().nunique() > 1:
+                report_path = tmp / "report_filtered.png"
+                pf.create_full_tear_sheet(ret_series)
+                plt.gcf().savefig(report_path, dpi=150, bbox_inches="tight")
+                plt.clf()
+                gcs_utils.upload_gcs_file(report_path, f"{output_dir}/report_filtered.png")
+            else:
+                note_path = tmp / "report_filtered.txt"
+                note_path.write_text(
+                    "No se generó tear-sheet: serie de retornos vacía "
+                    "o sin variación suficiente."
+                )
+                gcs_utils.upload_gcs_file(note_path, f"{output_dir}/report_filtered.txt")
+                logger.warning("Tear-sheet omitido por falta de datos variados.")
 
-            report_path = tmp / "report_filtered.html"
-            qs.reports.html(df_rep["returns"], output=str(report_path), title=f"{pair} Filtered Strategy")
-            gcs_utils.upload_gcs_file(report_path, f"{output_dir}/report_filtered.html")
-
-            df_rep.to_csv(tmp / "trades_filtered.csv")
+            filtered_trades.to_csv(tmp / "trades_filtered.csv", index=False)
             gcs_utils.upload_gcs_file(tmp / "trades_filtered.csv", f"{output_dir}/trades_filtered.csv")
 
         (tmp / "metrics.json").write_text(json.dumps(metrics, indent=4))
         gcs_utils.upload_gcs_file(tmp / "metrics.json", f"{output_dir}/metrics.json")
+        
+        kfp_dict = {
+            "metrics": [{"name": f"filtered-{k}", "numberValue": v} for k, v in metrics["filtered"].items()]
+        }
+        kfp_tmp_path = tmp / "kfp_metrics.json"
+        kfp_tmp_path.write_text(json.dumps(kfp_dict))
+        kfp_metrics_content = kfp_tmp_path.read_text()
 
-        kfp_dict = {"metrics": [{"name": f"filtered-{k}", "numberValue": v} for k, v in metrics["filtered"].items()]}
-        kfp_tmp = tmp / "kfp_metrics.json"
-        kfp_tmp.write_text(json.dumps(kfp_dict))
+        out_param_dir = Path("/tmp/outputs/output_gcs_dir")
+        out_param_dir.mkdir(parents=True, exist_ok=True)
+        (out_param_dir / "data").write_text(output_dir)
 
         Path("/tmp/backtest_dir.txt").write_text(output_dir)
-        Path("/tmp/kfp_metrics.json").write_text(kfp_tmp.read_text())
 
     logger.info("🎯 Back-test finalizado. Resultados en %s", output_dir)
-    return output_dir, "/tmp/kfp_metrics.json"
+    return output_dir, kfp_metrics_content
 
 
 # ─────────────────────────────── CLI ───────────────────────────────────────
@@ -247,13 +327,15 @@ if __name__ == "__main__":
     p.add_argument("--timeframe", required=True)
     args = p.parse_args()
 
-    out_dir, kfp_metrics_path = run_backtest(
+    out_dir, kfp_metrics_content = run_backtest(
         lstm_model_dir=args.lstm_model_dir,
         filter_model_path=args.filter_model_path,
         features_path=args.features_path,
         pair=args.pair,
         timeframe=args.timeframe,
     )
+    
+    Path("/tmp/kfp_metrics.json").write_text(kfp_metrics_content)
 
     logger.info("Back-test completado. Dir: %s", out_dir)
-    logger.info("KFP metrics en: %s", kfp_metrics_path)
+    logger.info("KFP metrics en: /tmp/kfp_metrics.json")
