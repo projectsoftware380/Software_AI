@@ -176,7 +176,18 @@ def keep_only_latest_version(base_gcs_prefix: str) -> None:
     mantiene solo el más reciente y elimina todos los demás.
     """
     try:
-        # CORRECCIÓN: Se añade la validación para asegurar que el prefijo sea una URI de GCS válida.
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Se añade una lógica para reparar automáticamente una URI mal formada (gs:/ -> gs://)
+        if base_gcs_prefix.startswith("gs:/") and not base_gcs_prefix.startswith("gs://"):
+            corrected_prefix = base_gcs_prefix.replace("gs:/", "gs://", 1)
+            logger.warning(
+                "Se recibió una URI de GCS mal formada. Corrigiendo '%s' a '%s'",
+                base_gcs_prefix,
+                corrected_prefix,
+            )
+            base_gcs_prefix = corrected_prefix
+        # --- FIN DE LA CORRECCIÓN ---
+            
         if not base_gcs_prefix.startswith("gs://"):
              raise ValueError(f"El prefijo GCS para limpieza debe ser una URI válida (gs://...), pero se recibió: {base_gcs_prefix}")
         

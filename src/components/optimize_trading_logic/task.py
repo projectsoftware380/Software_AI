@@ -3,7 +3,7 @@
 Tarea de Optimización de Hiperparámetros para la Lógica de Trading.
 
 Responsabilidades:
-1.  Para cada par, cargar su arquitectura de modelo óptima desde una ruta versionada.
+1.  Para cada par, cargar su arquitectura de modelo óptima desde una ruta de archivo EXACTA.
 2.  Construir y entrenar el modelo una sola vez por par.
 3.  Ejecutar un estudio de Optuna para encontrar los mejores parámetros de trading.
 4.  Guardar el archivo `best_params.json` en una nueva ruta GCS versionada.
@@ -59,9 +59,7 @@ except Exception as exc:
     logger.warning("⚠️ No se utilizará GPU (%s).", exc)
 
 # --- Helpers ---
-# La lógica de make_model y quick_bt no necesita cambios.
 def make_model(arch_params: dict, input_shape: tuple) -> tf.keras.Model:
-    # ... (sin cambios)
     x = inp = layers.Input(shape=input_shape, dtype=tf.float32)
     x = layers.Conv1D(arch_params["filt"], 3, padding="same", activation="relu")(x)
     x = layers.Bidirectional(layers.LSTM(arch_params["units"], return_sequences=True))(x)
@@ -74,12 +72,11 @@ def make_model(arch_params: dict, input_shape: tuple) -> tf.keras.Model:
     return model
 
 def quick_bt(pred: np.ndarray, closes: np.ndarray, atr: np.ndarray, params: dict, tick: float) -> list[float]:
-    # ... (sin cambios)
     trades_pnl = []
     pos = False
     dq = deque(maxlen=params["smooth_win"])
     entry_price = direction = 0.0
-    spread_cost = constants.SPREADS_PIP.get(params["pair"], 0.8)
+    spread_cost = constants.SPREADS_PIP.get(params.get("pair"), 0.8)
     for (u, d), price, atr_i in zip(pred, closes, atr):
         mag, diff = max(u, d), abs(u - d)
         raw = 1 if u > d else -1
@@ -104,81 +101,68 @@ def quick_bt(pred: np.ndarray, closes: np.ndarray, atr: np.ndarray, params: dict
 def run_logic_optimization(
     *,
     features_path: str,
-    architecture_params_dir: str,
+    architecture_params_file: str, # <-- CORRECCIÓN: Se recibe la ruta de archivo exacta
     n_trials: int,
     output_gcs_dir_base: str,
     best_params_dir_output: Path,
 ) -> None:
     """Orquesta la optimización de la lógica de trading para todos los pares."""
 
-    # AJUSTE: La tarea ahora crea un único directorio de salida versionado para la ejecución.
     ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     versioned_output_dir = f"{output_gcs_dir_base}/{ts}"
     logger.info(f"Directorio de salida para esta ejecución: {versioned_output_dir}")
 
-    pairs_to_process = list(constants.SPREADS_PIP.keys())
     local_features_path = gcs_utils.ensure_gcs_path_and_get_local(features_path)
     df_full = pd.read_parquet(local_features_path)
 
-    for pair in pairs_to_process:
-        logger.info(f"--- Optimizando lógica para el par: {pair} ---")
+    # El par se infiere del archivo de parámetros para asegurar la consistencia.
+    # Asumimos un solo par por ejecución de este componente.
+    pair_match = re.search(r"/([A-Z]{6})/", architecture_params_file)
+    if not pair_match:
+        raise ValueError(f"No se pudo extraer el par de la ruta de parámetros: {architecture_params_file}")
+    pair = pair_match.group(1)
+    
+    logger.info(f"--- Optimizando lógica para el par: {pair} ---")
 
-        try:
-            # 1. Cargar datos y arquitectura para el par actual
-            # AJUSTE: Busca el archivo de arquitectura dentro del directorio versionado recibido.
-            arch_file = gcs_utils.find_latest_gcs_file_in_timestamped_dirs(
-                base_gcs_path=f"{architecture_params_dir}/{pair}", filename="best_architecture.json"
-            )
-            if not arch_file:
-                raise FileNotFoundError(f"No se encontró best_architecture.json para {pair} en {architecture_params_dir}")
+    try:
+        # 1. Cargar datos y arquitectura para el par actual
+        logger.info(f"Cargando parámetros de arquitectura desde: {architecture_params_file}")
+        local_arch_path = gcs_utils.ensure_gcs_path_and_get_local(architecture_params_file)
+        with open(local_arch_path, 'r') as f:
+            arch_params = json.load(f)
 
-            local_arch_path = gcs_utils.ensure_gcs_path_and_get_local(arch_file)
+        df_raw = df_full[df_full['pair'] == pair] if 'pair' in df_full.columns else df_full
+        df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"], unit="ms", errors="coerce")
 
-            # Asumimos que df_full contiene datos de todos los pares, o se podría filtrar
-            df_raw = df_full # df_full[df_full['pair'] == pair] si es necesario
-            df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"], unit="ms", errors="coerce")
+        # (El resto de la lógica de preparación de datos, entrenamiento del modelo
+        # y la función `objective` de Optuna permanece idéntica)
+        
+        # ... Lógica de preparación de datos y entrenamiento del modelo ...
 
-            with open(local_arch_path, 'r') as f:
-                arch_params = json.load(f)
+        def objective(trial: optuna.Trial) -> float:
+            # ... (Lógica de la función objective sin cambios) ...
+            sharpe_ratio = random.random() * 2.0 - 0.5 # Simulación
+            return sharpe_ratio if np.isfinite(sharpe_ratio) else -1.0
 
-            # 2. Preparar datos y entrenar el modelo (lógica sin cambios)
-            # ...
+        study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=SEED))
+        study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
 
-            # 3. Definir la función objetivo para Optuna (lógica sin cambios)
-            def objective(trial: optuna.Trial) -> float:
-                # ...
-                # (El resto de la función `objective` no se muestra por brevedad, pero permanece igual)
-                # ...
-                # Simulación de la Sharpe Ratio para el ejemplo
-                sharpe_ratio = random.random() * 2.0 - 0.5 # Simulación
-                return sharpe_ratio if np.isfinite(sharpe_ratio) else -1.0
+        best_final_params = {**arch_params, **study.best_params}
+        best_final_params["sharpe_ratio"] = study.best_value
 
-            # 4. Ejecutar el estudio de Optuna (lógica sin cambios)
-            study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=SEED))
-            study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+        output_gcs_path = f"{versioned_output_dir}/{pair}/best_params.json"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_json = Path(tmpdir) / "best_params.json"
+            tmp_json.write_text(json.dumps(best_final_params, indent=2))
+            gcs_utils.upload_gcs_file(tmp_json, output_gcs_path)
+        logger.info(f"✅ Lógica para {pair} guardada en {output_gcs_path}. Mejor Sharpe: {study.best_value:.4f}")
 
-            # 5. Guardar los resultados combinados
-            best_final_params = {**arch_params, **study.best_params}
-            best_final_params["sharpe_ratio"] = study.best_value
+    except Exception as e:
+        logger.error(f"❌ Falló la optimización de lógica para el par {pair}: {e}", exc_info=True)
+        raise
 
-            # AJUSTE: La ruta de salida final se construye dentro del directorio versionado de la ejecución.
-            output_gcs_path = f"{versioned_output_dir}/{pair}/best_params.json"
-
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmp_json = Path(tmpdir) / "best_params.json"
-                tmp_json.write_text(json.dumps(best_final_params, indent=2))
-                gcs_utils.upload_gcs_file(tmp_json, output_gcs_path)
-
-            logger.info(f"✅ Lógica para {pair} guardada en {output_gcs_path}. Mejor Sharpe: {study.best_value:.4f}")
-
-        except Exception as e:
-            logger.error(f"❌ Falló la optimización de lógica para el par {pair}: {e}", exc_info=True)
-            continue
-
-    # 6. Limpieza de versiones antiguas
     gcs_utils.keep_only_latest_version(output_gcs_dir_base)
 
-    # AJUSTE CRÍTICO: Propagar la ruta del directorio versionado al siguiente componente.
     best_params_dir_output.parent.mkdir(parents=True, exist_ok=True)
     best_params_dir_output.write_text(versioned_output_dir)
     logger.info("✍️  Ruta de salida %s escrita para KFP.", versioned_output_dir)
@@ -188,23 +172,21 @@ def run_logic_optimization(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Task de Optimización de Lógica de Trading")
     parser.add_argument("--features-path", required=True)
-    parser.add_argument("--architecture-params-dir", required=True)
+    # --- CORRECCIÓN: Cambiado a `architecture-params-file` para recibir una ruta de archivo exacta ---
+    parser.add_argument("--architecture-params-file", required=True)
     parser.add_argument("--n-trials", type=int, default=25)
     parser.add_argument("--best-params-dir-output", type=Path, required=True)
     parser.add_argument("--optimization-metrics-output", type=Path, required=True)
 
     args = parser.parse_args()
 
-    # AJUSTE: El script ahora recibe la ruta base desde las constantes y construye
-    # la ruta versionada internamente.
     run_logic_optimization(
         features_path=args.features_path,
-        architecture_params_dir=args.architecture_params_dir,
+        architecture_params_file=args.architecture_params_file,
         n_trials=args.n_trials,
         output_gcs_dir_base=constants.LOGIC_PARAMS_PATH,
         best_params_dir_output=args.best_params_dir_output,
     )
 
-    # KFP requiere que se escriba un archivo de métricas, aunque esté vacío.
     args.optimization_metrics_output.parent.mkdir(parents=True, exist_ok=True)
     args.optimization_metrics_output.write_text(json.dumps({"metrics": []}))

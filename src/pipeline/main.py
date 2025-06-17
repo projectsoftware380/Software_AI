@@ -60,7 +60,6 @@ for comp in component_op_factory.values():
         impl.container.image = args.common_image_uri
 
 # ───────────────────────── Definición de la Pipeline ─────────────────────────
-# AJUSTE: Se actualiza el nombre y la descripción para reflejar la versión corregida.
 @dsl.pipeline(
     name="algo-trading-mlops-pipeline-v5-robust-paths",
     description="Versión final con gestión de rutas centralizada, versionada y robusta.",
@@ -85,8 +84,6 @@ def trading_pipeline_v5(
 
     # 2 ▸ Preparación de datos (con hold-out)
     prepare_opt_data_task = component_op_factory["data_preparation"](
-        # AJUSTE: Se pasa 'ALL' para que el componente procese todos los pares definidos
-        # en `constants.py` para la fase de optimización.
         pair="ALL",
         timeframe=timeframe,
         years_to_keep=backtest_years_to_keep,
@@ -102,6 +99,8 @@ def trading_pipeline_v5(
     # 4 ▸ Optimizar lógica de trading (umbrales, hiper-parámetros, etc.)
     optimize_logic_task = component_op_factory["optimize_trading_logic"](
         features_path=prepare_opt_data_task.outputs["prepared_data_path"],
+        # --- AJUSTE CLAVE ---
+        # Se pasa la RUTA EXACTA del directorio de arquitectura, no una ruta base.
         architecture_params_dir=optimize_arch_task.outputs["best_architecture_dir"],
         n_trials=n_trials_logic,
     )
@@ -126,10 +125,10 @@ def trading_pipeline_v5(
             region=constants.REGION,
             pair=pair,
             timeframe=timeframe,
+            # --- AJUSTE CLAVE ---
+            # Se pasa la RUTA EXACTA del directorio de parámetros, no una ruta base.
             params_path=optimize_logic_task.outputs['best_params_dir'],
             features_gcs_path=prepare_opt_data_task.outputs["prepared_data_path"],
-            # AJUSTE: Se pasa la RUTA BASE. El componente se encargará de crear
-            # el subdirectorio final versionado con timestamp.
             output_gcs_base_dir=constants.LSTM_MODELS_PATH,
             vertex_training_image_uri=args.common_image_uri,
             vertex_machine_type=constants.DEFAULT_VERTEX_GPU_MACHINE_TYPE,
@@ -155,7 +154,6 @@ def trading_pipeline_v5(
             pair=pair,
             timeframe=timeframe,
         )
-        # Se asignan recursos de GPU al backtest, ya que carga modelos TF.
         backtest_task.set_cpu_limit("8") \
             .set_memory_limit("30G") \
             .set_accelerator_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT) \
@@ -174,7 +172,6 @@ def trading_pipeline_v5(
 
 # ════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
-    # AJUSTE: Se cambia el nombre del archivo de salida para no sobrescribir el antiguo.
     PIPELINE_JSON = "algo_trading_mlops_pipeline_v5_corrected.json"
 
     # 1 ▸ Compilar
@@ -184,7 +181,6 @@ if __name__ == "__main__":
     # 2 ▸ Enviar a Vertex AI (si la variable de entorno lo permite)
     if os.getenv("SUBMIT_PIPELINE_TO_VERTEX", "true").lower() == "true":
         aip.init(project=constants.PROJECT_ID, location=constants.REGION)
-        # AJUSTE: Se actualiza el nombre del job para mayor claridad en la UI de Vertex.
         display_name = f"algo-trading-v5-robust-{datetime.utcnow():%Y%m%d-%H%M%S}"
         
         job = aip.PipelineJob(

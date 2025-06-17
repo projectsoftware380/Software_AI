@@ -22,10 +22,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Tuple
 
-# ▼▼▼ INICIO DE LA CORRECCIÓN ▼▼▼
+# --- INICIO DE LA CORRECCIÓN ---
 # Se fuerza a TensorFlow a utilizar únicamente la CPU para evitar errores de CUDA/GPU.
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-# ▲▲▲ FIN DE LA CORRECCIÓN ▲▲▲
+# --- FIN DE LA CORRECCIÓN ---
 
 import joblib
 import lightgbm as lgb

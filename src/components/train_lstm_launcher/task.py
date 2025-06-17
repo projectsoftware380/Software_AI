@@ -25,7 +25,7 @@ def run_launcher(
     region: str,
     pair: str,
     timeframe: str,
-    params_path: str,
+    params_file: str,  # <-- CORRECCIÓN: Ahora se recibe la ruta exacta del archivo.
     features_gcs_path: str,
     output_gcs_base_dir: str,
     vertex_training_image_uri: str,
@@ -42,19 +42,12 @@ def run_launcher(
     ts_disp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     display_name = f"train-lstm-{pair.lower()}-{timeframe.lower()}-{ts_disp}"
 
-    # AJUSTE CLAVE 1: Construir la RUTA DE SALIDA FINAL y ÚNICA para este trabajo.
-    # Esta es ahora la "única fuente de verdad" para la ubicación del modelo.
+    # Se construye la ruta de salida final y única para este trabajo.
     final_model_output_dir = f"{output_gcs_base_dir}/{pair}/{timeframe}/{display_name}"
     logger.info("Ruta de salida final del modelo definida: %s", final_model_output_dir)
 
-    # AJUSTE: Se elimina la búsqueda frágil. Se asume que `params_path` es la ruta
-    # al directorio que contiene los `best_params.json` para cada par.
-    best_params_uri = gcs_utils.find_latest_gcs_file_in_timestamped_dirs(
-        base_gcs_path=f"{params_path}/{pair}", filename="best_params.json"
-    )
-    if not best_params_uri:
-        raise FileNotFoundError(f"No se encontró best_params.json en la ruta base: {params_path}/{pair}")
-    logger.info("✔ Parámetros de trading más recientes encontrados: %s", best_params_uri)
+    # Ya no es necesario buscar el archivo, se usa la ruta exacta proporcionada.
+    logger.info("✔ Usando el archivo de parámetros de trading de: %s", params_file)
 
     # ---------- Definir el Custom Job de Vertex AI ----------
     worker_pool_specs = [
@@ -71,9 +64,10 @@ def run_launcher(
                 "args": [
                     f"--pair={pair}",
                     f"--timeframe={timeframe}",
-                    f"--params={best_params_uri}",
+                    # --- CORRECCIÓN ---
+                    # Se pasa la ruta exacta del archivo al script de entrenamiento.
+                    f"--params-file={params_file}",
                     f"--features-gcs-path={features_gcs_path}",
-                    # AJUSTE CLAVE 2: Pasar la RUTA FINAL Y EXACTA directamente al script de entrenamiento.
                     f"--output-gcs-final-dir={final_model_output_dir}",
                 ],
             },
@@ -97,8 +91,7 @@ def run_launcher(
 
     logger.info("✅ El Custom Job de entrenamiento finalizó con éxito.")
     
-    # AJUSTE CLAVE 3: Propagar la ruta conocida y exacta al siguiente paso de la pipeline.
-    # Ya no es necesario buscar ni adivinar, sabemos exactamente dónde debe estar el modelo.
+    # Se propaga la ruta conocida y exacta al siguiente paso de la pipeline.
     dest = Path(trained_lstm_dir_path_output)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(final_model_output_dir, encoding="utf-8")
@@ -112,7 +105,8 @@ if __name__ == "__main__":
     p.add_argument("--region", required=True)
     p.add_argument("--pair", required=True)
     p.add_argument("--timeframe", required=True)
-    p.add_argument("--params-path", required=True)
+    # --- CORRECCIÓN: El argumento ahora es `--params-file` para reflejar que es una ruta de archivo. ---
+    p.add_argument("--params-file", required=True)
     p.add_argument("--features-gcs-path", required=True)
     p.add_argument("--output-gcs-base-dir", required=True)
     p.add_argument("--vertex-training-image-uri", required=True)
@@ -128,7 +122,7 @@ if __name__ == "__main__":
         region=args.region,
         pair=args.pair,
         timeframe=args.timeframe,
-        params_path=args.params_path,
+        params_file=args.params_file,
         features_gcs_path=args.features_gcs_path,
         output_gcs_base_dir=args.output_gcs_base_dir,
         vertex_training_image_uri=args.vertex_training_image_uri,
