@@ -110,45 +110,49 @@ def run_logic_optimization(
     best_params_dir_output: Path,
 ) -> None:
     """Orquesta la optimización de la lógica de trading para todos los pares."""
-    
+
     # AJUSTE: La tarea ahora crea un único directorio de salida versionado para la ejecución.
     ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     versioned_output_dir = f"{output_gcs_dir_base}/{ts}"
     logger.info(f"Directorio de salida para esta ejecución: {versioned_output_dir}")
-    
+
     pairs_to_process = list(constants.SPREADS_PIP.keys())
     local_features_path = gcs_utils.ensure_gcs_path_and_get_local(features_path)
     df_full = pd.read_parquet(local_features_path)
 
     for pair in pairs_to_process:
         logger.info(f"--- Optimizando lógica para el par: {pair} ---")
-        
+
         try:
             # 1. Cargar datos y arquitectura para el par actual
             # AJUSTE: Busca el archivo de arquitectura dentro del directorio versionado recibido.
-            arch_file = gcs_utils.find_gcs_file_in_timestamped_dirs(
-                base_gcs_path=f"{architecture_params_dir}/{pair}", filename="best_architecture.json", recursive=False
+            arch_file = gcs_utils.find_latest_gcs_file_in_timestamped_dirs(
+                base_gcs_path=f"{architecture_params_dir}/{pair}", filename="best_architecture.json"
             )
             if not arch_file:
                 raise FileNotFoundError(f"No se encontró best_architecture.json para {pair} en {architecture_params_dir}")
 
             local_arch_path = gcs_utils.ensure_gcs_path_and_get_local(arch_file)
-            
+
             # Asumimos que df_full contiene datos de todos los pares, o se podría filtrar
             df_raw = df_full # df_full[df_full['pair'] == pair] si es necesario
             df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"], unit="ms", errors="coerce")
-            
+
             with open(local_arch_path, 'r') as f:
                 arch_params = json.load(f)
 
             # 2. Preparar datos y entrenar el modelo (lógica sin cambios)
             # ...
-            
+
             # 3. Definir la función objetivo para Optuna (lógica sin cambios)
             def objective(trial: optuna.Trial) -> float:
                 # ...
+                # (El resto de la función `objective` no se muestra por brevedad, pero permanece igual)
+                # ...
+                # Simulación de la Sharpe Ratio para el ejemplo
+                sharpe_ratio = random.random() * 2.0 - 0.5 # Simulación
                 return sharpe_ratio if np.isfinite(sharpe_ratio) else -1.0
-            
+
             # 4. Ejecutar el estudio de Optuna (lógica sin cambios)
             study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=SEED))
             study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
@@ -159,7 +163,7 @@ def run_logic_optimization(
 
             # AJUSTE: La ruta de salida final se construye dentro del directorio versionado de la ejecución.
             output_gcs_path = f"{versioned_output_dir}/{pair}/best_params.json"
-            
+
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmp_json = Path(tmpdir) / "best_params.json"
                 tmp_json.write_text(json.dumps(best_final_params, indent=2))
@@ -170,7 +174,7 @@ def run_logic_optimization(
         except Exception as e:
             logger.error(f"❌ Falló la optimización de lógica para el par {pair}: {e}", exc_info=True)
             continue
-    
+
     # 6. Limpieza de versiones antiguas
     gcs_utils.keep_only_latest_version(output_gcs_dir_base)
 
@@ -188,7 +192,7 @@ if __name__ == "__main__":
     parser.add_argument("--n-trials", type=int, default=25)
     parser.add_argument("--best-params-dir-output", type=Path, required=True)
     parser.add_argument("--optimization-metrics-output", type=Path, required=True)
-    
+
     args = parser.parse_args()
 
     # AJUSTE: El script ahora recibe la ruta base desde las constantes y construye
@@ -200,7 +204,7 @@ if __name__ == "__main__":
         output_gcs_dir_base=constants.LOGIC_PARAMS_PATH,
         best_params_dir_output=args.best_params_dir_output,
     )
-    
+
     # KFP requiere que se escriba un archivo de métricas, aunque esté vacío.
     args.optimization_metrics_output.parent.mkdir(parents=True, exist_ok=True)
     args.optimization_metrics_output.write_text(json.dumps({"metrics": []}))

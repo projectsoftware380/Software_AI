@@ -15,11 +15,11 @@ from typing import Optional
 import gcsfs
 from google.cloud import storage
 
-# AJUSTE: Se importa `constants` para poder usar el PROJECT_ID en gcsfs.
+# Se importa `constants` para poder usar el PROJECT_ID en gcsfs.
 from src.shared import constants
 
 logger = logging.getLogger(__name__)
-# AJUSTE: Asegurarse de que el logger esté configurado si aún no lo está.
+# Asegurarse de que el logger esté configurado si aún no lo está.
 if not logger.handlers:
     logging.basicConfig(
         level=logging.INFO,
@@ -56,7 +56,6 @@ def upload_gcs_file(local_path: Path | str, gcs_uri: str) -> None:
     if not local_path.is_file():
         raise FileNotFoundError(f"El archivo local no se encontró: {local_path}")
     
-    # CORRECCIÓN: Se aplica la validación sugerida.
     if not gcs_uri.startswith("gs://"):
         raise ValueError(f"La URI de GCS debe empezar por gs://, pero se recibió: {gcs_uri}")
     
@@ -68,7 +67,6 @@ def upload_gcs_file(local_path: Path | str, gcs_uri: str) -> None:
 
 def download_gcs_file(gcs_uri: str, destination_dir: Path | None = None) -> Path:
     """Descarga un objeto de GCS y devuelve la ruta local."""
-    # CORRECCIÓN: Se aplica la validación sugerida.
     if not gcs_uri.startswith("gs://"):
         raise ValueError(f"La URI de GCS debe empezar por gs://, pero se recibió: {gcs_uri}")
         
@@ -96,7 +94,6 @@ def copy_gcs_object(src_uri: str, dst_uri: str) -> None:
     dst_bucket = client.bucket(dst_bucket_name)
     src_blob = src_bucket.blob(src_blob_name)
     
-    # El método rewrite es más robusto para copias grandes o entre diferentes clases
     dst_bucket.blob(dst_blob_name).rewrite(src_blob)
     logger.info("Copiado %s → %s", src_uri, dst_uri)
 
@@ -135,7 +132,6 @@ def list_gcs_files(prefix: str, suffix: str | None = None, recursive: bool = Tru
         paths = fs.find(prefix_no_scheme, detail=False) if recursive else fs.ls(prefix_no_scheme, detail=False)
         if suffix:
             paths = [p for p in paths if p.endswith(suffix)]
-        # Reconstruye la URI completa con el esquema
         return [f"gs://{p}" for p in paths]
     except FileNotFoundError:
         return []
@@ -171,31 +167,27 @@ def find_latest_gcs_file_in_timestamped_dirs(
         logger.warning("No se hallaron directorios con formato de timestamp válido bajo %s", base_gcs_path)
         return None
 
-    # Ordenar por el timestamp (nombre del directorio) y tomar el último
     latest_path = sorted(valid, key=lambda t: t[0])[-1][1]
     return latest_path
 
-# AJUSTE FINAL Y DEFINITIVO DE LA FUNCIÓN DE LIMPIEZA
 def keep_only_latest_version(base_gcs_prefix: str) -> None:
     """
     Dentro de un prefijo GCS, busca subdirectorios con nombre de timestamp,
     mantiene solo el más reciente y elimina todos los demás.
     """
     try:
-        # CORRECCIÓN CLAVE: Asegurarse de que el prefijo siempre sea válido para gcsfs.
+        # CORRECCIÓN: Se añade la validación para asegurar que el prefijo sea una URI de GCS válida.
         if not base_gcs_prefix.startswith("gs://"):
              raise ValueError(f"El prefijo GCS para limpieza debe ser una URI válida (gs://...), pero se recibió: {base_gcs_prefix}")
         
         fs = gcsfs.GCSFileSystem(project=constants.PROJECT_ID)
         
-        # Trabajar siempre con la ruta sin el esquema "gs://" para gcsfs
         prefix_no_scheme = base_gcs_prefix.replace("gs://", "")
 
         if not fs.exists(prefix_no_scheme):
             logger.info("El prefijo base para limpieza no existe: %s. No se hará nada.", base_gcs_prefix)
             return
 
-        # Listar solo los directorios que coinciden con el patrón de timestamp
         all_dirs = fs.ls(prefix_no_scheme, detail=False)
         timestamped_dirs = [p for p in all_dirs if fs.isdir(p) and _TIMESTAMP_RE.search(Path(p).name)]
 
@@ -203,13 +195,10 @@ def keep_only_latest_version(base_gcs_prefix: str) -> None:
             logger.info("No hay versiones antiguas que limpiar en %s.", base_gcs_prefix)
             return
 
-        # Ordenar de más reciente a más antiguo
         timestamped_dirs.sort(key=lambda p: _TIMESTAMP_RE.search(Path(p).name).group(1), reverse=True)
         
-        # Eliminar todos excepto el primero (el más reciente)
         for old_dir_path in timestamped_dirs[1:]:
             logger.info("🗑️ Eliminando versión antigua de artefactos: gs://%s", old_dir_path)
-            # Usar la ruta completa sin esquema que fs.ls devuelve
             fs.rm(old_dir_path, recursive=True)
             
     except Exception as exc:
