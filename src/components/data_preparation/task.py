@@ -64,8 +64,6 @@ def run_preparation(
     Orquesta la preparación y división de los datos.
     """
     try:
-        # AJUSTE: Si pair es "ALL", procesa todos los pares de constants.SPREADS_PIP.
-        # De lo contrario, procesa solo el par especificado.
         pairs_to_process = list(constants.SPREADS_PIP.keys()) if pair == "ALL" else [pair]
         logger.info(f"Iniciando preparación de datos para los pares: {pairs_to_process}")
 
@@ -90,7 +88,6 @@ def run_preparation(
         logger.info("✔ Datos combinados y validados. Total de filas: %s", len(df_raw))
 
         # 2. Calcular indicadores
-        # AJUSTE: Usa los parámetros dummy de indicadores desde las constantes.
         df_ind = indicators.build_indicators(df_raw, constants.DUMMY_INDICATOR_PARAMS, drop_na=True)
         if df_ind.empty:
             raise RuntimeError("El DataFrame quedó vacío tras calcular indicadores.")
@@ -113,7 +110,6 @@ def run_preparation(
         logger.info(f"🗂️  Datos de Entrenamiento/Optimización: {len(df_train_opt):,} filas")
         logger.info(f"🔒 Datos de Hold-out: {len(df_holdout):,} filas")
 
-        # AJUSTE: El componente ahora construye sus propias rutas de salida versionadas.
         ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
         output_base_dir = f"{constants.DATA_FILTERED_FOR_OPT_PATH}/{pair}/{timeframe}/{ts}"
         output_gcs_path_main = f"{output_base_dir}/{pair}_{timeframe}_train_opt.parquet"
@@ -141,7 +137,6 @@ def run_preparation(
             # === FIN DE LA CORRECCIÓN ===
             gcs_utils.keep_only_latest_version(parent_dir)
 
-        # AJUSTE: Escribir las rutas de salida a los archivos que KFP espera.
         prepared_data_path_output.parent.mkdir(parents=True, exist_ok=True)
         prepared_data_path_output.write_text(output_gcs_path_main)
         
@@ -162,8 +157,6 @@ if __name__ == "__main__":
     p.add_argument("--years-to-keep", type=int, default=5)
     p.add_argument("--holdout-months", type=int, default=3)
     p.add_argument("--cleanup", type=lambda x: str(x).lower() == "true", default=True)
-
-    # AJUSTE: Argumentos de salida para KFP. Ya no se construyen rutas aquí.
     p.add_argument("--prepared-data-path-output", type=Path, required=True)
     p.add_argument("--holdout-data-path-output", type=Path, required=True)
 
