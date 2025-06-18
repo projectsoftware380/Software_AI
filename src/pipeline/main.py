@@ -2,7 +2,6 @@
 Pipeline v5 – Final. Reemplaza el filtro RL por un clasificador supervisado (LightGBM).
 Implementa una gestión de rutas centralizada y robusta.
 
-► Ajuste 18 Jun 2025
     • Compatibilidad con KFP ≥ 2.0: 'dsl.Concat' fue renombrado a
       `dsl.ConcatPlaceholder`.  Se añade lógica dinámica para importar la clase
       correcta sin romper versiones antiguas (<2.0).
@@ -23,25 +22,7 @@ from pathlib import Path
 import google.cloud.aiplatform as aip
 from kfp import dsl
 from kfp.compiler import Compiler
-import kfp
-from packaging import version  # sigue utilizándose más abajo para límites
 from kfp.components import load_component_from_text
-
-# ╭─ Ajuste de compatibilidad ──────────────────────────────────────────────────╮
-# `dsl.Concat` dejó de existir a partir de KFP 2.0; fue reemplazado por
-# `dsl.ConcatPlaceholder`. Para mantener compatibilidad con ambas ramas:
-#   1. Detectamos la versión instalada de KFP.
-#   2. Importamos la clase correcta y la exponemos SIEMPRE como `Concat` para
-#      que el resto del archivo no cambie.
-# ╰──────────────────────────────────────────────────────────────────────────────╯
-if version.parse(kfp.__version__) < version.parse("2.0.0"):
-    from kfp.dsl import Concat  # type: ignore  # disponible en KFP 1.x
-else:
-    from kfp.dsl import ConcatPlaceholder as _ConcatPlaceholder  # type: ignore
-
-    def Concat(*args):  # type: ignore
-        """Shim para KFP >= 2.0, acepta *args como en versiones previas."""
-        return _ConcatPlaceholder(list(args))
 
 # ───────────────────────────────────────────────────────────────────────────────
 # Módulos internos
@@ -139,12 +120,7 @@ def trading_pipeline_v5(
         optimize_logic_task = component_op_factory["optimize_trading_logic"](
             features_path=prepare_opt_data_task.outputs["prepared_data_path"],
             # Ruta dinámica al JSON de la arquitectura.
-            architecture_params_file=Concat(
-                optimize_arch_task.outputs["best_architecture_dir"],
-                "/",
-                pair,
-                "/best_architecture.json",
-            ),
+            architecture_params_file=f"{optimize_arch_task.outputs['best_architecture_dir']}/{pair}/best_architecture.json",
             n_trials=n_trials_logic,
         )
 
@@ -155,12 +131,7 @@ def trading_pipeline_v5(
             pair=pair,
             timeframe=timeframe,
             # Ruta dinámica al JSON de parámetros de lógica
-            params_file=Concat(
-                optimize_logic_task.outputs["best_params_dir"],
-                "/",
-                pair,
-                "/best_params.json",
-            ),
+            params_file=f"{optimize_logic_task.outputs['best_params_dir']}/{pair}/best_params.json",
             features_gcs_path=prepare_opt_data_task.outputs["prepared_data_path"],
             output_gcs_base_dir=constants.LSTM_MODELS_PATH,
             vertex_training_image_uri=args.common_image_uri,
