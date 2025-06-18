@@ -124,7 +124,12 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Script de entrenamiento de modelo LSTM final.")
     ap.add_argument("--pair", required=True, help="Par de divisas, ej: EURUSD.")
     ap.add_argument("--timeframe", required=True, help="Timeframe de los datos, ej: 15minute.")
-    ap.add_argument("--params", required=True, help="Ruta GCS al archivo JSON de parámetros optimizados.")
+    ap.add_argument(
+        "--params-file",
+        dest="params_file",
+        required=True,
+        help="Ruta GCS al archivo JSON de parámetros optimizados.",
+    )
     ap.add_argument("--features-gcs-path", required=True, help="Ruta GCS al archivo parquet de features.")
     
     # AJUSTE: El argumento de salida ahora es la ruta final y exacta.
@@ -139,7 +144,7 @@ if __name__ == "__main__":
     train_final_model(
         pair=a.pair,
         timeframe=a.timeframe,
-        params_path=a.params,
+        params_path=a.params_file,
         features_gcs_path=a.features_gcs_path,
         output_gcs_final_dir=a.output_gcs_final_dir
     )
