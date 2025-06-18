@@ -9,7 +9,8 @@ from datetime import datetime
 from pathlib import Path
 
 import google.cloud.aiplatform as aip
-from kfp import compiler, dsl
+from kfp import dsl
+from kfp.compiler import Compiler
 from packaging import version
 import kfp
 # NOTE: Use the DSL helper to concatenate dynamic strings when passing
