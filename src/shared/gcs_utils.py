@@ -27,6 +27,25 @@ if not logger.handlers:
     )
 
 
+def _parse_gcs_uri(uri: str) -> tuple[str, str]:
+    """Descompone una URI de GCS en ``(bucket, blob)``.
+
+    Valida que la URI comience con ``gs://`` y que incluya tanto el nombre del
+    bucket como la ruta del objeto.
+    """
+    if not uri.startswith("gs://"):
+        raise ValueError(
+            f"La URI de GCS debe empezar por gs://, pero se recibió: {uri}"
+        )
+
+    without_scheme = uri[5:]
+    parts = without_scheme.split("/", 1)
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        raise ValueError(f"URI de GCS inválida: {uri}")
+
+    return parts[0], parts[1]
+
+
 def get_gcs_client() -> storage.Client:
     """Devuelve un cliente autenticado de GCS."""
     return storage.Client()
