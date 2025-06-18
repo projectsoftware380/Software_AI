@@ -1,35 +1,51 @@
 """
 Pipeline v5 – Final. Reemplaza el filtro RL por un clasificador supervisado (LightGBM).
 Implementa una gestión de rutas centralizada y robusta.
+
+► Ajuste 18 Jun 2025
+    • Compatibilidad con KFP ≥ 2.0: 'dsl.Concat' fue renombrado a
+      `dsl.ConcatPlaceholder`.  Se añade lógica dinámica para importar la clase
+      correcta sin romper versiones antiguas (<2.0).
 """
 
+from __future__ import annotations
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Imports estándar
+# ───────────────────────────────────────────────────────────────────────────────
 import argparse
 import os
 from datetime import datetime
 from pathlib import Path
 
+# ───────────────────────────────────────────────────────────────────────────────
+# Imports de terceros
+# ───────────────────────────────────────────────────────────────────────────────
 import google.cloud.aiplatform as aip
 from kfp import dsl
 from kfp.compiler import Compiler
-from packaging import version
 import kfp
-# NOTE: Use the DSL helper to concatenate dynamic strings when passing
-# arguments to components. `ConcatPlaceholder` is intended for component
-# definitions and causes type errors when used directly in a pipeline.
-from kfp.dsl import Concat
+from packaging import version  # sigue utilizándose más abajo para límites
 from kfp.components import load_component_from_text
 
-# Verificar que la versión de KFP sea compatible con `dsl.Concat`.
+# ╭─ Ajuste de compatibilidad ──────────────────────────────────────────────────╮
+# `dsl.Concat` dejó de existir a partir de KFP 2.0; fue reemplazado por
+# `dsl.ConcatPlaceholder`. Para mantener compatibilidad con ambas ramas:
+#   1. Detectamos la versión instalada de KFP.
+#   2. Importamos la clase correcta y la exponemos SIEMPRE como `Concat` para
+#      que el resto del archivo no cambie.
+# ╰──────────────────────────────────────────────────────────────────────────────╯
 if version.parse(kfp.__version__) < version.parse("2.0.0"):
-    raise ImportError(
-        f"KFP>=2.0.0 es requerido para usar dsl.Concat; versión detectada: {kfp.__version__}. "
-        "Actualiza con 'pip install --upgrade \"kfp>=2.13.0\"'."
-    )
+    from kfp.dsl import Concat  # type: ignore  # disponible en KFP 1.x
+else:
+    from kfp.dsl import ConcatPlaceholder as Concat  # type: ignore
 
-# AJUSTE: Se asegura que 'constants' sea la única fuente de configuración.
+# ───────────────────────────────────────────────────────────────────────────────
+# Módulos internos
+# ───────────────────────────────────────────────────────────────────────────────
 from src.shared import constants
 
-# ───────────────────────────── CLI ──────────────────────────────
+# ───────────────────────────── CLI ─────────────────────────────────────────────
 parser = argparse.ArgumentParser(
     "Compila y/o envía la pipeline v5 final con filtro supervisado"
 )
@@ -40,12 +56,12 @@ parser.add_argument(
 )
 args, _ = parser.parse_known_args()
 
-# ─────────────────────── Carga de Componentes ─────────────────────
+# ─────────────────────── Carga de Componentes ─────────────────────────────────
 COMPONENTS_DIR = Path(__file__).parent.parent / "components"
 
 
 def load_utf8_component(rel_path: str):
-    """Carga un componente YAML preservando UTF-8 (Windows‑safe)."""
+    """Carga un componente YAML preservando UTF‑8 (Windows‑safe)."""
     yaml_text = (COMPONENTS_DIR / rel_path).read_text(encoding="utf-8")
     return load_component_from_text(yaml_text)
 
@@ -72,7 +88,7 @@ for comp in component_op_factory.values():
     if hasattr(impl, "container") and impl.container:
         impl.container.image = args.common_image_uri
 
-# ───────────────────────── Definición de la Pipeline ─────────────────────────
+# ───────────────────────── Definición de la Pipeline ──────────────────────────
 @dsl.pipeline(
     name="algo-trading-mlops-pipeline-v5-robust-paths",
     description="Versión final con gestión de rutas centralizada, versionada y robusta.",
@@ -120,8 +136,6 @@ def trading_pipeline_v5(
         optimize_logic_task = component_op_factory["optimize_trading_logic"](
             features_path=prepare_opt_data_task.outputs["prepared_data_path"],
             # Ruta dinámica al JSON de la arquitectura.
-            # `dsl.Concat` produces a pipeline parameter string compatible with
-            # KFP's type system.
             architecture_params_file=Concat(
                 optimize_arch_task.outputs["best_architecture_dir"],
                 "/",
@@ -194,7 +208,7 @@ if __name__ == "__main__":
     PIPELINE_JSON = "algo_trading_mlops_pipeline_v5_corrected.json"
 
     # 1 ▸ Compilar
-    compiler.Compiler().compile(trading_pipeline_v5, PIPELINE_JSON)
+    Compiler().compile(trading_pipeline_v5, PIPELINE_JSON)
     print(f"✅ Pipeline v5 (rutas corregidas) compilada a {PIPELINE_JSON}")
 
     # 2 ▸ Enviar a Vertex AI (si la variable de entorno lo permite)
@@ -212,4 +226,3 @@ if __name__ == "__main__":
         print(f"🚀 Pipeline lanzada con Display Name: {display_name}")
     else:
         print("⏭️ La pipeline no se envió a Vertex AI (SUBMIT_PIPELINE_TO_VERTEX está en 'false').")
-
