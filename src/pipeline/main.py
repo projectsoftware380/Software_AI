@@ -122,7 +122,7 @@ def trading_pipeline_v5(
             region=constants.REGION,
             pair=pair,
             timeframe=timeframe,
-            params_path=optimize_logic_task.outputs['best_params_dir'],
+            params_file=optimize_logic_task.outputs['best_params_dir'],
             features_gcs_path=prepare_opt_data_task.outputs["prepared_data_path"],
             output_gcs_base_dir=constants.LSTM_MODELS_PATH,
             vertex_training_image_uri=args.common_image_uri,
