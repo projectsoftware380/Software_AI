@@ -86,19 +86,19 @@ def upload_gcs_file(local_path: Path | str, gcs_uri: str) -> None:
 
 def download_gcs_file(gcs_uri: str, destination_dir: Path | None = None) -> Path:
     """Descarga un objeto de GCS y devuelve la ruta local."""
-    if not gcs_uri.startswith("gs://"):
-        raise ValueError(f"La URI de GCS debe empezar por gs://, pero se recibió: {gcs_uri}")
-        
+    bucket_name, blob_name = _parse_gcs_uri(gcs_uri)
+
     dest_dir = destination_dir or Path(tempfile.mkdtemp())
     dest_dir.mkdir(parents=True, exist_ok=True)
-    
-    bucket_name, blob_name = gcs_uri[5:].split("/", 1)
+
+    client = get_gcs_client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    if not blob.exists():
+        raise FileNotFoundError(f"El objeto no existe en GCS: {gcs_uri}")
+
     local_path = dest_dir / Path(blob_name).name
-    
-    # Use the ``Path`` object directly so callers and tests can assert against
-    # the same type. ``google-cloud-storage`` accepts both ``str`` and ``Path``
-    # instances.
-    get_gcs_client().bucket(bucket_name).blob(blob_name).download_to_filename(local_path)
+    blob.download_to_filename(local_path)
     logger.info("Descargado %s → %s", gcs_uri, local_path)
     return local_path
 

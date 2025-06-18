@@ -74,7 +74,11 @@ def train_final_model(
     # Descarga de artefactos necesarios a un directorio temporal
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
-        loc_params = gcs_utils.download_gcs_file(params_path, tmp_path)
+        try:
+            loc_params = gcs_utils.download_gcs_file(params_path, tmp_path)
+        except FileNotFoundError:
+            logger.error("No se encontró el archivo de parámetros en GCS: %s", params_path)
+            raise
         hp = json.loads(loc_params.read_text())
         
         loc_feat = gcs_utils.download_gcs_file(features_gcs_path, tmp_path)

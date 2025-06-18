@@ -109,7 +109,8 @@ class TestGcsUtils:
         mock_blob = MagicMock()
         mock_gcs_client.return_value.bucket.return_value = mock_bucket
         mock_bucket.blob.return_value = mock_blob
-        
+        mock_blob.exists.return_value = True
+
         gcs_uri = "gs://my-test-bucket/path/to/download.txt"
         destination_dir = tmp_path
 
@@ -119,6 +120,7 @@ class TestGcsUtils:
         # Aserciones
         mock_gcs_client.return_value.bucket.assert_called_once_with("my-test-bucket")
         mock_bucket.blob.assert_called_once_with("path/to/download.txt")
+        mock_blob.exists.assert_called_once()
         expected_local_path = destination_dir / "download.txt"
         mock_blob.download_to_filename.assert_called_once_with(expected_local_path)
         assert result_path == expected_local_path
