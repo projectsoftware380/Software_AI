@@ -10,7 +10,10 @@ from pathlib import Path
 
 import google.cloud.aiplatform as aip
 from kfp import compiler, dsl
-from kfp.dsl import ConcatPlaceholder  # type: ignore
+# NOTE: Use the DSL helper to concatenate dynamic strings when passing
+# arguments to components. `ConcatPlaceholder` is intended for component
+# definitions and causes type errors when used directly in a pipeline.
+from kfp.dsl import Concat
 from kfp.components import load_component_from_text
 
 # AJUSTE: Se asegura que 'constants' sea la única fuente de configuración.
@@ -106,14 +109,14 @@ def trading_pipeline_v5(
         # 4 ▸ Optimizar lógica de trading (umbrales, hiper‑parámetros, etc.)
         optimize_logic_task = component_op_factory["optimize_trading_logic"](
             features_path=prepare_opt_data_task.outputs["prepared_data_path"],
-            # Ruta dinámica al JSON de la arquitectura
-            architecture_params_file=ConcatPlaceholder(
-                [
-                    optimize_arch_task.outputs["best_architecture_dir"],
-                    "/",
-                    pair,
-                    "/best_architecture.json",
-                ]
+            # Ruta dinámica al JSON de la arquitectura.
+            # `dsl.Concat` produces a pipeline parameter string compatible with
+            # KFP's type system.
+            architecture_params_file=Concat(
+                optimize_arch_task.outputs["best_architecture_dir"],
+                "/",
+                pair,
+                "/best_architecture.json",
             ),
             n_trials=n_trials_logic,
         )
@@ -125,13 +128,11 @@ def trading_pipeline_v5(
             pair=pair,
             timeframe=timeframe,
             # Ruta dinámica al JSON de parámetros de lógica
-            params_file=ConcatPlaceholder(
-                [
-                    optimize_logic_task.outputs["best_params_dir"],
-                    "/",
-                    pair,
-                    "/best_params.json",
-                ]
+            params_file=Concat(
+                optimize_logic_task.outputs["best_params_dir"],
+                "/",
+                pair,
+                "/best_params.json",
             ),
             features_gcs_path=prepare_opt_data_task.outputs["prepared_data_path"],
             output_gcs_base_dir=constants.LSTM_MODELS_PATH,
