@@ -37,7 +37,11 @@ from kfp.components import load_component_from_text
 if version.parse(kfp.__version__) < version.parse("2.0.0"):
     from kfp.dsl import Concat  # type: ignore  # disponible en KFP 1.x
 else:
-    from kfp.dsl import ConcatPlaceholder as Concat  # type: ignore
+    from kfp.dsl import ConcatPlaceholder as _ConcatPlaceholder  # type: ignore
+
+    def Concat(*args):  # type: ignore
+        """Shim para KFP >= 2.0, acepta *args como en versiones previas."""
+        return _ConcatPlaceholder(list(args))
 
 # ───────────────────────────────────────────────────────────────────────────────
 # Módulos internos
