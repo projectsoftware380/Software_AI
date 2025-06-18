@@ -10,11 +10,20 @@ from pathlib import Path
 
 import google.cloud.aiplatform as aip
 from kfp import compiler, dsl
+from packaging import version
+import kfp
 # NOTE: Use the DSL helper to concatenate dynamic strings when passing
 # arguments to components. `ConcatPlaceholder` is intended for component
 # definitions and causes type errors when used directly in a pipeline.
 from kfp.dsl import Concat
 from kfp.components import load_component_from_text
+
+# Verificar que la versión de KFP sea compatible con `dsl.Concat`.
+if version.parse(kfp.__version__) < version.parse("2.0.0"):
+    raise ImportError(
+        f"KFP>=2.0.0 es requerido para usar dsl.Concat; versión detectada: {kfp.__version__}. "
+        "Actualiza con 'pip install --upgrade \"kfp>=2.13.0\"'."
+    )
 
 # AJUSTE: Se asegura que 'constants' sea la única fuente de configuración.
 from src.shared import constants
