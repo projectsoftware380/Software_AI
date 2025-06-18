@@ -117,7 +117,10 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser("Promotion Decision Task")
     p.add_argument("--new-metrics-dir", required=True)
     p.add_argument("--new-lstm-artifacts-dir", required=True)
-    p.add_argument("--new-filter-model-path", required=True)
+    p.add_argument(
+        "--new-filter-model-path",
+        default="/tmp/filter_model",
+    )
     p.add_argument("--pair", required=True)
     p.add_argument("--timeframe", required=True)
     p.add_argument("--production-base-dir", default=constants.PRODUCTION_MODELS_PATH)

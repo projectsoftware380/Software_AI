@@ -95,7 +95,10 @@ def download_gcs_file(gcs_uri: str, destination_dir: Path | None = None) -> Path
     bucket_name, blob_name = gcs_uri[5:].split("/", 1)
     local_path = dest_dir / Path(blob_name).name
     
-    get_gcs_client().bucket(bucket_name).blob(blob_name).download_to_filename(str(local_path))
+    # Use the ``Path`` object directly so callers and tests can assert against
+    # the same type. ``google-cloud-storage`` accepts both ``str`` and ``Path``
+    # instances.
+    get_gcs_client().bucket(bucket_name).blob(blob_name).download_to_filename(local_path)
     logger.info("Descargado %s → %s", gcs_uri, local_path)
     return local_path
 

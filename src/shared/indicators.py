@@ -38,8 +38,10 @@ if not log.handlers:
 _INDICATOR_CACHE: Dict[Tuple[int, Tuple[int, ...]], pd.DataFrame] = {}
 
 
-def _cache_key(df: pd.DataFrame, p: dict, atr_len: int) -> Tuple[int, Tuple[int, ...]]:
-    """Clave basada en *id* del DataFrame + hiper-parámetros relevantes."""
+def _cache_key(
+    df: pd.DataFrame, p: dict, atr_len: int, drop_na: bool, ffill: bool
+) -> Tuple[int, Tuple[int, ...]]:
+    """Clave basada en ``id`` del DataFrame, hiper-parámetros y opciones."""
     return (
         id(df),
         (
@@ -49,6 +51,8 @@ def _cache_key(df: pd.DataFrame, p: dict, atr_len: int) -> Tuple[int, Tuple[int,
             p["macd_slow"],
             p["stoch_len"],
             atr_len,
+            int(drop_na),
+            int(ffill),
         ),
     )
 
@@ -131,7 +135,7 @@ def build_indicators(
             f"Faltan columnas OHLC obligatorias: {', '.join(sorted(missing))}"
         )
 
-    key = _cache_key(df, params, atr_len)
+    key = _cache_key(df, params, atr_len, drop_na, ffill)
 
     # ─────────────────────────  Cache  ────────────────────────────────
     if key in _INDICATOR_CACHE and _INDICATOR_CACHE[key] is not None:
@@ -195,16 +199,17 @@ def build_indicators(
     )
 
     # ───────────────────  Post-procesado NaNs  ────────────────────────
-    out.bfill(inplace=True)
-    if ffill:
-        out.ffill(inplace=True)
-
+    # Only fill missing values when explicitely requested.  Dropping NaNs first
+    # ensures the initial warm‑up rows are removed, which keeps behaviour
+    # predictable for tests.
     if drop_na:
         before = len(out)
         out = out.dropna().reset_index(drop=True)
         removed = before - len(out)
         if removed:
             log.info("🔍 build_indicators: %d filas con NaN eliminadas", removed)
+    if ffill:
+        out.ffill(inplace=True)
 
     # ─────────────────── Validación final & cache  ────────────────────
     if out.isna().any().any():
