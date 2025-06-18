@@ -157,8 +157,17 @@ if __name__ == "__main__":
     p.add_argument("--years-to-keep", type=int, default=5)
     p.add_argument("--holdout-months", type=int, default=3)
     p.add_argument("--cleanup", type=lambda x: str(x).lower() == "true", default=True)
-    p.add_argument("--prepared-data-path-output", type=Path, required=True)
-    p.add_argument("--holdout-data-path-output", type=Path, required=True)
+    tmp = Path(tempfile.gettempdir())
+    p.add_argument(
+        "--prepared-data-path-output",
+        type=Path,
+        default=tmp / "prepared.parquet",
+    )
+    p.add_argument(
+        "--holdout-data-path-output",
+        type=Path,
+        default=tmp / "holdout.parquet",
+    )
 
     args = p.parse_args()
 

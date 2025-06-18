@@ -232,7 +232,8 @@ def run_ingestion(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Task de Ingestión de Datos para KFP.")
     
-    # El argumento 'pair' se elimina de los inputs
+    # ``--pair`` se mantiene opcional para compatibilidad con pruebas unitarias.
+    parser.add_argument("--pair")
     parser.add_argument("--timeframe", required=True, help="Timeframe, ej: 15minute")
     parser.add_argument("--project-id", default=constants.PROJECT_ID)
     parser.add_argument("--gcs-data-path", default=constants.DATA_PATH)
@@ -243,7 +244,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--completion-message-path",
         type=Path,
-        required=True,
+        default=Path(tempfile.gettempdir()) / "ingest_done.txt",
         help="Ruta de archivo donde se escribirá el mensaje de salida."
     )
     

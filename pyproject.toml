@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "software-ai"
+version = "0.1.0"
+description = "Algo trading ML pipeline"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Unknown"}]
+
+# Dependencies from requirements.txt
+dependencies = [
+    "numpy>=1.26",
+    "pandas==2.1.4",
+    "pyarrow==15.0.2",
+    "scikit-learn==1.4.2",
+    "joblib==1.4.2",
+    "scipy>=1.15.3",
+    "lightgbm>=4.0.0",
+    "torch==2.1.2",
+    "stable-baselines3==2.3.2",
+    "gymnasium==0.29.1",
+    "optuna==3.6.1",
+    "pandas-ta",
+    "protobuf==4.25.3",
+    "grpcio==1.62.3",
+    "grpcio-status==1.62.3",
+    "google-api-core>=2.24.2,<3",
+    "google-auth>=2.40,<3",
+    "google-auth-oauthlib>=1.2.2",
+    "googleapis-common-protos>=1.62,<2",
+    "google-cloud-storage~=2.19",
+    "google-cloud-pubsub~=2.30",
+    "google-cloud-secret-manager~=2.24",
+    "google-cloud-aiplatform==1.60.0",
+    "gcsfs==2024.5.0",
+    "kfp==2.13.0",
+    "kfp-server-api==2.4.0",
+    "kfp-pipeline-spec==0.6.0",
+    "boto3==1.28.57",
+    "tenacity>=9.1.2",
+    "loguru==0.7.3",
+    "python-dotenv==1.1.0",
+    "click>=8.2,<9",
+    "kubernetes<31,>=25.0",
+    "PyYAML>=6.0.2",
+    "requests>=2.31",
+    "requests-toolbelt>=0.10,<1",
+    "tabulate>=0.9",
+    "pytest>=8.4",
+    "pyfolio-reloaded==0.9.6",
+    "empyrical==0.5.5",
+    "ipython>=8.22.0",
+    "pycairo>=1.26.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
