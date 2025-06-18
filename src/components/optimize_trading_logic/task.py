@@ -131,6 +131,10 @@ def run_logic_optimization(
         with open(local_arch_path, 'r') as f:
             arch_params = json.load(f)
 
+        # --- CORRECCIÓN: asegurar que los parámetros de indicadores
+        # fijos acompañen a los de arquitectura para evitar KeyError posteriores.
+        arch_params.update(constants.DUMMY_INDICATOR_PARAMS)
+
         df_raw = df_full[df_full['pair'] == pair] if 'pair' in df_full.columns else df_full
         df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"], unit="ms", errors="coerce")
 
