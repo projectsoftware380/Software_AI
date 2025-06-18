@@ -16,6 +16,11 @@ pip install .
 This installs the `src` package along with all required third party
 libraries.
 
+> **Note**
+> The pipeline requires Kubeflow Pipelines SDK **2.0** or newer in order to use
+> `dsl.Concat`.  If you encounter import errors, ensure that `kfp>=2.13.0` is
+> installed.
+
 ## Running tests
 
 After installing the package you can run the unit tests with `pytest`:
