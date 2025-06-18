@@ -1,6 +1,5 @@
-# src/pipeline/main.py
 """
-Pipeline v5 – Final. Reemplaza el filtro RL por un clasificador supervisado (LightGBM).
+Pipeline v5 – Final. Reemplaza el filtro RL por un clasificador supervisado (LightGBM).
 Implementa una gestión de rutas centralizada y robusta.
 """
 
@@ -33,7 +32,7 @@ COMPONENTS_DIR = Path(__file__).parent.parent / "components"
 
 
 def load_utf8_component(rel_path: str):
-    """Carga un componente YAML preservando UTF-8 (Windows-safe)."""
+    """Carga un componente YAML preservando UTF-8 (Windows‑safe)."""
     yaml_text = (COMPONENTS_DIR / rel_path).read_text(encoding="utf-8")
     return load_component_from_text(yaml_text)
 
@@ -83,7 +82,7 @@ def trading_pipeline_v5(
         timeframe=timeframe,
     )
 
-    # 2 ▸ Preparación de datos (con hold-out)
+    # 2 ▸ Preparación de datos (con hold‑out)
     prepare_opt_data_task = component_op_factory["data_preparation"](
         pair="ALL",
         timeframe=timeframe,
@@ -104,20 +103,18 @@ def trading_pipeline_v5(
         items=pairs_to_process, name="parallel-training-for-each-pair"
     ) as pair:
 
-        # 4 ▸ Optimizar lógica de trading (umbrales, hiper-parámetros, etc.)
-        # Esta tarea ahora se ejecuta dentro del bucle para acceder a `pair`.
+        # 4 ▸ Optimizar lógica de trading (umbrales, hiper‑parámetros, etc.)
         optimize_logic_task = component_op_factory["optimize_trading_logic"](
             features_path=prepare_opt_data_task.outputs["prepared_data_path"],
-
-            # --- CORRECCIÓN: KFP v2 utiliza `ConcatPlaceholder` para
-            # interpolar dinámicamente dentro de un `ParallelFor`.
-            architecture_params_file=ConcatPlaceholder([
-                optimize_arch_task.outputs["best_architecture_dir"],
-                "/",
-                pair,
-                "/best_architecture.json",
-            ]),
-
+            # Ruta dinámica al JSON de la arquitectura
+            architecture_params_file=ConcatPlaceholder(
+                [
+                    optimize_arch_task.outputs["best_architecture_dir"],
+                    "/",
+                    pair,
+                    "/best_architecture.json",
+                ]
+            ),
             n_trials=n_trials_logic,
         )
 
@@ -127,13 +124,15 @@ def trading_pipeline_v5(
             region=constants.REGION,
             pair=pair,
             timeframe=timeframe,
-            # --- CORRECCIÓN: Ruta dinámica construida con `ConcatPlaceholder` ---
-            params_file=ConcatPlaceholder([
-                optimize_logic_task.outputs["best_params_dir"],
-                "/",
-                pair,
-                "/best_params.json",
-            ]),
+            # Ruta dinámica al JSON de parámetros de lógica
+            params_file=ConcatPlaceholder(
+                [
+                    optimize_logic_task.outputs["best_params_dir"],
+                    "/",
+                    pair,
+                    "/best_params.json",
+                ]
+            ),
             features_gcs_path=prepare_opt_data_task.outputs["prepared_data_path"],
             output_gcs_base_dir=constants.LSTM_MODELS_PATH,
             vertex_training_image_uri=args.common_image_uri,
@@ -152,7 +151,7 @@ def trading_pipeline_v5(
             output_gcs_base_dir=constants.FILTER_MODELS_PATH,
         )
 
-        # 7 ▸ Backtest final sobre el hold-out
+        # 7 ▸ Backtest final sobre el hold‑out
         backtest_task = component_op_factory["backtest"](
             lstm_model_dir=train_lstm_task.outputs["trained_lstm_dir_path"],
             filter_model_path=train_filter_task.outputs["trained_filter_model_path"],
@@ -160,7 +159,7 @@ def trading_pipeline_v5(
             pair=pair,
             timeframe=timeframe,
         )
-        
+
         # 8 ▸ Promoción a producción si el backtest pasa los umbrales
         component_op_factory["model_promotion"](
             new_metrics_dir=backtest_task.outputs["output_gcs_dir"],
@@ -170,7 +169,6 @@ def trading_pipeline_v5(
             timeframe=timeframe,
             production_base_dir=constants.PRODUCTION_MODELS_PATH,
         ).after(backtest_task)
-
 
     # Recursos recomendados para steps de Optuna y Backtest (fuera del bucle)
     for task in (optimize_arch_task, optimize_logic_task, backtest_task):
@@ -192,14 +190,15 @@ if __name__ == "__main__":
     if os.getenv("SUBMIT_PIPELINE_TO_VERTEX", "true").lower() == "true":
         aip.init(project=constants.PROJECT_ID, location=constants.REGION)
         display_name = f"algo-trading-v5-robust-{datetime.utcnow():%Y%m%d-%H%M%S}"
-        
+
         job = aip.PipelineJob(
             display_name=display_name,
             template_path=PIPELINE_JSON,
             pipeline_root=constants.PIPELINE_ROOT,
-            enable_caching=True
+            enable_caching=True,
         )
         job.run()
         print(f"🚀 Pipeline lanzada con Display Name: {display_name}")
     else:
         print("⏭️ La pipeline no se envió a Vertex AI (SUBMIT_PIPELINE_TO_VERTEX está en 'false').")
+
