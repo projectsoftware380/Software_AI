@@ -8,7 +8,6 @@ Implementa una gestión de rutas centralizada y robusta.
       correcta sin romper versiones antiguas (<2.0).
 """
 
-from __future__ import annotations
 
 # ───────────────────────────────────────────────────────────────────────────────
 # Imports estándar
