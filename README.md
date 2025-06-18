@@ -24,3 +24,5 @@ After installing the package you can run the unit tests with `pytest`:
 pytest
 ```
 
+
+For details on the critical bug fixed in pipeline v5, see [docs/Pipeline_v5_error_fix.md](docs/Pipeline_v5_error_fix.md).
