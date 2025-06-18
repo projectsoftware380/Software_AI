@@ -5,7 +5,7 @@ inputs:
   - {name: region, type: String}
   - {name: pair, type: String}
   - {name: timeframe, type: String}
-  - {name: params_path, type: String}
+  - {name: params_file, type: String}
   - {name: features_gcs_path, type: String}
   - {name: output_gcs_base_dir, type: String}
   - {name: vertex_training_image_uri, type: String}
@@ -31,8 +31,8 @@ implementation:
       - {inputValue: pair}
       - --timeframe
       - {inputValue: timeframe}
-      - --params-path
-      - {inputValue: params_path}
+      - --params-file
+      - {inputValue: params_file}
       - --features-gcs-path
       - {inputValue: features_gcs_path}
       - --output-gcs-base-dir

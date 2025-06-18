@@ -156,6 +156,41 @@ def test_model_promotion_task_promotes(mock_load_metrics, mock_upload, mock_copy
     # El script debe imprimir "true"
     assert result.stdout.strip() == "true"
 
+
+@patch('src.components.train_lstm_launcher.task.aip.init')
+@patch('src.components.train_lstm_launcher.task.aip.CustomJob')
+def test_train_lstm_launcher_uses_params_file(mock_custom_job, mock_aip_init, tmp_path):
+    """Verifica que el argumento `--params-file` se propaga al CustomJob."""
+
+    mock_custom_job.return_value.state = "JOB_STATE_SUCCEEDED"
+
+    output_path = tmp_path / "model_dir.txt"
+
+    run_launcher = __import__(
+        'src.components.train_lstm_launcher.task', fromlist=['run_launcher']
+    ).run_launcher
+
+    run_launcher(
+        project_id="p",
+        region="us",
+        pair="EURUSD",
+        timeframe="15m",
+        params_file="gs://bucket/best.json",
+        features_gcs_path="gs://bucket/features.parquet",
+        output_gcs_base_dir="gs://bucket/output",
+        vertex_training_image_uri="img",
+        vertex_machine_type="n1",
+        vertex_accelerator_type="ACC",
+        vertex_accelerator_count=1,
+        vertex_service_account="svc",
+        trained_lstm_dir_path_output=str(output_path),
+    )
+
+    called_args = (
+        mock_custom_job.call_args[1]["worker_pool_specs"][0]["container_spec"]["args"]
+    )
+    assert "--params-file=gs://bucket/best.json" in called_args
+
 # Nota: Un conjunto de pruebas completo también incluiría casos de fallo,
 # como datos de entrada inválidos, respuestas de API con errores,
 # y casos donde el modelo no es promovido. Este archivo sirve como una
