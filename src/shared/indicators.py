@@ -18,6 +18,12 @@ from typing import Dict, Tuple, Callable, List
 import logging
 
 import pandas as pd
+import numpy as np
+
+# --- CORRECCIÓN: algunas versiones recientes de NumPy no exponen la
+# constante `NaN` que espera `pandas_ta`. Se crea un alias si es necesario.
+if not hasattr(np, "NaN"):
+    np.NaN = np.nan
 
 try:
     import pandas_ta as ta

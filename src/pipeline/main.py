@@ -11,6 +11,7 @@ from pathlib import Path
 
 import google.cloud.aiplatform as aip
 from kfp import compiler, dsl
+from kfp.dsl import ConcatPlaceholder  # type: ignore
 from kfp.components import load_component_from_text
 
 # AJUSTE: Se asegura que 'constants' sea la única fuente de configuración.
@@ -107,12 +108,16 @@ def trading_pipeline_v5(
         # Esta tarea ahora se ejecuta dentro del bucle para acceder a `pair`.
         optimize_logic_task = component_op_factory["optimize_trading_logic"](
             features_path=prepare_opt_data_task.outputs["prepared_data_path"],
-            
-            # --- SOLUCIÓN IMPLEMENTADA ---
-            # Se reemplaza dsl.concat por la sintaxis de KFP v2 para construir
-            # la ruta dinámicamente usando el `pair` del bucle.
-            architecture_params_file=f"{optimize_arch_task.outputs['best_architecture_dir']}/{pair}/best_architecture.json",
-            
+
+            # --- CORRECCIÓN: KFP v2 utiliza `ConcatPlaceholder` para
+            # interpolar dinámicamente dentro de un `ParallelFor`.
+            architecture_params_file=ConcatPlaceholder([
+                optimize_arch_task.outputs["best_architecture_dir"],
+                "/",
+                pair,
+                "/best_architecture.json",
+            ]),
+
             n_trials=n_trials_logic,
         )
 
@@ -122,7 +127,13 @@ def trading_pipeline_v5(
             region=constants.REGION,
             pair=pair,
             timeframe=timeframe,
-            params_file=f"{optimize_logic_task.outputs['best_params_dir']}/{pair}/best_params.json",
+            # --- CORRECCIÓN: Ruta dinámica construida con `ConcatPlaceholder` ---
+            params_file=ConcatPlaceholder([
+                optimize_logic_task.outputs["best_params_dir"],
+                "/",
+                pair,
+                "/best_params.json",
+            ]),
             features_gcs_path=prepare_opt_data_task.outputs["prepared_data_path"],
             output_gcs_base_dir=constants.LSTM_MODELS_PATH,
             vertex_training_image_uri=args.common_image_uri,
