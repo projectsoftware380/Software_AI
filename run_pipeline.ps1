@@ -65,7 +65,9 @@ Write-Host "--------------------------------------------------"
 
 # --- 3. Construir y Subir la Imagen Docker ---
 Write-Host "Paso 2: Construyendo la imagen Docker..."
-docker build -t $ImageUri .
+# NOTA: Se añade --no-cache para forzar la reinstalación de las dependencias
+# y evitar problemas si requirements.txt cambió.
+docker build --no-cache -t $ImageUri .
 if ($LASTEXITCODE -ne 0) {
     Write-Error "¡Falló la construcción de la imagen Docker!"
     exit 1
@@ -82,8 +84,12 @@ if ($LASTEXITCODE -ne 0) {
 # --- 4. Ejecutar la Pipeline Pasando la URI como Parámetro ---
 Write-Host "Paso 4: Lanzando la pipeline de Vertex AI..."
 
-# === AJUSTE CORREGIDO: Se cambia '--image_uri' por '--common-image-uri' ===
-python -m src.pipeline.main --common-image-uri $ImageUri
+# =========================================================================
+# === AJUSTE CRÍTICO: Usar la ruta explícita al Python del entorno venv ===
+# Esto garantiza que se use el intérprete correcto con las librerías
+# instaladas (kfp, google-cloud-aiplatform, etc.) y evita el error
+# 'ModuleNotFoundError' en la máquina local.
+.\venv\Scripts\python.exe -m src.pipeline.main --common-image-uri $ImageUri
 # =========================================================================
 
 # Verificación final
