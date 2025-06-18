@@ -96,22 +96,6 @@ def trading_pipeline_v5(
         n_trials=n_trials_arch,
     )
 
-    # 4 ▸ Optimizar lógica de trading (umbrales, hiper-parámetros, etc.)
-    optimize_logic_task = component_op_factory["optimize_trading_logic"](
-        features_path=prepare_opt_data_task.outputs["prepared_data_path"],
-        # --- AJUSTE CLAVE ---
-        # Se pasa la RUTA EXACTA del directorio de arquitectura, no una ruta base.
-        architecture_params_dir=optimize_arch_task.outputs["best_architecture_dir"],
-        n_trials=n_trials_logic,
-    )
-
-    # Recursos recomendados para steps de Optuna
-    for task in (optimize_arch_task, optimize_logic_task):
-        task.set_cpu_limit("8") \
-            .set_memory_limit("30G") \
-            .set_accelerator_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT) \
-            .set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE)
-
     # ───────── Bucle paralelo por cada par de divisas ─────────
     pairs_to_process = list(constants.SPREADS_PIP.keys())
 
@@ -119,14 +103,25 @@ def trading_pipeline_v5(
         items=pairs_to_process, name="parallel-training-for-each-pair"
     ) as pair:
 
+        # 4 ▸ Optimizar lógica de trading (umbrales, hiper-parámetros, etc.)
+        # Esta tarea ahora se ejecuta dentro del bucle para acceder a `pair`.
+        optimize_logic_task = component_op_factory["optimize_trading_logic"](
+            features_path=prepare_opt_data_task.outputs["prepared_data_path"],
+            
+            # --- SOLUCIÓN IMPLEMENTADA ---
+            # Se reemplaza dsl.concat por la sintaxis de KFP v2 para construir
+            # la ruta dinámicamente usando el `pair` del bucle.
+            architecture_params_file=f"{optimize_arch_task.outputs['best_architecture_dir']}/{pair}/best_architecture.json",
+            
+            n_trials=n_trials_logic,
+        )
+
         # 5 ▸ Entrenamiento LSTM para el par actual
         train_lstm_task = component_op_factory["train_lstm_launcher"](
             project_id=constants.PROJECT_ID,
             region=constants.REGION,
             pair=pair,
             timeframe=timeframe,
-            # --- AJUSTE CLAVE ---
-            # Se pasa la RUTA EXACTA del directorio de parámetros, no una ruta base.
             params_path=optimize_logic_task.outputs['best_params_dir'],
             features_gcs_path=prepare_opt_data_task.outputs["prepared_data_path"],
             output_gcs_base_dir=constants.LSTM_MODELS_PATH,
@@ -154,11 +149,7 @@ def trading_pipeline_v5(
             pair=pair,
             timeframe=timeframe,
         )
-        backtest_task.set_cpu_limit("8") \
-            .set_memory_limit("30G") \
-            .set_accelerator_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT) \
-            .set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE)
-
+        
         # 8 ▸ Promoción a producción si el backtest pasa los umbrales
         component_op_factory["model_promotion"](
             new_metrics_dir=backtest_task.outputs["output_gcs_dir"],
@@ -168,6 +159,14 @@ def trading_pipeline_v5(
             timeframe=timeframe,
             production_base_dir=constants.PRODUCTION_MODELS_PATH,
         ).after(backtest_task)
+
+
+    # Recursos recomendados para steps de Optuna y Backtest (fuera del bucle)
+    for task in (optimize_arch_task, optimize_logic_task, backtest_task):
+        task.set_cpu_limit("8") \
+            .set_memory_limit("30G") \
+            .set_accelerator_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT) \
+            .set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE)
 
 
 # ════════════════════════════════════════════════════════════════

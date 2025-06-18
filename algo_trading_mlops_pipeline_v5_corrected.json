@@ -10,6 +10,9 @@
             "componentRef": {
               "name": "comp-launch-vertex-ai-lstm-training-job"
             },
+            "dependentTasks": [
+              "optimize-trading-logic"
+            ],
             "inputs": {
               "parameters": {
                 "features_gcs_path": {
@@ -24,7 +27,10 @@
                   "componentInputParameter": "pipelinechannel--loop-item-param-1"
                 },
                 "params_path": {
-                  "componentInputParameter": "pipelinechannel--optimize-trading-logic-best_params_dir"
+                  "taskOutputParameter": {
+                    "outputParameterKey": "best_params_dir",
+                    "producerTask": "optimize-trading-logic"
+                  }
                 },
                 "project_id": {
                   "runtimeValue": {
@@ -61,7 +67,7 @@
                 },
                 "vertex_training_image_uri": {
                   "runtimeValue": {
-                    "constant": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250617-194429"
+                    "constant": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250617-205948"
                   }
                 }
               }
@@ -117,6 +123,38 @@
             },
             "taskInfo": {
               "name": "model-promotion-gate"
+            }
+          },
+          "optimize-trading-logic": {
+            "cachingOptions": {
+              "enableCache": true
+            },
+            "componentRef": {
+              "name": "comp-optimize-trading-logic"
+            },
+            "inputs": {
+              "parameters": {
+                "architecture_params_file": {
+                  "runtimeValue": {
+                    "constant": "{{$.inputs.parameters['pipelinechannel--optimize-model-architecture-best_architecture_dir']}}/{{$.inputs.parameters['pipelinechannel--loop-item-param-1']}}/best_architecture.json"
+                  }
+                },
+                "features_path": {
+                  "componentInputParameter": "pipelinechannel--prepare-training-and-holdout-data-prepared_data_path"
+                },
+                "n_trials": {
+                  "componentInputParameter": "pipelinechannel--n_trials_logic"
+                },
+                "pipelinechannel--loop-item-param-1": {
+                  "componentInputParameter": "pipelinechannel--loop-item-param-1"
+                },
+                "pipelinechannel--optimize-model-architecture-best_architecture_dir": {
+                  "componentInputParameter": "pipelinechannel--optimize-model-architecture-best_architecture_dir"
+                }
+              }
+            },
+            "taskInfo": {
+              "name": "optimize-trading-logic"
             }
           },
           "perform-final-backtest": {
@@ -204,7 +242,10 @@
           "pipelinechannel--loop-item-param-1": {
             "parameterType": "STRING"
           },
-          "pipelinechannel--optimize-trading-logic-best_params_dir": {
+          "pipelinechannel--n_trials_logic": {
+            "parameterType": "NUMBER_INTEGER"
+          },
+          "pipelinechannel--optimize-model-architecture-best_architecture_dir": {
             "parameterType": "STRING"
           },
           "pipelinechannel--prepare-training-and-holdout-data-holdout_data_path": {
@@ -365,7 +406,7 @@
       "executorLabel": "exec-optimize-trading-logic",
       "inputDefinitions": {
         "parameters": {
-          "architecture_params_dir": {
+          "architecture_params_file": {
             "parameterType": "STRING"
           },
           "features_path": {
@@ -520,7 +561,7 @@
             "-m",
             "src.components.data_ingestion.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250617-194429"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250617-205948"
         }
       },
       "exec-launch-vertex-ai-lstm-training-job": {
@@ -558,7 +599,7 @@
             "-m",
             "src.components.train_lstm_launcher.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250617-194429"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250617-205948"
         }
       },
       "exec-model-promotion-gate": {
@@ -582,7 +623,7 @@
             "-m",
             "src.components.model_promotion.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250617-194429"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250617-205948"
         }
       },
       "exec-optimize-model-architecture": {
@@ -600,7 +641,7 @@
             "-m",
             "src.components.optimize_model_architecture.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250617-194429",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250617-205948",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -620,8 +661,8 @@
           "args": [
             "--features-path",
             "{{$.inputs.parameters['features_path']}}",
-            "--architecture-params-dir",
-            "{{$.inputs.parameters['architecture_params_dir']}}",
+            "--architecture-params-file",
+            "{{$.inputs.parameters['architecture_params_file']}}",
             "--n-trials",
             "{{$.inputs.parameters['n_trials']}}",
             "--best-params-dir-output",
@@ -634,7 +675,7 @@
             "-m",
             "src.components.optimize_trading_logic.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250617-194429",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250617-205948",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -668,7 +709,7 @@
             "-m",
             "src.components.backtest.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250617-194429",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250617-205948",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -706,7 +747,7 @@
             "-m",
             "src.components.data_preparation.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250617-194429"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250617-205948"
         }
       },
       "exec-train-filter-model": {
@@ -730,7 +771,7 @@
             "-m",
             "src.components.train_filter_model.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250617-194429"
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250617-205948"
         }
       }
     }
@@ -747,15 +788,18 @@
             "name": "comp-for-loop-2"
           },
           "dependentTasks": [
-            "optimize-trading-logic",
+            "optimize-model-architecture",
             "prepare-training-and-holdout-data"
           ],
           "inputs": {
             "parameters": {
-              "pipelinechannel--optimize-trading-logic-best_params_dir": {
+              "pipelinechannel--n_trials_logic": {
+                "componentInputParameter": "n_trials_logic"
+              },
+              "pipelinechannel--optimize-model-architecture-best_architecture_dir": {
                 "taskOutputParameter": {
-                  "outputParameterKey": "best_params_dir",
-                  "producerTask": "optimize-trading-logic"
+                  "outputParameterKey": "best_architecture_dir",
+                  "producerTask": "optimize-model-architecture"
                 }
               },
               "pipelinechannel--prepare-training-and-holdout-data-holdout_data_path": {
@@ -843,40 +887,6 @@
           },
           "taskInfo": {
             "name": "optimize-model-architecture"
-          }
-        },
-        "optimize-trading-logic": {
-          "cachingOptions": {
-            "enableCache": true
-          },
-          "componentRef": {
-            "name": "comp-optimize-trading-logic"
-          },
-          "dependentTasks": [
-            "optimize-model-architecture",
-            "prepare-training-and-holdout-data"
-          ],
-          "inputs": {
-            "parameters": {
-              "architecture_params_dir": {
-                "taskOutputParameter": {
-                  "outputParameterKey": "best_architecture_dir",
-                  "producerTask": "optimize-model-architecture"
-                }
-              },
-              "features_path": {
-                "taskOutputParameter": {
-                  "outputParameterKey": "prepared_data_path",
-                  "producerTask": "prepare-training-and-holdout-data"
-                }
-              },
-              "n_trials": {
-                "componentInputParameter": "n_trials_logic"
-              }
-            }
-          },
-          "taskInfo": {
-            "name": "optimize-trading-logic"
           }
         },
         "prepare-training-and-holdout-data": {
