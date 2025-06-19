@@ -28,7 +28,7 @@ outputs:
 
 implementation:
   container:
-    image: placeholder-image
+    image: gcr.io/trading-ai-460823/trading-ai-gpu:v1
     command:
       - python
       - -m
@@ -46,3 +46,5 @@ implementation:
       - {inputValue: output_gcs_base_dir}
       - --trained-filter-model-path-output
       - {outputPath: trained_filter_model_path}
+    resources:
+      nvidia_gpu_limit: "1"

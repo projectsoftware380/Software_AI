@@ -94,6 +94,8 @@ def trading_pipeline_v5(
         end_date=datetime.utcnow().strftime("%Y-%m-%d"),
         timeframe=timeframe,
     )
+    ingest_task.set_accelerator_type("NVIDIA_TESLA_T4")
+    ingest_task.set_accelerator_limit(1)
 
     # 2 ▸ Preparación de datos (con hold‑out)
     prepare_opt_data_task = component_op_factory["data_preparation"](
@@ -102,12 +104,16 @@ def trading_pipeline_v5(
         years_to_keep=backtest_years_to_keep,
         holdout_months=holdout_months,
     ).after(ingest_task)
+    prepare_opt_data_task.set_accelerator_type("NVIDIA_TESLA_T4")
+    prepare_opt_data_task.set_accelerator_limit(1)
 
     # 3 ▸ Optimizar arquitectura LSTM
     optimize_arch_task = component_op_factory["optimize_model_architecture"](
         features_path=prepare_opt_data_task.outputs["prepared_data_path"],
         n_trials=n_trials_arch,
     )
+    optimize_arch_task.set_accelerator_type("NVIDIA_TESLA_T4")
+    optimize_arch_task.set_accelerator_limit(1)
 
     # ───────── Bucle paralelo por cada par de divisas ─────────
     pairs_to_process = list(constants.SPREADS_PIP.keys())
@@ -123,6 +129,8 @@ def trading_pipeline_v5(
             architecture_params_file=f"{optimize_arch_task.outputs['best_architecture_dir']}/{pair}/best_architecture.json",
             n_trials=n_trials_logic,
         )
+        optimize_logic_task.set_accelerator_type("NVIDIA_TESLA_T4")
+        optimize_logic_task.set_accelerator_limit(1)
 
         # 5 ▸ Entrenamiento LSTM para el par actual
         train_lstm_task = component_op_factory["train_lstm_launcher"](
@@ -140,6 +148,8 @@ def trading_pipeline_v5(
             vertex_accelerator_count=constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT,
             vertex_service_account=constants.VERTEX_LSTM_SERVICE_ACCOUNT,
         )
+        train_lstm_task.set_accelerator_type("NVIDIA_TESLA_T4")
+        train_lstm_task.set_accelerator_limit(1)
 
         # 6 ▸ Entrenamiento del modelo filtro supervisado (LightGBM)
         train_filter_task = component_op_factory["train_filter_model"](
@@ -149,6 +159,8 @@ def trading_pipeline_v5(
             timeframe=timeframe,
             output_gcs_base_dir=constants.FILTER_MODELS_PATH,
         )
+        train_filter_task.set_accelerator_type("NVIDIA_TESLA_T4")
+        train_filter_task.set_accelerator_limit(1)
 
         # 7 ▸ Backtest final sobre el hold‑out
         backtest_task = component_op_factory["backtest"](
@@ -158,23 +170,28 @@ def trading_pipeline_v5(
             pair=pair,
             timeframe=timeframe,
         )
+        backtest_task.set_accelerator_type("NVIDIA_TESLA_T4")
+        backtest_task.set_accelerator_limit(1)
 
         # 8 ▸ Promoción a producción si el backtest pasa los umbrales
-        component_op_factory["model_promotion"](
+        promotion_task = component_op_factory["model_promotion"](
             new_metrics_dir=backtest_task.outputs["output_gcs_dir"],
             new_lstm_artifacts_dir=train_lstm_task.outputs["trained_lstm_dir_path"],
             new_filter_model_path=train_filter_task.outputs["trained_filter_model_path"],
             pair=pair,
             timeframe=timeframe,
             production_base_dir=constants.PRODUCTION_MODELS_PATH,
-        ).after(backtest_task)
+        )
+        promotion_task.after(backtest_task)
+        promotion_task.set_accelerator_type("NVIDIA_TESLA_T4")
+        promotion_task.set_accelerator_limit(1)
 
     # Recursos recomendados para steps de Optuna y Backtest (fuera del bucle)
     for task in (optimize_arch_task, optimize_logic_task, backtest_task):
         task.set_cpu_limit("8") \
             .set_memory_limit("30G") \
-            .set_accelerator_limit(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT) \
-            .set_accelerator_type(constants.DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE)
+            .set_accelerator_limit(1) \
+            .set_accelerator_type("NVIDIA_TESLA_T4")
 
 
 # ════════════════════════════════════════════════════════════════

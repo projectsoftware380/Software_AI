@@ -27,7 +27,7 @@ outputs:
 
 implementation:
   container:
-    image: placeholder-image
+    image: gcr.io/trading-ai-460823/trading-ai-gpu:v1
     command:
       - python
       - -m
@@ -43,3 +43,5 @@ implementation:
       - {outputPath: best_params_dir}
       - --optimization-metrics-output
       - {outputPath: optimization_metrics}
+    resources:
+      nvidia_gpu_limit: "1"

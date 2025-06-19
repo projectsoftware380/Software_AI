@@ -19,7 +19,7 @@ outputs:
 
 implementation:
   container:
-    image: placeholder-image
+    image: gcr.io/trading-ai-460823/trading-ai-gpu:v1
     command:
       - python
       - -m
@@ -37,5 +37,7 @@ implementation:
       - {inputValue: timeframe}
       - --production-base-dir
       - {inputValue: production_base_dir}
+    resources:
+      nvidia_gpu_limit: "1"
     fileOutputs:
       model_promoted: /tmp/model_promoted.txt
