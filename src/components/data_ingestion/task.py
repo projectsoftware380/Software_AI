@@ -231,8 +231,13 @@ if __name__ == "__main__":
     args.completion_message_path.parent.mkdir(parents=True, exist_ok=True)
     args.completion_message_path.write_text(message)
     
-    # Salir con código de error si algún par falló
+    # Registrar el resumen final y salir siempre con código 0 para evitar
+    # que el pipeline falle por pares individuales.
     if failed_pairs:
-        sys.exit(1)
+        logger.warning(
+            "Ingestión completada con fallos en los pares: %s", ", ".join(failed_pairs)
+        )
     else:
-        sys.exit(0)
+        logger.info("Ingestión completada sin fallos.")
+
+    sys.exit(0)
