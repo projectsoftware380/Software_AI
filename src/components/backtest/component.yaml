@@ -34,8 +34,6 @@ implementation:
       - {inputValue: pair}
       - --timeframe
       - {inputValue: timeframe}
-    resources:
-      nvidia_gpu_limit: "1"
     fileOutputs:
       output_gcs_dir: /tmp/backtest_dir.txt
       kfp_metrics_artifact: /tmp/kfp_metrics.json

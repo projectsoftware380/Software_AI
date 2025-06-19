@@ -55,5 +55,3 @@ implementation:
       - {outputPath: prepared_data_path}
       - --holdout-data-path-output
       - {outputPath: holdout_data_path}
-    resources:
-      nvidia_gpu_limit: "1"

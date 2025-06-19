@@ -49,5 +49,3 @@ implementation:
       - {inputValue: vertex_service_account}
       - --trained-lstm-dir-path-output
       - {outputPath: trained_lstm_dir_path}
-    resources:
-      nvidia_gpu_limit: "1"

@@ -43,5 +43,3 @@ implementation:
       - {outputPath: best_params_dir}
       - --optimization-metrics-output
       - {outputPath: optimization_metrics}
-    resources:
-      nvidia_gpu_limit: "1"
