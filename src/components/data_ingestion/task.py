@@ -3,12 +3,11 @@
 Tarea del componente de ingestión de datos.
 
 Responsabilidades:
-1.  Obtener la API Key de Polygon desde Google Secret Manager.
-2.  Iterar sobre una lista de pares de divisas predefinida en las constantes.
-3.  Para cada par, eliminar el Parquet histórico y descargar los datos desde Polygon.io.
-4.  Validar que se ha descargado un número mínimo de registros para cada par.
-5.  Guardar los datos consolidados en un nuevo archivo Parquet en GCS.
-6.  Enviar notificaciones de éxito o fracaso a un topic de Pub/Sub para cada par.
+1.  Iterar sobre una lista de pares de divisas predefinida en las constantes.
+2.  Para cada par, eliminar el Parquet histórico y descargar los datos desde Dukascopy.
+3.  Validar que se ha descargado un número mínimo de registros para cada par.
+4.  Guardar los datos consolidados en un nuevo archivo Parquet en GCS.
+5.  Enviar notificaciones de éxito o fracaso a un topic de Pub/Sub para cada par.
 
 Este script está diseñado para ser ejecutado por un componente de KFP.
 """
@@ -26,9 +25,10 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List
 
+import asyncio
 import pandas as pd
-import requests
-from google.cloud import pubsub_v1, secretmanager
+import dukascopy_python as dukascopy
+from google.cloud import pubsub_v1
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -47,89 +47,39 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# --- Lógica de Acceso a Secret Manager ---
-def get_polygon_api_key(
-    project_id: str, secret_name: str, version: str = "latest"
-) -> str:
-    """
-    Obtiene la API Key de Polygon desde Google Secret Manager.
-    """
-    try:
-        logger.info(
-            f"Accediendo al secreto: projects/{project_id}/secrets/{secret_name}/versions/{version}"
-        )
-        client = secretmanager.SecretManagerServiceClient()
-        secret_path = client.secret_version_path(project_id, secret_name, version)
-        response = client.access_secret_version(request={"name": secret_path})
-        api_key = response.payload.data.decode("UTF-8")
-        logger.info(f"API Key obtenida de Secret Manager ({secret_name}).")
-        return api_key
-    except Exception as e:
-        logger.error(f"Error al obtener la API Key de Secret Manager: {e}", exc_info=True)
-        raise RuntimeError(
-            f"Fallo al obtener la API Key de Secret Manager '{secret_name}': {e}"
-        )
+# --- Lógica de Descarga de Datos desde Dukascopy ---
 
 
-# --- Lógica de Descarga de Datos (adaptada de data_fetcher_vertexai.py) ---
-POLYGON_MAX_LIMIT = 50_000
-
-
-@retry(
-    wait=wait_exponential(multiplier=1, min=2, max=60),
-    stop=stop_after_attempt(5),
-    retry=retry_if_exception_type(requests.HTTPError),
-    reraise=True,
-)
-def _fetch_window(
-    session: requests.Session,
+async def _fetch_window(
     symbol: str,
     timeframe: str,
     start_date: str,
     end_date: str,
-    api_key: str,
-) -> List[Dict[str, Any]]:
-    """Realiza una petición a la API de Polygon para una ventana de tiempo."""
-    match = re.match(r"^(\d+)([a-zA-Z]+)$", timeframe)
-    if not match:
+) -> pd.DataFrame:
+    """Descarga una ventana de datos desde Dukascopy."""
+    tf_map = {"15minute": dukascopy.INTERVAL_MIN_15, "1hour": dukascopy.INTERVAL_HOUR_1}
+    if timeframe not in tf_map:
         raise ValueError(f"Timeframe inválido: {timeframe!r}")
-    mult, span = match.groups()
 
-    url = f"https://api.polygon.io/v2/aggs/ticker/C:{symbol}/range/{mult}/{span}/{start_date}/{end_date}"
-    params = {
-        "adjusted": "true",
-        "sort": "asc",
-        "limit": POLYGON_MAX_LIMIT,
-        "apiKey": api_key,
-    }
-    response = session.get(url, params=params, timeout=30)
-    response.raise_for_status()
-    return response.json().get("results", [])
+    start_dt = dt.datetime.fromisoformat(start_date)
+    end_dt = dt.datetime.fromisoformat(end_date)
 
-
-def _results_to_df(results: List[Dict[str, Any]]) -> pd.DataFrame:
-    """Convierte la lista de resultados de la API a un DataFrame limpio."""
-    if not results:
-        return pd.DataFrame()
-    df = (
-        pd.DataFrame(results)
-        .rename(
-            columns={
-                "o": "open",
-                "h": "high",
-                "l": "low",
-                "c": "close",
-                "v": "volume",
-                "t": "timestamp",
-            }
-        )
-        .dropna(subset=["open", "high", "low", "close"])
-        .assign(timestamp=lambda d: d["timestamp"].astype("int64"))
-        .sort_values("timestamp")
-        .drop_duplicates("timestamp")
-        .reset_index(drop=True)
+    df = await asyncio.to_thread(
+        dukascopy.fetch,
+        symbol,
+        tf_map[timeframe],
+        dukascopy.OFFER_SIDE_BID,
+        start_dt,
+        end_dt,
     )
+
+    df = df.reset_index()
+    df = df.rename(columns={"timestamp": "timestamp"})
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True).view("int64") // 1_000_000
+    df = df[["open", "high", "low", "close", "volume", "timestamp"]]
     return df
+
+
 
 
 # --- Orquestación Principal de la Tarea ---
@@ -138,11 +88,9 @@ def run_ingestion(
     timeframe: str,
     project_id: str,
     gcs_data_path: str,
-    polygon_secret: str,
     start_date: str,
     end_date: str,
     min_rows: int,
-    api_key: str, # Aceptamos la API key como argumento para no obtenerla en cada bucle
 ) -> bool:
     """
     Orquesta el proceso completo de ingestión de datos para un par/timeframe.
@@ -161,22 +109,25 @@ def run_ingestion(
         all_dfs: List[pd.DataFrame] = []
         win_start = dt.date.fromisoformat(start_date)
         final_end = dt.date.fromisoformat(end_date)
-        session = requests.Session()
 
         while win_start <= final_end:
             win_end = min(win_start + dt.timedelta(days=30), final_end)
             try:
-                results = _fetch_window(
-                    session, pair, timeframe, win_start.isoformat(), win_end.isoformat(), api_key
+                df_window = asyncio.run(
+                    _fetch_window(
+                        pair,
+                        timeframe,
+                        win_start.isoformat(),
+                        win_end.isoformat(),
+                    )
                 )
-                df_window = _results_to_df(results)
                 if not df_window.empty:
                     all_dfs.append(df_window)
             except Exception as e:
-                logger.warning(f"⚠️  Error en ventana {win_start}-{win_end} para {pair}: {e}")
+                logger.warning(
+                    f"⚠️  Error en ventana {win_start}-{win_end} para {pair}: {e}"
+                )
             win_start = win_end + dt.timedelta(days=1)
-        
-        session.close()
 
         # 3. Consolidar y validar
         if not all_dfs:
@@ -237,7 +188,6 @@ if __name__ == "__main__":
     parser.add_argument("--timeframe", required=True, help="Timeframe, ej: 15minute")
     parser.add_argument("--project-id", default=constants.PROJECT_ID)
     parser.add_argument("--gcs-data-path", default=constants.DATA_PATH)
-    parser.add_argument("--polygon-secret-name", default=constants.POLYGON_API_KEY_SECRET_NAME)
     parser.add_argument("--start-date", default="2010-01-01")
     parser.add_argument("--end-date", default=dt.date.today().isoformat())
     parser.add_argument("--min-rows", type=int, default=100_000)
@@ -254,8 +204,7 @@ if __name__ == "__main__":
     pairs_to_ingest = list(constants.SPREADS_PIP.keys())
     logger.info(f"Iniciando ingestión para los siguientes pares: {pairs_to_ingest}")
     
-    # Obtener la API key una sola vez
-    api_key = get_polygon_api_key(args.project_id, args.polygon_secret_name)
+    # Dukascopy no requiere autenticación con API key
     
     results = {}
     for pair in pairs_to_ingest:
@@ -265,11 +214,9 @@ if __name__ == "__main__":
             timeframe=args.timeframe,
             project_id=args.project_id,
             gcs_data_path=args.gcs_data_path,
-            polygon_secret=args.polygon_secret_name,
             start_date=args.start_date,
             end_date=args.end_date,
             min_rows=args.min_rows,
-            api_key=api_key
         )
         results[pair] = "SUCCESS" if success else "FAILURE"
 

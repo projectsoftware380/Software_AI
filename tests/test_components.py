@@ -27,13 +27,12 @@ TEST_GCS_BUCKET = "test-bucket"
 
 # Se usan "patches" para interceptar y simular las llamadas a funciones externas.
 @patch('src.components.data_ingestion.task.pubsub_v1.PublisherClient')
-@patch('src.components.data_ingestion.task.requests.Session')
-@patch('src.components.data_ingestion.task.get_polygon_api_key')
+@patch('src.components.data_ingestion.task._fetch_window')
 @patch('src.shared.gcs_utils.upload_gcs_file')
 @patch('src.shared.gcs_utils.delete_gcs_blob')
 @patch('src.shared.gcs_utils.gcs_path_exists')
 def test_data_ingestion_task_success(
-    mock_path_exists, mock_delete_blob, mock_upload, mock_get_api_key, mock_session, mock_pubsub
+    mock_path_exists, mock_delete_blob, mock_upload, mock_fetch, mock_pubsub
 ):
     """
     Prueba el flujo de éxito del script de ingestión de datos.
@@ -41,14 +40,15 @@ def test_data_ingestion_task_success(
     """
     # 1. Configurar los mocks
     mock_path_exists.return_value = True  # Simula que un archivo antiguo existe
-    mock_get_api_key.return_value = "fake_polygon_api_key"
-
-    # Simular una respuesta exitosa de la API de Polygon
-    mock_response = MagicMock()
-    mock_response.json.return_value = {
-        "results": [{"t": 123456, "o": 1.0, "h": 1.1, "l": 0.9, "c": 1.05, "v": 100}] * 10
-    }
-    mock_session.return_value.get.return_value = mock_response
+    # Simular DataFrame de regreso de Dukascopy
+    mock_fetch.return_value = pd.DataFrame({
+        'open': [1.0]*10,
+        'high': [1.1]*10,
+        'low': [0.9]*10,
+        'close': [1.05]*10,
+        'volume': [100]*10,
+        'timestamp': list(range(10))
+    })
 
     # 2. Ejecutar el script como un subproceso
     cmd = [
@@ -67,7 +67,7 @@ def test_data_ingestion_task_success(
     # Verificar que las funciones mockeadas fueron llamadas
     mock_path_exists.assert_called_once()
     mock_delete_blob.assert_called_once()
-    mock_get_api_key.assert_called_once()
+    mock_fetch.assert_called()
     mock_upload.assert_called_once()
     mock_pubsub.return_value.publish.assert_called_once()
     
