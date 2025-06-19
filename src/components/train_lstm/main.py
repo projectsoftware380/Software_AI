@@ -108,9 +108,19 @@ def train_final_model(
         logger.info("Dataset final para entrenamiento: X=%s", X_seq.shape)
 
         model = make_model(X_seq.shape[1:], hp["lr"], hp["dr"], hp["filt"], hp["units"], hp["heads"])
-        model.fit(X_seq, np.vstack([y_up, y_dn]).T, epochs=60, batch_size=128,
-                  callbacks=[callbacks.EarlyStopping(patience=5, restore_best_weights=True)],
-                  verbose=1)
+        model.fit(
+            X_seq,
+            np.vstack([y_up, y_dn]).T,
+            epochs=60,
+            batch_size=128,
+            validation_split=0.2,
+            callbacks=[
+                callbacks.EarlyStopping(
+                    monitor="val_loss", patience=5, restore_best_weights=True
+                )
+            ],
+            verbose=1,
+        )
 
         # Guardar artefactos localmente antes de subirlos.
         loc_artifacts_dir = tmp_path / "artifacts"
