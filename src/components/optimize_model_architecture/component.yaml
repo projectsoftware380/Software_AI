@@ -32,5 +32,3 @@ implementation:
       - {inputValue: n_trials}
       - --best-architecture-dir-output
       - {outputPath: best_architecture_dir}
-    resources:
-      nvidia_gpu_limit: "1"

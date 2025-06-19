@@ -49,5 +49,3 @@ implementation:
       - {inputValue: min_rows}
       - --completion-message-path
       - {outputPath: completion_message}
-    resources:
-      nvidia_gpu_limit: "1"

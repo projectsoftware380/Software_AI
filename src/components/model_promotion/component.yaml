@@ -37,7 +37,5 @@ implementation:
       - {inputValue: timeframe}
       - --production-base-dir
       - {inputValue: production_base_dir}
-    resources:
-      nvidia_gpu_limit: "1"
     fileOutputs:
       model_promoted: /tmp/model_promoted.txt
