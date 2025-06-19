@@ -29,7 +29,7 @@ outputs:
 
 implementation:
   container:
-    image: europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:latest
+    image: gcr.io/trading-ai-460823/trading-ai-gpu:v1
     command:
       - python
       - -m                           # ← módulo, no ruta de archivo
@@ -49,3 +49,5 @@ implementation:
       - {inputValue: min_rows}
       - --completion-message-path
       - {outputPath: completion_message}
+    resources:
+      nvidia_gpu_limit: "1"

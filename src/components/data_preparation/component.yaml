@@ -35,9 +35,7 @@ outputs:
 
 implementation:
   container:
-    # Se añade un placeholder para que KFP pueda cargar el componente.
-    # El script de la pipeline (main.py) lo sobreescribirá con la imagen real.
-    image: placeholder-image
+    image: gcr.io/trading-ai-460823/trading-ai-gpu:v1
     command:
       - python
       - -m
@@ -57,3 +55,5 @@ implementation:
       - {outputPath: prepared_data_path}
       - --holdout-data-path-output
       - {outputPath: holdout_data_path}
+    resources:
+      nvidia_gpu_limit: "1"
