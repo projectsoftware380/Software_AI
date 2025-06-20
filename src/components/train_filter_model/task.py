@@ -124,8 +124,15 @@ def _make_checkpoint_callback(path: Path) -> callable:
         # env.evaluation_result_list: [(data_name, eval_name, result, is_higher_better), ...]
         for data_name, eval_name, result, _ in env.evaluation_result_list:
             if data_name == "valid_0" and eval_name == "binary_logloss" and result < best_loss[0]:
+                logger.debug(
+                    "Nueva mejor pérdida %.6f en iteración %d. Guardando modelo en %s",
+                    result,
+                    env.iteration,
+                    path,
+                )
                 best_loss[0] = result
                 env.model.save_model(str(path), num_iteration=env.iteration + 1)
+                logger.debug("Modelo guardado exitosamente en %s", path)
 
     _callback.order = 0
     return _callback
@@ -201,7 +208,12 @@ def run_filter_training(
         # Cargar explícitamente el mejor modelo antes de continuar.
         if best_model_file.exists():
             logger.info("Recuperando el modelo almacenado en %s", best_model_file)
-            lgb_clf._Booster = lgb.Booster(model_file=str(best_model_file))
+            try:
+                lgb_clf._Booster = lgb.Booster(model_file=str(best_model_file))
+                logger.debug("Modelo cargado exitosamente desde %s", best_model_file)
+            except Exception as e:
+                print(f"ERROR: {e}")
+                raise
 
     # 4. Seleccionar umbral óptimo
     logger.info("Buscando umbral de probabilidad óptimo...")
