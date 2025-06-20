@@ -157,7 +157,11 @@ def run_filter_training(
         model_path = gcs_utils.download_gcs_file(f"{lstm_model_dir}/model.keras", tmp)
         scaler_path = gcs_utils.download_gcs_file(f"{lstm_model_dir}/scaler.pkl", tmp)
         params_path = gcs_utils.download_gcs_file(f"{lstm_model_dir}/params.json", tmp)
-        lstm_model = models.load_model(model_path, compile=False)
+        lstm_model = models.load_model(
+            model_path,
+            compile=False,
+            custom_objects={"Recall": tf.keras.metrics.Recall},
+        )
         scaler = joblib.load(scaler_path)
         hp = json.loads(params_path.read_text())
 
