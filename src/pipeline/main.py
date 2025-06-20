@@ -159,6 +159,9 @@ def trading_pipeline_v5(
             timeframe=timeframe,
             output_gcs_base_dir=constants.FILTER_MODELS_PATH,
         )
+        train_filter_task.set_service_account(
+            constants.VERTEX_LSTM_SERVICE_ACCOUNT
+        )
         train_filter_task.set_accelerator_type("NVIDIA_TESLA_T4")
         train_filter_task.set_accelerator_limit(1)
 
