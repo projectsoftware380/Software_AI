@@ -136,6 +136,14 @@ def run_filter_training(
         scaler = joblib.load(scaler_path)
         hp = json.loads(params_path.read_text())
 
+        # 🔹 Asegurar que el JSON contenga los hiperparámetros de indicadores
+        # necesarios para `build_indicators`.  Algunos archivos antiguos podían
+        # carecer de estas claves, lo que provocaba un ``KeyError`` al intentar
+        # generar los indicadores.  Para garantizar robustez, se completan con
+        # los valores por defecto definidos en ``constants.DUMMY_INDICATOR_PARAMS``.
+        for k, v in constants.DUMMY_INDICATOR_PARAMS.items():
+            hp.setdefault(k, v)
+
     # 2. Generar el dataset de entrenamiento para el filtro
     local_features = gcs_utils.ensure_gcs_path_and_get_local(features_path)
     df_raw = pd.read_parquet(local_features)
