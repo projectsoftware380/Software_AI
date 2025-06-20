@@ -159,9 +159,10 @@ def trading_pipeline_v5(
             timeframe=timeframe,
             output_gcs_base_dir=constants.FILTER_MODELS_PATH,
         )
-        train_filter_task.set_service_account(
-            constants.VERTEX_LSTM_SERVICE_ACCOUNT
-        )
+        # ─── AJUSTE ELIMINADO ───
+        # Se elimina la siguiente línea porque es de KFP v1 y causa error.
+        # La cuenta de servicio se asignará a nivel de PipelineJob.
+        # train_filter_task.set_service_account(...)
         train_filter_task.set_accelerator_type("NVIDIA_TESLA_T4")
         train_filter_task.set_accelerator_limit(1)
 
@@ -216,7 +217,12 @@ if __name__ == "__main__":
             pipeline_root=constants.PIPELINE_ROOT,
             enable_caching=True,
         )
-        job.run()
+        
+        # ─── AJUSTE AÑADIDO ───
+        # Se añade el parámetro `service_account` a la ejecución del job.
+        # Esta es la forma correcta para KFP v2 de asignar permisos a todo el pipeline.
+        job.run(service_account=constants.VERTEX_LSTM_SERVICE_ACCOUNT)
+        
         print(f"🚀 Pipeline lanzada con Display Name: {display_name}")
     else:
         print("⏭️ La pipeline no se envió a Vertex AI (SUBMIT_PIPELINE_TO_VERTEX está en 'false').")
