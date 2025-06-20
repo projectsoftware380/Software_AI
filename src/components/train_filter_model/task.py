@@ -109,8 +109,26 @@ def _generate_features_and_labels(df_raw: pd.DataFrame, lstm_model: tf.keras.Mod
     
     X = dataset.drop('label', axis=1)
     y = dataset['label']
-    
+
     return X, y
+
+
+def _make_checkpoint_callback(path: Path) -> callable:
+    """Crea un callback de LightGBM que guarda el mejor modelo según val_loss."""
+
+    best_loss = [float("inf")]
+
+    def _callback(env: lgb.callback.CallbackEnv) -> None:
+        if not env.evaluation_result_list:
+            return
+        # env.evaluation_result_list: [(data_name, eval_name, result, is_higher_better), ...]
+        for data_name, eval_name, result, _ in env.evaluation_result_list:
+            if data_name == "valid_0" and eval_name == "binary_logloss" and result < best_loss[0]:
+                best_loss[0] = result
+                env.model.save_model(str(path), num_iteration=env.iteration + 1)
+
+    _callback.order = 0
+    return _callback
 
 # --- Función Principal ---
 def run_filter_training(
@@ -156,10 +174,34 @@ def run_filter_training(
     X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, shuffle=False)
     n_neg, n_pos = y_train.value_counts().sort_index()
     scale_pos_weight = n_neg / n_pos if n_pos > 0 else 1
-    lgb_clf = lgb.LGBMClassifier(objective='binary', scale_pos_weight=scale_pos_weight, random_state=SEED, n_jobs=-1)
-    
+    lgb_clf = lgb.LGBMClassifier(
+        objective="binary",
+        scale_pos_weight=scale_pos_weight,
+        random_state=SEED,
+        n_jobs=-1,
+    )
+
     logger.info("Entrenando el modelo de filtro LightGBM...")
-    lgb_clf.fit(X_train, y_train, eval_set=[(X_val, y_val)], eval_metric='f1', callbacks=[lgb.early_stopping(10)])
+    evals_result: dict[str, list] = {}
+    with tempfile.TemporaryDirectory() as fit_tmpdir:
+        best_model_file = Path(fit_tmpdir) / "best_lgb.txt"
+        callbacks = [
+            lgb.early_stopping(10),
+            lgb.record_evaluation(evals_result),
+            _make_checkpoint_callback(best_model_file),
+        ]
+        lgb_clf.fit(
+            X_train,
+            y_train,
+            eval_set=[(X_val, y_val)],
+            eval_metric="binary_logloss",
+            callbacks=callbacks,
+        )
+
+        # Cargar explícitamente el mejor modelo antes de continuar.
+        if best_model_file.exists():
+            logger.info("Recuperando el modelo almacenado en %s", best_model_file)
+            lgb_clf._Booster = lgb.Booster(model_file=str(best_model_file))
 
     # 4. Seleccionar umbral óptimo
     logger.info("Buscando umbral de probabilidad óptimo...")
