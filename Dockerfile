@@ -16,8 +16,23 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         build-essential \
         pkg-config \
-        libcairo2-dev && \
+        libcairo2-dev \
+        curl \
+        gnupg && \
     rm -rf /var/lib/apt/lists/*
+
+# ─── NUEVO AJUSTE (PASO 2.5): Instalar y configurar Google Cloud SDK ───────────
+# Aunque la imagen base lo incluye, instalarlo explícitamente nos da control
+# sobre la versión y asegura que el PATH esté configurado correctamente.
+RUN curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add - && \
+    echo "deb https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list && \
+    apt-get update && apt-get install -y google-cloud-cli
+
+# ─── NUEVO AJUSTE (PASO 2.6): Definir el Proyecto de GCP como variable de entorno ───
+# Esta es la corrección clave. Resuelve el error "Project not passed and could
+# not be determined from the environment" al hornear el ID del proyecto en la
+# imagen. Las librerías de Google Cloud leen esta variable automáticamente.
+ENV GOOGLE_CLOUD_PROJECT=trading-ai-460823
 
 # Paso 3: Establecer el directorio de trabajo.
 # Todas las operaciones posteriores se realizarán dentro de /app.
@@ -43,9 +58,9 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # Paso 6: Instalar el resto de las dependencias de Python.
 # 1. Se elimina 'tensorflow' del requirements.txt con 'sed' para no
-#    sobreescribir la versión optimizada de la imagen base.
+#    sobreescribir la versión optimizada de la imagen base.
 # 2. Se instalan las librerías restantes, de nuevo con reintentos y timeout
-#    para máxima robustez en la descarga.
+#    para máxima robustez en la descarga.
 RUN sed -i '/tensorflow/d' requirements.txt && \
     pip install \
         --no-cache-dir \
