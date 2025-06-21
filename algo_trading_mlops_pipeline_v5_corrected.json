@@ -75,7 +75,7 @@
                 },
                 "vertex_training_image_uri": {
                   "runtimeValue": {
-                    "constant": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250620-111611"
+                    "constant": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250620-202622"
                   }
                 }
               }
@@ -569,7 +569,7 @@
             "-m",
             "src.components.data_ingestion.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250620-111611",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250620-202622",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -615,7 +615,7 @@
             "-m",
             "src.components.train_lstm_launcher.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250620-111611",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250620-202622",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -647,7 +647,7 @@
             "-m",
             "src.components.model_promotion.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250620-111611",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250620-202622",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -673,7 +673,7 @@
             "-m",
             "src.components.optimize_model_architecture.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250620-111611",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250620-202622",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -707,7 +707,7 @@
             "-m",
             "src.components.optimize_trading_logic.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250620-111611",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250620-202622",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -741,7 +741,7 @@
             "-m",
             "src.components.backtest.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250620-111611",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250620-202622",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -779,7 +779,7 @@
             "-m",
             "src.components.data_preparation.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250620-111611",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250620-202622",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -811,7 +811,7 @@
             "-m",
             "src.components.train_filter_model.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250620-111611",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250620-202622",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -888,7 +888,7 @@
             "parameters": {
               "end_date": {
                 "runtimeValue": {
-                  "constant": "2025-06-20"
+                  "constant": "2025-06-21"
                 }
               },
               "polygon_secret_name": {
