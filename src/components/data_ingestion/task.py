@@ -28,7 +28,7 @@ from typing import Any, Dict, List
 
 import pandas as pd
 import requests
-from google.cloud import pubsub_v1, secretmanager
+from google.cloud import pubsub_v1, secretmanager, storage
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -70,10 +70,8 @@ def get_polygon_api_key(
             f"Fallo al obtener la API Key de Secret Manager '{secret_name}': {e}"
         )
 
-
-# --- Lógica de Descarga de Datos (adaptada de data_fetcher_vertexai.py) ---
+# --- Lógica de Descarga de Datos ---
 POLYGON_MAX_LIMIT = 50_000
-
 
 @retry(
     wait=wait_exponential(multiplier=1, min=2, max=60),
@@ -131,6 +129,25 @@ def _results_to_df(results: List[Dict[str, Any]]) -> pd.DataFrame:
     )
     return df
 
+# --- NUEVA FUNCIÓN DE VERIFICACIÓN ---
+def upload_df_to_gcs_and_verify(df: pd.DataFrame, gcs_uri: str, local_path: Path):
+    """
+    Sube un DataFrame a GCS y verifica explícitamente que la subida fue exitosa.
+    """
+    logger.info(f"Guardando DataFrame en archivo local temporal: {local_path}")
+    df.to_parquet(local_path, index=False, engine="pyarrow")
+    
+    logger.info(f"Subiendo archivo a GCS: {gcs_uri}")
+    gcs_utils.upload_gcs_file(local_path, gcs_uri)
+    
+    # Verificación
+    logging.info(f"Verificando la existencia del objeto en GCS: {gcs_uri}")
+    if not gcs_utils.gcs_path_exists(gcs_uri):
+        raise FileNotFoundError(
+            f"¡VERIFICACIÓN FALLIDA! El objeto no se encontró en GCS después de la subida: {gcs_uri}"
+        )
+    logger.info(f"✅ VERIFICACIÓN EXITOSA: El objeto existe en {gcs_uri}.")
+
 
 # --- Orquestación Principal de la Tarea ---
 def run_ingestion(
@@ -142,7 +159,7 @@ def run_ingestion(
     start_date: str,
     end_date: str,
     min_rows: int,
-    api_key: str, # Aceptamos la API key como argumento para no obtenerla en cada bucle
+    api_key: str,
 ) -> bool:
     """
     Orquesta el proceso completo de ingestión de datos para un par/timeframe.
@@ -191,11 +208,10 @@ def run_ingestion(
                 "Se aborta para evitar un Parquet inválido."
             )
 
-        # 4. Guardar en GCS
+        # 4. Guardar en GCS usando la nueva función de verificación
         with tempfile.TemporaryDirectory() as tmpdir:
             local_parquet_path = Path(tmpdir) / f"{pair}_{timeframe}.parquet"
-            df_full.to_parquet(local_parquet_path, index=False, engine="pyarrow")
-            gcs_utils.upload_gcs_file(local_parquet_path, parquet_uri)
+            upload_df_to_gcs_and_verify(df_full, parquet_uri, local_parquet_path)
 
         status_success = True
         logger.info(f"🏁 Descarga para {pair}/{timeframe} completada con éxito.")
@@ -232,7 +248,6 @@ def run_ingestion(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Task de Ingestión de Datos para KFP.")
     
-    # ``--pair`` se mantiene opcional para compatibilidad con pruebas unitarias.
     parser.add_argument("--pair")
     parser.add_argument("--timeframe", required=True, help="Timeframe, ej: 15minute")
     parser.add_argument("--project-id", default=constants.PROJECT_ID)
@@ -250,11 +265,9 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
 
-    # Obtener la lista de pares del archivo de constantes
     pairs_to_ingest = list(constants.SPREADS_PIP.keys())
     logger.info(f"Iniciando ingestión para los siguientes pares: {pairs_to_ingest}")
     
-    # Obtener la API key una sola vez
     api_key = get_polygon_api_key(args.project_id, args.polygon_secret_name)
     
     results = {}
@@ -273,7 +286,6 @@ if __name__ == "__main__":
         )
         results[pair] = "SUCCESS" if success else "FAILURE"
 
-    # Preparar mensaje final de salida
     successful_pairs = [p for p, s in results.items() if s == "SUCCESS"]
     failed_pairs = [p for p, s in results.items() if s == "FAILURE"]
     
@@ -284,7 +296,6 @@ if __name__ == "__main__":
     args.completion_message_path.parent.mkdir(parents=True, exist_ok=True)
     args.completion_message_path.write_text(message)
     
-    # Salir con código de error si algún par falló
     if failed_pairs:
         sys.exit(1)
     else:

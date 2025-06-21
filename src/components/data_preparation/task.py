@@ -64,6 +64,9 @@ def create_holdout_set(df: pd.DataFrame, holdout_months: int) -> tuple[pd.DataFr
     if not isinstance(df.index, pd.DatetimeIndex):
         raise TypeError("El índice del DataFrame debe ser de tipo DatetimeIndex.")
 
+    # Convertir holdout_months a entero por si KFP lo pasa como otro tipo
+    holdout_months = int(holdout_months)
+    
     if holdout_months <= 0:
         logging.warning("holdout_months es <= 0. No se creará un set de hold-out.")
         return df, pd.DataFrame()
@@ -74,7 +77,6 @@ def create_holdout_set(df: pd.DataFrame, holdout_months: int) -> tuple[pd.DataFr
 
     logging.info(f"Holdout creado a partir de {holdout_start_date.date()}")
     return train_df, holdout_df
-
 
 # -----------------------------------------------------------------------------
 # Lógica Principal del Componente
@@ -116,34 +118,43 @@ def run_data_preparation(
     """Orquesta todo el proceso de preparación de datos."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
-        local_raw_path = gcs_utils.download_gcs_file(
-            f"gs://{constants.BUCKET_NAME}/{constants.RAW_DATA_PATH}/{timeframe}/{pair}.parquet",
-            tmp_path,
-        )
+        # La ruta al archivo de entrada es construida dinámicamente.
+        gcs_input_uri = f"gs://{constants.BUCKET_NAME}/{constants.RAW_DATA_PATH}/{timeframe}/{pair}.parquet"
+        
+        local_raw_path = gcs_utils.download_gcs_file(gcs_input_uri, tmp_path)
+        
         if local_raw_path is None:
-            raise FileNotFoundError(f"No se pudo descargar el archivo de datos crudos para {pair}.")
+            raise FileNotFoundError(f"No se pudo descargar el archivo de datos crudos desde: {gcs_input_uri}")
             
         df_raw = pd.read_parquet(local_raw_path)
         df_processed = clean_and_resample(df_raw, timeframe)
         df_train, df_holdout = create_holdout_set(df_processed, holdout_months)
+        
         logging.info(
             f"Set de entrenamiento: {df_train.shape[0]} filas | "
             f"Set de Hold-out: {df_holdout.shape[0]} filas"
         )
+        
         version_ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
         output_base_path = f"gs://{constants.BUCKET_NAME}/{constants.FEATURES_PATH}/{pair}/{timeframe}/{version_ts}"
+        
         prepared_data_path = f"{output_base_path}/{pair}_{timeframe}_train_opt.parquet"
         holdout_data_path = f"{output_base_path}/{pair}_{timeframe}_holdout.parquet"
+        
         upload_df_to_gcs_and_verify(df_train, prepared_data_path)
         upload_df_to_gcs_and_verify(df_holdout, holdout_data_path)
+        
         Path(prepared_data_path_output).parent.mkdir(parents=True, exist_ok=True)
         Path(prepared_data_path_output).write_text(prepared_data_path)
+        
         Path(holdout_data_path_output).parent.mkdir(parents=True, exist_ok=True)
         Path(holdout_data_path_output).write_text(holdout_data_path)
+        
         logging.info(
             "Rutas de salida escritas para KFP: "
             f"Train='{prepared_data_path}', Holdout='{holdout_data_path}'"
         )
+        
         if cleanup:
             logging.info("La lógica de limpieza de versiones antiguas no está implementada.")
 
@@ -166,8 +177,12 @@ if __name__ == "__main__":
         default=3,
         help="Meses para reservar para el set de hold-out.",
     )
+    # El tipo `bool` para argparse es complicado; se recomienda manejarlo así
     parser.add_argument(
-        "--cleanup", type=bool, default=True, help="Activar limpieza de versiones antiguas."
+        "--cleanup",
+        type=lambda x: (str(x).lower() == 'true'),
+        default=True,
+        help="Activar limpieza de versiones antiguas."
     )
     parser.add_argument(
         "--prepared-data-path-output",
@@ -180,6 +195,7 @@ if __name__ == "__main__":
         help="Ruta donde guardar la URI del dataset de hold-out.",
     )
     args = parser.parse_args()
+    
     run_data_preparation(
         pair=args.pair,
         timeframe=args.timeframe,
