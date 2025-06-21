@@ -1,34 +1,25 @@
-# src/components/optimize_model_architecture/component.yaml
-name: Optimize Model Architecture
-description: >
-  Uses Optuna to find the best LSTM model architecture (layers, units, learning rate, etc.)
-  by minimizing the validation loss. This runs for each pair found in the input data path.
+name: Optimize LSTM Model Architecture
+description: Runs Optuna hyperparameter optimization for the LSTM model's architecture.
 
 inputs:
-  - name: features_path
-    type: String
-    description: 'The GCS path to the directory containing Parquet files prepared for optimization.'
-  - name: n_trials
-    type: Integer
-    description: 'The number of optimization trials to run in Optuna for each currency pair.'
-    default: 20
+  - {name: features_path, type: String, description: "GCS path to the training data Parquet file."}
+  - {name: n_trials,      type: Integer, description: "Number of Optuna trials to run."}
+  # --- AJUSTE AÑADIDO ---
+  # Se añade 'pair' para que el componente sepa en qué subcarpeta guardar el resultado.
+  - {name: pair,          type: String, description: "The currency pair being processed (e.g., 'EURUSD')."}
 
 outputs:
-  - name: best_architecture_dir
-    type: String
-    description: 'The GCS directory path containing the best_architecture.json files for each pair.'
+  - {name: best_architecture_dir, type: String, description: "GCS directory where the best architecture JSON is saved."}
 
 implementation:
   container:
-    image: gcr.io/trading-ai-460823/trading-ai-gpu:v1
-    command:
-      - python
-      - -m
-      - src.components.optimize_model_architecture.task
-    args:
-      - --features-path
-      - {inputValue: features_path}
-      - --n-trials
-      - {inputValue: n_trials}
-      - --best-architecture-dir-output
-      - {outputPath: best_architecture_dir}
+    image: "gcr.io/your-project/your-image:latest" # Reemplazado por main.py
+    command: [
+      python, -m, src.components.optimize_model_architecture.task,
+      --features-path, {inputValue: features_path},
+      --n-trials, {inputValue: n_trials},
+      # --- AJUSTE AÑADIDO ---
+      # Se pasa el nuevo parámetro al script.
+      --pair, {inputValue: pair},
+      --best-architecture-dir-output, {outputPath: best_architecture_dir},
+    ]

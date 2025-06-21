@@ -1,39 +1,31 @@
-# src/components/backtest/component.yaml
-name: Perform Final Backtest
-description: >
-  Runs a comprehensive backtest on the hold-out dataset. It compares the
-  base strategy (LSTM only) against the filtered strategy (LSTM + LightGBM).
-  Generates a detailed HTML report with QuantStats, CSVs, and metrics.
+name: Run Final Backtest
+description: Runs a final backtest on the hold-out data using the trained LSTM and filter models.
 
 inputs:
-  - {name: lstm_model_dir, type: String, description: "GCS path to the trained LSTM model directory."}
-  - {name: filter_model_path, type: String, description: "GCS path to the trained LightGBM filter model directory."}
-  - {name: features_path, type: String, description: "GCS path to the hold-out dataset (.parquet)."}
-  - {name: pair, type: String}
-  - {name: timeframe, type: String}
+  - {name: lstm_model_dir,    type: String, description: "GCS path to the trained LSTM model directory."}
+  - {name: filter_model_path, type: String, description: "GCS path to the trained filter model file."}
+  - {name: features_path,     type: String, description: "GCS path to the hold-out data Parquet file."}
+  # --- AJUSTE AÑADIDO ---
+  # Se añaden 'pair' y 'timeframe' para que el componente tenga el contexto completo.
+  - {name: pair,              type: String, description: "The currency pair being processed (e.g., 'EURUSD')."}
+  - {name: timeframe,         type: String, description: "The timeframe for the data (e.g., '15minute')."}
 
 outputs:
-  - {name: output_gcs_dir, type: String, description: "GCS folder with the full backtest report (HTML, CSVs, metrics)."}
-  - {name: kfp_metrics_artifact, type: String, description: "Path to the metrics JSON for the Vertex AI UI."}
+  - {name: output_gcs_dir,       type: String,  description: "GCS directory containing backtest results (metrics.json, trades.csv)."}
+  - {name: kfp_metrics_artifact, type: Metrics, description: "KFP Metrics artifact for the Vertex AI UI."}
 
 implementation:
   container:
-    image: gcr.io/trading-ai-460823/trading-ai-gpu:v1
-    command:
-      - python
-      - -m
-      - src.components.backtest.task
-    args:
-      - --lstm-model-dir
-      - {inputValue: lstm_model_dir}
-      - --filter-model-path
-      - {inputValue: filter_model_path}
-      - --features-path
-      - {inputValue: features_path}
-      - --pair
-      - {inputValue: pair}
-      - --timeframe
-      - {inputValue: timeframe}
-    fileOutputs:
-      output_gcs_dir: /tmp/backtest_dir.txt
-      kfp_metrics_artifact: /tmp/kfp_metrics.json
+    image: "gcr.io/your-project/your-image:latest" # Reemplazado por main.py
+    command: [
+      python, -m, src.components.backtest.task,
+      --lstm-model-dir, {inputValue: lstm_model_dir},
+      --filter-model-path, {inputValue: filter_model_path},
+      --features-path, {inputValue: features_path},
+      # --- AJUSTE AÑADIDO ---
+      # Se pasan los nuevos parámetros al script.
+      --pair, {inputValue: pair},
+      --timeframe, {inputValue: timeframe},
+      --output-gcs-dir-output, {outputPath: output_gcs_dir},
+      --kfp-metrics-artifact-output, {outputPath: kfp_metrics_artifact},
+    ]

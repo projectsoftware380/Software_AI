@@ -1,48 +1,29 @@
-# src/components/train_filter_model/component.yaml
-name: Train Filter Model
-description: >
-  Trains a LightGBM classifier to filter LSTM signals, replacing the RL agent.
-  The model learns to predict if a signal will hit its Take Profit or Stop Loss.
+name: Train Supervised Filter Model
+description: Trains a LightGBM classifier to act as a filter based on LSTM predictions.
 
 inputs:
-  - name: lstm_model_dir
-    type: String
-    description: 'The GCS path to the directory of the trained LSTM model.'
-  - name: features_path
-    type: String
-    description: 'The GCS path to the Parquet file with features for training the filter.'
-  - name: pair
-    type: String
-    description: 'The trading pair to process, e.g., EURUSD.'
-  - name: timeframe
-    type: String
-    description: 'The timeframe of the data, e.g., 15minute.'
-  - name: output_gcs_base_dir
-    type: String
-    description: 'Base GCS directory to save the trained filter model.'
+  - {name: lstm_model_dir,      type: String, description: "GCS path to the directory containing the trained LSTM model artifacts."}
+  - {name: features_path,       type: String, description: "GCS path to the training data Parquet file."}
+  # --- AJUSTE AÑADIDO ---
+  # Se añaden 'pair' y 'timeframe' para que el componente tenga el contexto completo.
+  - {name: pair,                type: String, description: "The currency pair being processed (e.g., 'EURUSD')."}
+  - {name: timeframe,           type: String, description: "The timeframe for the data (e.g., '15minute')."}
+  - {name: output_gcs_base_dir, type: String, description: "Base GCS directory to save the trained filter model."}
 
 outputs:
-  - name: trained_filter_model_path
-    type: String
-    description: 'The GCS path to the trained LightGBM model (.pkl) and its params (.json).'
+  - {name: trained_filter_model_path, type: String, description: "GCS path to the saved LightGBM model file."}
 
 implementation:
   container:
-    image: gcr.io/trading-ai-460823/trading-ai-gpu:v1
-    command:
-      - python
-      - -m
-      - src.components.train_filter_model.task
-    args:
-      - --lstm-model-dir
-      - {inputValue: lstm_model_dir}
-      - --features-path
-      - {inputValue: features_path}
-      - --pair
-      - {inputValue: pair}
-      - --timeframe
-      - {inputValue: timeframe}
-      - --output-gcs-base-dir
-      - {inputValue: output_gcs_base_dir}
-      - --trained-filter-model-path-output
-      - {outputPath: trained_filter_model_path}
+    image: "gcr.io/your-project/your-image:latest" # Reemplazado por main.py
+    command: [
+      python, -m, src.components.train_filter_model.task,
+      --lstm-model-dir, {inputValue: lstm_model_dir},
+      --features-path, {inputValue: features_path},
+      # --- AJUSTE AÑADIDO ---
+      # Se pasan los nuevos parámetros al script.
+      --pair, {inputValue: pair},
+      --timeframe, {inputValue: timeframe},
+      --output-gcs-base-dir, {inputValue: output_gcs_base_dir},
+      --trained-filter-model-path-output, {outputPath: trained_filter_model_path},
+    ]

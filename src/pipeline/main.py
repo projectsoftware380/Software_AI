@@ -97,6 +97,7 @@ def trading_pipeline_v5(
         optimize_arch_task = component_op_factory["optimize_model_architecture"](
             features_path=prepare_data_task.outputs["prepared_data_path"],
             n_trials=n_trials_arch,
+            pair=pair
         )
         optimize_arch_task.set_accelerator_type("NVIDIA_TESLA_T4").set_accelerator_limit(1)
 

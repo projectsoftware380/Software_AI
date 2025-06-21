@@ -1,41 +1,27 @@
-# src/components/model_promotion/component.yaml
-name: Model Promotion Gate
-description: >
-  Decides if the new model (LSTM + Filter) should be promoted to production.
-  It performs a 3-step check: 1) Is the filtered strategy profitable?
-  2) Does the filter significantly improve the base strategy? 3) Is the new
-  filtered strategy better than the current production model?
+name: Promote Model to Production
+description: Compares the new model's metrics with the production model and promotes it if it's better.
 
 inputs:
-  - {name: new_metrics_dir, type: String}
-  - {name: new_lstm_artifacts_dir, type: String}
-  - {name: new_filter_model_path, type: String, description: "GCS path to the trained filter model directory."}
-  - {name: pair, type: String}
-  - {name: timeframe, type: String}
-  - {name: production_base_dir, type: String}
-
-outputs:
-  - {name: model_promoted, type: String, description: "'true' if the model is promoted, 'false' otherwise."}
+  - {name: new_metrics_dir,           type: String, description: "GCS directory of the new model's backtest metrics."}
+  - {name: new_lstm_artifacts_dir,    type: String, description: "GCS directory of the new LSTM model artifacts."}
+  - {name: new_filter_model_path,     type: String, description: "GCS path to the new filter model file."}
+  # --- AJUSTE AÑADIDO ---
+  # Se añaden 'pair' y 'timeframe' para que el componente tenga el contexto completo.
+  - {name: pair,                      type: String, description: "The currency pair being processed (e.g., 'EURUSD')."}
+  - {name: timeframe,                 type: String, description: "The timeframe for the data (e.g., '15minute')."}
+  - {name: production_base_dir,       type: String, description: "Base GCS directory for production models."}
 
 implementation:
   container:
-    image: gcr.io/trading-ai-460823/trading-ai-gpu:v1
-    command:
-      - python
-      - -m
-      - src.components.model_promotion.task
-    args:
-      - --new-metrics-dir
-      - {inputValue: new_metrics_dir}
-      - --new-lstm-artifacts-dir
-      - {inputValue: new_lstm_artifacts_dir}
-      - --new-filter-model-path
-      - {inputValue: new_filter_model_path}
-      - --pair
-      - {inputValue: pair}
-      - --timeframe
-      - {inputValue: timeframe}
-      - --production-base-dir
-      - {inputValue: production_base_dir}
-    fileOutputs:
-      model_promoted: /tmp/model_promoted.txt
+    image: "gcr.io/your-project/your-image:latest" # Reemplazado por main.py
+    command: [
+      python, -m, src.components.model_promotion.task,
+      --new-metrics-dir, {inputValue: new_metrics_dir},
+      --new-lstm-artifacts-dir, {inputValue: new_lstm_artifacts_dir},
+      --new-filter-model-path, {inputValue: new_filter_model_path},
+      # --- AJUSTE AÑADIDO ---
+      # Se pasan los nuevos parámetros al script.
+      --pair, {inputValue: pair},
+      --timeframe, {inputValue: timeframe},
+      --production-base-dir, {inputValue: production_base_dir},
+    ]

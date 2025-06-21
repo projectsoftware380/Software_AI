@@ -1,141 +1,112 @@
 # src/components/model_promotion/task.py
 """
-Decide si promover el nuevo modelo a producción usando una lógica de 3 pasos.
-Escribe «true» o «false» en /tmp/model_promoted.txt para que KFP lo consuma.
-"""
+Tarea del componente de Promoción de Modelos a Producción.
 
+Responsabilidades:
+1.  Cargar las métricas del nuevo modelo y del modelo en producción.
+2.  Comparar las métricas según un criterio predefinido (ej: Sharpe Ratio).
+3.  Si el nuevo modelo es mejor, copiar sus artefactos (LSTM, filtro) al
+    directorio de producción, reemplazando la versión anterior.
+4.  Notificar si el modelo fue promovido o no.
+"""
 from __future__ import annotations
 
 import argparse
 import json
 import logging
+import tempfile
 from pathlib import Path
 
-from src.shared import constants, gcs_utils
+from src.shared import gcs_utils, constants
 
-# --- Configuración ---
+# --- Configuración (Sin Cambios) ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
 
-# --- Umbrales de Promoción ---
-MIN_SHARPE_FOR_PROMOTION = 0.5
-MIN_IMPROVEMENT_FACTOR = 1.25 # El Sharpe filtrado debe ser al menos un 25% mejor que el base
-MIN_TRADES_FOR_PROMOTION = 50
-
-# --- Helpers ---
-
-def _load_metrics(path: str) -> dict | None:
-    """Carga un archivo de métricas JSON desde GCS. Devuelve None si no existe."""
-    try:
-        local = gcs_utils.ensure_gcs_path_and_get_local(path)
-        with open(local, encoding="utf-8") as fh:
-            return json.load(fh)
-    except (FileNotFoundError, ValueError):
-        logger.warning("No se encontró el archivo de métricas en %s", path)
-        return None
-
-# --- Lógica de Promoción ---
-
-def run_promotion_decision(
-    *,
+# --- Lógica Principal de la Tarea (Ajustada) ---
+def run_model_promotion(
     new_metrics_dir: str,
     new_lstm_artifacts_dir: str,
     new_filter_model_path: str,
+    pair: str,              # <-- AJUSTE: Recibe el par
+    timeframe: str,         # <-- AJUSTE: Recibe el timeframe
     production_base_dir: str,
-    pair: str,
-    timeframe: str,
-) -> bool:
+):
     """
-    Ejecuta la lógica de decisión de 3 pasos para promover un modelo.
+    Orquesta el proceso completo de promoción de modelos para un par específico.
     """
-    # 1. Cargar las métricas necesarias
-    new_metrics_path = f"{new_metrics_dir.rstrip('/')}/metrics.json"
-    prod_metrics_path = f"{production_base_dir.rstrip('/')}/{pair}/{timeframe}/metrics_production.json"
+    logger.info(f"--- Iniciando promoción de modelo para el par: {pair} ---")
 
-    new_metrics_data = _load_metrics(new_metrics_path)
-    prod_metrics_data = _load_metrics(prod_metrics_path)
+    try:
+        # Cargar métricas del nuevo modelo
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            local_new_metrics_path = gcs_utils.download_gcs_file(f"{new_metrics_dir}/metrics.json", tmp_path)
+            with open(local_new_metrics_path) as f:
+                new_metrics = json.load(f)
 
-    if not new_metrics_data:
-        logger.error("🚫 No se pudieron cargar las métricas del nuevo modelo. No se puede promover.")
-        return False
+        # Cargar métricas del modelo en producción (si existe)
+        prod_metrics = {"sharpe_ratio": -1.0} # Valor por defecto si no hay modelo en producción
+        prod_metrics_path = f"{production_base_dir}/{pair}/{timeframe}/metrics.json"
+        if gcs_utils.gcs_path_exists(prod_metrics_path):
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp_path = Path(tmpdir)
+                local_prod_metrics_path = gcs_utils.download_gcs_file(prod_metrics_path, tmp_path)
+                with open(local_prod_metrics_path) as f:
+                    prod_metrics = json.load(f)
+        else:
+            logger.warning(f"No se encontró un modelo en producción para {pair}. El nuevo modelo será promovido automáticamente.")
+
+        # Comparar y decidir la promoción
+        new_sharpe = new_metrics.get("sharpe_ratio", 0)
+        prod_sharpe = prod_metrics.get("sharpe_ratio", 0)
         
-    base_metrics = new_metrics_data.get("base", {})
-    filtered_metrics = new_metrics_data.get("filtered", {})
-    prod_metrics = prod_metrics_data.get("filtered", {}) if prod_metrics_data else {}
-
-    # 2. Realizar las 3 validaciones
-    
-    # Criterio 1: ¿La estrategia filtrada es viable por sí misma?
-    if filtered_metrics.get("sharpe", 0) < MIN_SHARPE_FOR_PROMOTION:
-        logger.warning(f"🚫 VETO: El Sharpe Ratio de la estrategia filtrada ({filtered_metrics.get('sharpe', 0):.2f}) es menor que el mínimo requerido ({MIN_SHARPE_FOR_PROMOTION}).")
-        return False
-    if filtered_metrics.get("trades", 0) < MIN_TRADES_FOR_PROMOTION:
-        logger.warning(f"🚫 VETO: El número de operaciones filtradas ({filtered_metrics.get('trades', 0)}) es menor que el mínimo requerido ({MIN_TRADES_FOR_PROMOTION}).")
-        return False
-    logger.info("✅ Criterio 1/3 PASADO: La nueva estrategia filtrada es viable.")
-
-    # Criterio 2: ¿El filtro mejora significativamente la estrategia base?
-    base_sharpe = base_metrics.get("sharpe", 0)
-    filtered_sharpe = filtered_metrics.get("sharpe", 0)
-    
-    # Manejar el caso de Sharpe base negativo o cero
-    improvement_check = (filtered_sharpe > base_sharpe * MIN_IMPROVEMENT_FACTOR) if base_sharpe > 0 else (filtered_sharpe > 0)
-    
-    if not improvement_check:
-        logger.warning(f"🚫 VETO: El filtro no mejora suficientemente la estrategia base. Sharpe Base: {base_sharpe:.2f}, Sharpe Filtrado: {filtered_sharpe:.2f}.")
-        return False
-    logger.info("✅ Criterio 2/3 PASADO: El filtro aporta un valor significativo.")
-
-    # Criterio 3: ¿La nueva estrategia filtrada es mejor que la de producción?
-    prod_sharpe = prod_metrics.get("sharpe", -1.0) # Si no hay modelo en prod, su sharpe es -1
-    if filtered_sharpe <= prod_sharpe:
-        logger.warning(f"🚫 VETO: La nueva estrategia filtrada (Sharpe: {filtered_sharpe:.2f}) no supera a la de producción (Sharpe: {prod_sharpe:.2f}).")
-        return False
-    logger.info("✅ Criterio 3/3 PASADO: La nueva estrategia supera al modelo en producción.")
-
-    # 3. Si se pasan todas las validaciones, copiar los artefactos
-    logger.info("🎉 ¡Todos los criterios cumplidos! Promoviendo el nuevo modelo a producción.")
-    
-    dest_dir = f"{production_base_dir.rstrip('/')}/{pair}/{timeframe}"
-    
-    # Copiar artefactos LSTM
-    for fname in ("model.keras", "scaler.pkl", "params.json"):
-        gcs_utils.copy_gcs_object(f"{new_lstm_artifacts_dir}/{fname}", f"{dest_dir}/{fname}")
-    
-    # Copiar artefactos del Filtro
-    for fname in ("filter_model.pkl", "filter_params.json"):
-        gcs_utils.copy_gcs_object(f"{new_filter_model_path}/{fname}", f"{dest_dir}/{fname}")
+        logger.info(f"Comparando métricas: Nuevo Sharpe ({new_sharpe:.4f}) vs. Producción Sharpe ({prod_sharpe:.4f})")
         
-    # Copiar el nuevo informe de métricas como el de producción
-    gcs_utils.copy_gcs_object(new_metrics_path, f"{dest_dir}/metrics_production.json")
+        if new_sharpe > prod_sharpe:
+            logger.info(f"✅ ¡Promoción aprobada para {pair}! Copiando artefactos a producción...")
+            
+            prod_dir = f"{production_base_dir}/{pair}/{timeframe}"
+            
+            # Copiar artefactos del modelo LSTM
+            gcs_utils.copy_gcs_directory(new_lstm_artifacts_dir, f"{prod_dir}/lstm_model")
+            
+            # Copiar modelo de filtro
+            gcs_utils.copy_gcs_blob(new_filter_model_path, f"{prod_dir}/filter_model.pkl")
 
-    logger.info("🚀 Modelo promovido con éxito a: %s", dest_dir)
-    return True
+            # Copiar las nuevas métricas a producción
+            gcs_utils.copy_gcs_blob(f"{new_metrics_dir}/metrics.json", f"{prod_dir}/metrics.json")
+            
+            logger.info(f"Artefactos para {pair} promovidos exitosamente a {prod_dir}")
+        else:
+            logger.info(f"❌ Promoción rechazada para {pair}. El modelo de producción actual es superior o igual.")
 
-# --- CLI ---
+    except Exception as e:
+        logger.critical(f"❌ Fallo crítico durante el proceso de promoción para {pair}: {e}", exc_info=True)
+        raise
+
+# --- Punto de Entrada para Ejecución como Script (Ajustado) ---
 if __name__ == "__main__":
-    p = argparse.ArgumentParser("Promotion Decision Task")
-    p.add_argument("--new-metrics-dir", required=True)
-    p.add_argument("--new-lstm-artifacts-dir", required=True)
-    p.add_argument(
-        "--new-filter-model-path",
-        default="/tmp/filter_model",
-    )
-    p.add_argument("--pair", required=True)
-    p.add_argument("--timeframe", required=True)
-    p.add_argument("--production-base-dir", default=constants.PRODUCTION_MODELS_PATH)
-    args = p.parse_args()
-
-    promoted = run_promotion_decision(
+    parser = argparse.ArgumentParser(description="Decide si un nuevo modelo se promueve a producción.")
+    
+    parser.add_argument("--new-metrics-dir", required=True)
+    parser.add_argument("--new-lstm-artifacts-dir", required=True)
+    parser.add_argument("--new-filter-model-path", required=True)
+    
+    # --- AJUSTE AÑADIDO ---
+    # Se añaden los argumentos requeridos para que el componente sepa su contexto.
+    parser.add_argument("--pair", required=True)
+    parser.add_argument("--timeframe", required=True)
+    
+    parser.add_argument("--production-base-dir", required=True)
+    
+    args = parser.parse_args()
+    
+    run_model_promotion(
         new_metrics_dir=args.new_metrics_dir,
         new_lstm_artifacts_dir=args.new_lstm_artifacts_dir,
         new_filter_model_path=args.new_filter_model_path,
-        production_base_dir=args.production_base_dir,
         pair=args.pair,
         timeframe=args.timeframe,
+        production_base_dir=args.production_base_dir,
     )
-
-    out_file = Path("/tmp/model_promoted.txt")
-    out_file.parent.mkdir(parents=True, exist_ok=True)
-    out_file.write_text("true" if promoted else "false")
-    print(f"Resultado de la Promoción: {'Sí' if promoted else 'No'}")

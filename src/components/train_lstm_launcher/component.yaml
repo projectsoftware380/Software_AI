@@ -1,51 +1,45 @@
-name: launch_vertex_ai_lstm_training_job
-description: Lanza un Custom Job de Vertex AI para entrenar el modelo LSTM
+name: Launch Vertex AI LSTM Training Job
+description: Launches a Vertex AI CustomJob to train the final LSTM model.
+
 inputs:
-  - {name: project_id, type: String}
-  - {name: region, type: String}
-  - {name: pair, type: String}
-  - {name: timeframe, type: String}
-  - {name: params_file, type: String}
-  - {name: features_gcs_path, type: String}
-  - {name: output_gcs_base_dir, type: String}
-  - {name: vertex_training_image_uri, type: String}
-  - {name: vertex_machine_type, type: String}
-  - {name: vertex_accelerator_type, type: String}
-  - {name: vertex_accelerator_count, type: Integer}
-  - {name: vertex_service_account, type: String}
+  - {name: project_id,                  type: String, description: "ID of the Google Cloud project."}
+  - {name: region,                      type: String, description: "Region where the Vertex AI job will run."}
+  # --- AJUSTE AÑADIDO ---
+  # Se añaden 'pair' y 'timeframe' para que el lanzador sepa qué entrenar.
+  - {name: pair,                        type: String, description: "The currency pair to train (e.g., 'EURUSD')."}
+  - {name: timeframe,                   type: String, description: "The timeframe for the data (e.g., '15minute')."}
+  
+  - {name: params_file,                 type: String, description: "GCS path to the best_params.json file."}
+  - {name: features_gcs_path,           type: String, description: "GCS path to the training data Parquet file."}
+  - {name: output_gcs_base_dir,         type: String, description: "Base GCS directory to save the trained model artifacts."}
+  - {name: vertex_training_image_uri,   type: String, description: "URI of the Docker image for the training job."}
+  - {name: vertex_machine_type,         type: String, description: "Machine type for the Vertex AI training job."}
+  - {name: vertex_accelerator_type,     type: String, description: "Accelerator type for the training job (e.g., 'NVIDIA_TESLA_T4')."}
+  - {name: vertex_accelerator_count,    type: Integer, description: "Number of accelerators to attach."}
+  - {name: vertex_service_account,      type: String, description: "Service account to run the Vertex AI job."}
+
 outputs:
-  - {name: trained_lstm_dir_path, type: String}
+  - {name: trained_lstm_dir_path, type: String, description: "GCS path to the directory containing the trained LSTM model."}
+
 implementation:
   container:
-    image: gcr.io/trading-ai-460823/trading-ai-gpu:v1
-    command:
-      - python
-      - -m
-      - src.components.train_lstm_launcher.task
-    args:
-      - --project-id
-      - {inputValue: project_id}
-      - --region
-      - {inputValue: region}
-      - --pair
-      - {inputValue: pair}
-      - --timeframe
-      - {inputValue: timeframe}
-      - --params-file
-      - {inputValue: params_file}
-      - --features-gcs-path
-      - {inputValue: features_gcs_path}
-      - --output-gcs-base-dir
-      - {inputValue: output_gcs_base_dir}
-      - --vertex-training-image-uri
-      - {inputValue: vertex_training_image_uri}
-      - --vertex-machine-type
-      - {inputValue: vertex_machine_type}
-      - --vertex-accelerator-type
-      - {inputValue: vertex_accelerator_type}
-      - --vertex-accelerator-count
-      - {inputValue: vertex_accelerator_count}
-      - --vertex-service-account
-      - {inputValue: vertex_service_account}
-      - --trained-lstm-dir-path-output
-      - {outputPath: trained_lstm_dir_path}
+    image: "gcr.io/your-project/your-image:latest" # Reemplazado por main.py
+    command: [
+      python, -m, src.components.train_lstm_launcher.task,
+      --project-id, {inputValue: project_id},
+      --region, {inputValue: region},
+      # --- AJUSTE AÑADIDO ---
+      # Se pasan los nuevos parámetros al script.
+      --pair, {inputValue: pair},
+      --timeframe, {inputValue: timeframe},
+      
+      --params-file, {inputValue: params_file},
+      --features-gcs-path, {inputValue: features_gcs_path},
+      --output-gcs-base-dir, {inputValue: output_gcs_base_dir},
+      --vertex-training-image-uri, {inputValue: vertex_training_image_uri},
+      --vertex-machine-type, {inputValue: vertex_machine_type},
+      --vertex-accelerator-type, {inputValue: vertex_accelerator_type},
+      --vertex-accelerator-count, {inputValue: vertex_accelerator_count},
+      --vertex-service-account, {inputValue: vertex_service_account},
+      --trained-lstm-dir-path-output, {outputPath: trained_lstm_dir_path},
+    ]
