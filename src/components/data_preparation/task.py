@@ -18,55 +18,87 @@ from google.cloud import storage
 
 # Módulos internos
 from src.shared import constants, gcs_utils
-from src.shared.data_utils import clean_and_resample, create_holdout_set
 
 # Configuración del logging para una salida clara y estandarizada
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s"
 )
 
+# -----------------------------------------------------------------------------
+# Funciones de Utilidad de Datos (Mantenidas dentro de este script)
+# -----------------------------------------------------------------------------
+
+def clean_and_resample(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+    """
+    Limpia y remuestrea un DataFrame de precios OHLCV.
+    """
+    # --- AJUSTE CLAVE AÑADIDO ---
+    # Se convierte el parámetro 'timeframe' a string para asegurar compatibilidad
+    # con el orquestador de pipelines (KFP), que puede pasar objetos placeholder.
+    timeframe = str(timeframe)
+
+    if not isinstance(timeframe, str):
+        raise TypeError(
+            f"The 'timeframe' argument must be a string, but got {type(timeframe)} instead."
+        )
+
+    required_columns = {"open", "high", "low", "close", "volume"}
+    if not required_columns.issubset(df.columns):
+        raise ValueError(
+            f"El DataFrame debe contener las columnas: {required_columns}"
+        )
+
+    df.index.name = "timestamp"
+    df = df.sort_index()
+    df.dropna(inplace=True)
+    df = df[~df.index.duplicated(keep="first")]
+
+    logging.info(f"DataFrame limpiado. {df.shape[0]} filas restantes.")
+    return df
+
+
+def create_holdout_set(df: pd.DataFrame, holdout_months: int) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Divide el DataFrame en un conjunto de entrenamiento y uno de hold-out.
+    """
+    if not isinstance(df.index, pd.DatetimeIndex):
+        raise TypeError("El índice del DataFrame debe ser de tipo DatetimeIndex.")
+
+    if holdout_months <= 0:
+        logging.warning("holdout_months es <= 0. No se creará un set de hold-out.")
+        return df, pd.DataFrame()
+
+    holdout_start_date = df.index.max() - pd.DateOffset(months=holdout_months)
+    train_df = df[df.index < holdout_start_date]
+    holdout_df = df[df.index >= holdout_start_date]
+
+    logging.info(f"Holdout creado a partir de {holdout_start_date.date()}")
+    return train_df, holdout_df
+
+
+# -----------------------------------------------------------------------------
+# Lógica Principal del Componente
+# -----------------------------------------------------------------------------
 
 def upload_df_to_gcs_and_verify(df: pd.DataFrame, gcs_uri: str) -> None:
-    """
-    Sube un DataFrame a una URI de GCS como Parquet y verifica que la subida
-    fue exitosa.
-
-    Args:
-        df: El DataFrame de pandas a subir.
-        gcs_uri: La ruta completa en GCS (gs://...) donde se guardará el archivo.
-
-    Raises:
-        FileNotFoundError: Si después de la operación de escritura, el archivo
-                           no se puede encontrar en GCS.
-        Exception: Cualquier otro error durante el proceso de subida.
-    """
+    """Sube un DataFrame a una URI de GCS y verifica la subida."""
     logging.info(f"Intentando subir DataFrame a {gcs_uri}...")
     try:
-        # Usa pandas para escribir el archivo directamente a GCS.
-        # gcsfs debe estar instalado para que esto funcione.
         df.to_parquet(gcs_uri, engine="pyarrow", index=True)
         logging.info(
             f"La operación de escritura a {gcs_uri} se completó sin errores."
         )
-
-        # --- Bloque de Verificación Crítico ---
         logging.info(f"Verificando la existencia del objeto en GCS: {gcs_uri}")
         client = storage.Client()
         bucket_name, blob_name = gcs_uri.replace("gs://", "").split("/", 1)
         bucket = client.bucket(bucket_name)
         blob = bucket.blob(blob_name)
-
         if not blob.exists():
-            # Si el archivo no existe después de la subida, es un error fatal.
-            # Esto detendrá el pipeline en el lugar correcto.
             raise FileNotFoundError(
                 f"¡VERIFICACIÓN FALLIDA! El objeto no se encontró en GCS "
                 f"después de la subida: {gcs_uri}"
             )
-
         logging.info(f"✅ VERIFICACIÓN EXITOSA: El objeto existe en {gcs_uri}.")
-        # --- Fin de la Verificación ---
-
     except Exception as e:
         logging.error(f"Error fatal durante la subida o verificación a GCS: {e}")
         raise
@@ -81,13 +113,9 @@ def run_data_preparation(
     prepared_data_path_output: str,
     holdout_data_path_output: str,
 ):
-    """
-    Orquesta todo el proceso de preparación de datos.
-    """
+    """Orquesta todo el proceso de preparación de datos."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
-
-        # Descargar los datos crudos desde GCS
         local_raw_path = gcs_utils.download_gcs_file(
             f"gs://{constants.BUCKET_NAME}/{constants.RAW_DATA_PATH}/{timeframe}/{pair}.parquet",
             tmp_path,
@@ -96,42 +124,28 @@ def run_data_preparation(
             raise FileNotFoundError(f"No se pudo descargar el archivo de datos crudos para {pair}.")
             
         df_raw = pd.read_parquet(local_raw_path)
-
-        # Procesar y dividir los datos
         df_processed = clean_and_resample(df_raw, timeframe)
         df_train, df_holdout = create_holdout_set(df_processed, holdout_months)
         logging.info(
             f"Set de entrenamiento: {df_train.shape[0]} filas | "
             f"Set de Hold-out: {df_holdout.shape[0]} filas"
         )
-
-        # Crear rutas de salida versionadas con timestamp
         version_ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
         output_base_path = f"gs://{constants.BUCKET_NAME}/{constants.FEATURES_PATH}/{pair}/{timeframe}/{version_ts}"
-
         prepared_data_path = f"{output_base_path}/{pair}_{timeframe}_train_opt.parquet"
         holdout_data_path = f"{output_base_path}/{pair}_{timeframe}_holdout.parquet"
-
-        # Subir los dataframes a GCS con la nueva función de verificación
         upload_df_to_gcs_and_verify(df_train, prepared_data_path)
         upload_df_to_gcs_and_verify(df_holdout, holdout_data_path)
-
-        # Escribir las rutas de salida para que KFP las pase a los siguientes componentes
         Path(prepared_data_path_output).parent.mkdir(parents=True, exist_ok=True)
         Path(prepared_data_path_output).write_text(prepared_data_path)
-
         Path(holdout_data_path_output).parent.mkdir(parents=True, exist_ok=True)
         Path(holdout_data_path_output).write_text(holdout_data_path)
-
         logging.info(
             "Rutas de salida escritas para KFP: "
             f"Train='{prepared_data_path}', Holdout='{holdout_data_path}'"
         )
-
         if cleanup:
             logging.info("La lógica de limpieza de versiones antiguas no está implementada.")
-            # Aquí iría la lógica para encontrar y eliminar directorios antiguos
-            pass
 
 
 if __name__ == "__main__":
@@ -155,7 +169,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--cleanup", type=bool, default=True, help="Activar limpieza de versiones antiguas."
     )
-    # Argumentos de salida de KFP
     parser.add_argument(
         "--prepared-data-path-output",
         required=True,
@@ -166,12 +179,7 @@ if __name__ == "__main__":
         required=True,
         help="Ruta donde guardar la URI del dataset de hold-out.",
     )
-
     args = parser.parse_args()
-
-    # --- AJUSTE CLAVE AÑADIDO ---
-    # Se añade la llamada a la función principal con los argumentos parseados.
-    # Esto era lo que faltaba y causaba que el script no hiciera nada.
     run_data_preparation(
         pair=args.pair,
         timeframe=args.timeframe,
