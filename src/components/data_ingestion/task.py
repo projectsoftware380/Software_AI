@@ -1,16 +1,16 @@
 # src/components/data_ingestion/task.py
 """
-Tarea del componente de ingestión de datos.
+Tarea del componente de ingestión de datos para UN SOLO PAR.
 
 Responsabilidades:
 1.  Obtener la API Key de Polygon desde Google Secret Manager.
-2.  Iterar sobre una lista de pares de divisas predefinida en las constantes.
-3.  Para cada par, eliminar el Parquet histórico y descargar los datos desde Polygon.io.
-4.  Validar que se ha descargado un número mínimo de registros para cada par.
+2.  Recibir un par de divisas específico como argumento.
+3.  Eliminar el Parquet histórico y descargar los datos desde Polygon.io para ese par.
+4.  Validar que se ha descargado un número mínimo de registros.
 5.  Guardar los datos consolidados en un nuevo archivo Parquet en GCS.
-6.  Enviar notificaciones de éxito o fracaso a un topic de Pub/Sub para cada par.
+6.  Enviar notificaciones de éxito o fracaso a un topic de Pub/Sub.
 
-Este script está diseñado para ser ejecutado por un componente de KFP.
+Este script está diseñado para ser ejecutado por un componente de KFP dentro de un bucle.
 """
 
 from __future__ import annotations
@@ -51,9 +51,7 @@ logger = logging.getLogger(__name__)
 def get_polygon_api_key(
     project_id: str, secret_name: str, version: str = "latest"
 ) -> str:
-    """
-    Obtiene la API Key de Polygon desde Google Secret Manager.
-    """
+    # Esta función se mantiene intacta.
     try:
         logger.info(
             f"Accediendo al secreto: projects/{project_id}/secrets/{secret_name}/versions/{version}"
@@ -70,7 +68,7 @@ def get_polygon_api_key(
             f"Fallo al obtener la API Key de Secret Manager '{secret_name}': {e}"
         )
 
-# --- Lógica de Descarga de Datos ---
+# --- Lógica de Descarga de Datos (Sin Cambios) ---
 POLYGON_MAX_LIMIT = 50_000
 
 @retry(
@@ -87,7 +85,7 @@ def _fetch_window(
     end_date: str,
     api_key: str,
 ) -> List[Dict[str, Any]]:
-    """Realiza una petición a la API de Polygon para una ventana de tiempo."""
+    # Esta función se mantiene intacta.
     match = re.match(r"^(\d+)([a-zA-Z]+)$", timeframe)
     if not match:
         raise ValueError(f"Timeframe inválido: {timeframe!r}")
@@ -106,30 +104,20 @@ def _fetch_window(
 
 
 def _results_to_df(results: List[Dict[str, Any]]) -> pd.DataFrame:
-    """Convierte la lista de resultados de la API a un DataFrame limpio."""
+    # Esta función se mantiene intacta.
     if not results:
         return pd.DataFrame()
-    df = (
+    return (
         pd.DataFrame(results)
-        .rename(
-            columns={
-                "o": "open",
-                "h": "high",
-                "l": "low",
-                "c": "close",
-                "v": "volume",
-                "t": "timestamp",
-            }
-        )
+        .rename(columns={"o": "open", "h": "high", "l": "low", "c": "close", "v": "volume", "t": "timestamp"})
         .dropna(subset=["open", "high", "low", "close"])
         .assign(timestamp=lambda d: d["timestamp"].astype("int64"))
         .sort_values("timestamp")
         .drop_duplicates("timestamp")
         .reset_index(drop=True)
     )
-    return df
 
-# --- NUEVA FUNCIÓN DE VERIFICACIÓN ---
+# --- Función de Verificación de Subida (Sin Cambios) ---
 def upload_df_to_gcs_and_verify(df: pd.DataFrame, gcs_uri: str, local_path: Path):
     """
     Sube un DataFrame a GCS y verifica explícitamente que la subida fue exitosa.
@@ -140,16 +128,13 @@ def upload_df_to_gcs_and_verify(df: pd.DataFrame, gcs_uri: str, local_path: Path
     logger.info(f"Subiendo archivo a GCS: {gcs_uri}")
     gcs_utils.upload_gcs_file(local_path, gcs_uri)
     
-    # Verificación
-    logging.info(f"Verificando la existencia del objeto en GCS: {gcs_uri}")
+    logger.info(f"Verificando la existencia del objeto en GCS: {gcs_uri}")
     if not gcs_utils.gcs_path_exists(gcs_uri):
-        raise FileNotFoundError(
-            f"¡VERIFICACIÓN FALLIDA! El objeto no se encontró en GCS después de la subida: {gcs_uri}"
-        )
+        raise FileNotFoundError(f"¡VERIFICACIÓN FALLIDA! El objeto no se encontró en GCS después de la subida: {gcs_uri}")
     logger.info(f"✅ VERIFICACIÓN EXITOSA: El objeto existe en {gcs_uri}.")
 
 
-# --- Orquestación Principal de la Tarea ---
+# --- Orquestación Principal de la Tarea (Lógica Interna Sin Cambios) ---
 def run_ingestion(
     pair: str,
     timeframe: str,
@@ -166,14 +151,12 @@ def run_ingestion(
     """
     status_success = False
     try:
-        # 1. Definir ruta de salida y eliminar versión anterior
         parquet_uri = f"{gcs_data_path}/{pair}/{timeframe}/{pair}_{timeframe}.parquet"
         if gcs_utils.gcs_path_exists(parquet_uri):
             gcs_utils.delete_gcs_blob(parquet_uri)
         else:
             logger.info(f"No existía un Parquet previo en {parquet_uri}. Se creará uno nuevo.")
 
-        # 2. Descargar datos por ventanas
         logger.info(f"📥 Descargando {pair} | {timeframe} | {start_date} → {end_date}")
         all_dfs: List[pd.DataFrame] = []
         win_start = dt.date.fromisoformat(start_date)
@@ -195,7 +178,6 @@ def run_ingestion(
         
         session.close()
 
-        # 3. Consolidar y validar
         if not all_dfs:
             raise RuntimeError(f"No se descargaron datos para {pair}. La lista de DataFrames está vacía.")
 
@@ -208,7 +190,6 @@ def run_ingestion(
                 "Se aborta para evitar un Parquet inválido."
             )
 
-        # 4. Guardar en GCS usando la nueva función de verificación
         with tempfile.TemporaryDirectory() as tmpdir:
             local_parquet_path = Path(tmpdir) / f"{pair}_{timeframe}.parquet"
             upload_df_to_gcs_and_verify(df_full, parquet_uri, local_parquet_path)
@@ -221,7 +202,6 @@ def run_ingestion(
         status_success = False
 
     finally:
-        # 5. Enviar notificación a Pub/Sub
         topic_id = constants.SUCCESS_TOPIC_ID if status_success else constants.FAILURE_TOPIC_ID
         publisher = pubsub_v1.PublisherClient()
         topic_path = publisher.topic_path(project_id, topic_id)
@@ -248,7 +228,9 @@ def run_ingestion(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Task de Ingestión de Datos para KFP.")
     
-    parser.add_argument("--pair")
+    # --- AJUSTE #1: 'pair' ahora es un argumento requerido ---
+    parser.add_argument("--pair", required=True, help="El par de divisas específico a procesar (ej: 'EURUSD').")
+    
     parser.add_argument("--timeframe", required=True, help="Timeframe, ej: 15minute")
     parser.add_argument("--project-id", default=constants.PROJECT_ID)
     parser.add_argument("--gcs-data-path", default=constants.DATA_PATH)
@@ -256,47 +238,30 @@ if __name__ == "__main__":
     parser.add_argument("--start-date", default="2010-01-01")
     parser.add_argument("--end-date", default=dt.date.today().isoformat())
     parser.add_argument("--min-rows", type=int, default=100_000)
-    parser.add_argument(
-        "--completion-message-path",
-        type=Path,
-        default=Path(tempfile.gettempdir()) / "ingest_done.txt",
-        help="Ruta de archivo donde se escribirá el mensaje de salida."
-    )
+    
+    # Eliminado el argumento --completion-message-path que ya no es necesario en el nuevo diseño
     
     args = parser.parse_args()
 
-    pairs_to_ingest = list(constants.SPREADS_PIP.keys())
-    logger.info(f"Iniciando ingestión para los siguientes pares: {pairs_to_ingest}")
+    # --- AJUSTE #2: El script ahora solo procesa el par que recibe ---
+    logger.info(f"--- Iniciando ingestión para el par: {args.pair} ---")
     
     api_key = get_polygon_api_key(args.project_id, args.polygon_secret_name)
     
-    results = {}
-    for pair in pairs_to_ingest:
-        logger.info(f"--- Procesando par: {pair} ---")
-        success = run_ingestion(
-            pair=pair,
-            timeframe=args.timeframe,
-            project_id=args.project_id,
-            gcs_data_path=args.gcs_data_path,
-            polygon_secret=args.polygon_secret_name,
-            start_date=args.start_date,
-            end_date=args.end_date,
-            min_rows=args.min_rows,
-            api_key=api_key
-        )
-        results[pair] = "SUCCESS" if success else "FAILURE"
-
-    successful_pairs = [p for p, s in results.items() if s == "SUCCESS"]
-    failed_pairs = [p for p, s in results.items() if s == "FAILURE"]
+    success = run_ingestion(
+        pair=args.pair,
+        timeframe=args.timeframe,
+        project_id=args.project_id,
+        gcs_data_path=args.gcs_data_path,
+        polygon_secret=args.polygon_secret_name,
+        start_date=args.start_date,
+        end_date=args.end_date,
+        min_rows=args.min_rows,
+        api_key=api_key
+    )
     
-    message = f"Ingestión completada. Éxito: {len(successful_pairs)} pares. Fallo: {len(failed_pairs)} pares."
-    if failed_pairs:
-        message += f" Pares fallidos: {', '.join(failed_pairs)}"
-
-    args.completion_message_path.parent.mkdir(parents=True, exist_ok=True)
-    args.completion_message_path.write_text(message)
-    
-    if failed_pairs:
+    # Salir con código de error si la ingestión para este par falló
+    if not success:
         sys.exit(1)
     else:
         sys.exit(0)

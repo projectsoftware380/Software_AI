@@ -1,51 +1,30 @@
-# ────────────────────────────────────────────────────────────────
-# src/components/data_ingestion/component.yaml
-# ────────────────────────────────────────────────────────────────
-name: ingest-market-data-for-all-pairs
-description: >
-  Descarga/actualiza datos OHLC históricos desde Polygon.io para todos los
-  pares de divisas y guarda los Parquet en GCS.
+# -----------------------------------------------------------------------------
+# component.yaml: Componente de Ingestión de Datos
+# -----------------------------------------------------------------------------
+name: Ingest Market Data for All Pairs
+description: |
+  Orquesta la descarga de datos históricos para todos los pares de divisas
+  desde Polygon.io, los guarda en GCS y notifica los resultados.
 
 inputs:
-  - name: project_id
-    type: String
-  - name: timeframe
-    type: String
-  - name: polygon_secret_name        # ← coincide con main.py y task.py
-    type: String
-  - name: start_date
-    type: String
-    default: "2010-01-01"
-  - name: end_date
-    type: String
-    default: "2100-01-01"
-  - name: min_rows
-    type: Integer
-    default: 100000
-
-outputs:
-  - name: completion_message
-    type: String
+  - {name: project_id,          type: String, description: "ID del proyecto de Google Cloud."}
+  - {name: polygon_secret_name, type: String, description: "Nombre del secreto en Secret Manager para la API key de Polygon."}
+  - {name: end_date,            type: String, description: "Fecha final para la descarga de datos (YYYY-MM-DD)."}
+  - {name: timeframe,           type: String, description: "Timeframe de las velas (ej: '15minute')."}
+  # --- AJUSTE AÑADIDO ---
+  # Se añade el parámetro 'pair' para que el componente sepa qué par procesar.
+  - {name: pair,                type: String, description: "El par de divisas específico a procesar (ej: 'EURUSD')."}
 
 implementation:
   container:
-    image: gcr.io/trading-ai-460823/trading-ai-gpu:v1
-    command:
-      - python
-      - -m                           # ← módulo, no ruta de archivo
-      - src.components.data_ingestion.task
-    args:
-      - --project-id
-      - {inputValue: project_id}
-      - --timeframe
-      - {inputValue: timeframe}
-      - --polygon-secret-name
-      - {inputValue: polygon_secret_name}
-      - --start-date
-      - {inputValue: start_date}
-      - --end-date
-      - {inputValue: end_date}
-      - --min-rows
-      - {inputValue: min_rows}
-      - --completion-message-path
-      - {outputPath: completion_message}
+    image: "gcr.io/your-project/your-image:latest"  # Esta será reemplazada por el main.py
+    command: [
+      python, -m, src.components.data_ingestion.task,
+      --project-id,           {inputValue: project_id},
+      --polygon-secret-name,  {inputValue: polygon_secret_name},
+      --end-date,             {inputValue: end_date},
+      --timeframe,            {inputValue: timeframe},
+      # --- AJUSTE AÑADIDO ---
+      # Se pasa el nuevo input al script de Python.
+      --pair,                 {inputValue: pair},
+    ]
