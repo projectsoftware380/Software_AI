@@ -1,4 +1,5 @@
-S# task.py: Componente de Preparación de Datos
+# -----------------------------------------------------------------------------
+# task.py: Componente de Preparación de Datos
 # -----------------------------------------------------------------------------
 # Este script orquesta la carga de datos crudos, su limpieza, resampling,
 # la creación de un conjunto de hold-out para validación final, y la subida
@@ -17,7 +18,7 @@ from google.cloud import storage
 
 # Módulos internos
 from src.shared import constants, gcs_utils
-from src.shared.gcs_utils import clean_and_resample, create_holdout_set
+from src.shared.data_utils import clean_and_resample, create_holdout_set
 
 # Configuración del logging para una salida clara y estandarizada
 logging.basicConfig(
@@ -168,6 +169,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # --- AJUSTE CLAVE AÑADIDO ---
+    # Se añade la llamada a la función principal con los argumentos parseados.
+    # Esto era lo que faltaba y causaba que el script no hiciera nada.
     run_data_preparation(
         pair=args.pair,
         timeframe=args.timeframe,
