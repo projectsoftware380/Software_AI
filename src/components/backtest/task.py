@@ -7,8 +7,9 @@ Responsabilidades:
 2.  Generar predicciones con ambos modelos sobre los datos de hold-out.
 3.  Simular las operaciones de trading basadas en las señales de los modelos.
 4.  Calcular un conjunto completo de métricas de rendimiento (Sharpe, Sortino, etc.).
-5.  Guardar las métricas y el registro de operaciones en GCS.
-6.  Generar un artefacto de Métricas de KFP para visualización en la UI de Vertex.
+5.  Guardar las métricas y el registro de operaciones en un directorio GCS versionado.
+6.  Limpiar las versiones antiguas de los resultados del backtest.
+7.  Generar un artefacto de Métricas de KFP para visualización en la UI de Vertex.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ import argparse
 import json
 import logging
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 import joblib
@@ -23,8 +25,6 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 
-# --- AJUSTE AÑADIDO ---
-# Se importa el módulo 'constants' que faltaba para resolver el NameError.
 from src.shared import constants, gcs_utils, indicators
 
 # --- Configuración (Sin Cambios) ---
@@ -73,7 +73,7 @@ def to_sequences(mat, win):
         X.append(mat[i - win : i])
     return np.asarray(X, np.float32)
 
-# --- Lógica Principal de la Tarea (Lógica Original Intacta) ---
+# --- Lógica Principal de la Tarea (Ajustada) ---
 def run_backtest(
     lstm_model_dir: str,
     filter_model_path: str,
@@ -82,6 +82,7 @@ def run_backtest(
     timeframe: str,
     output_gcs_dir_output: Path,
     kfp_metrics_artifact_output: Path,
+    cleanup: bool = True, # <-- AJUSTE: Recibe el flag de limpieza
 ):
     """
     Orquesta el proceso completo de backtesting para un par específico.
@@ -147,24 +148,35 @@ def run_backtest(
         metrics = calculate_metrics(returns, trades)
         logger.info(f"Métricas de backtest para {pair}: {metrics}")
         
-        # El nombre del bucket ahora se obtiene de `constants`
-        output_dir = Path(output_gcs_dir_output)
-        output_dir.mkdir(parents=True, exist_ok=True)
+        # --- AJUSTE: Lógica de guardado en directorio versionado ---
+        ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        versioned_output_dir_str = f"{constants.BACKTEST_RESULTS_PATH}/{pair}/{timeframe}/{ts}"
         
-        trades.to_csv(output_dir / "trades.csv", index=False)
-        gcs_utils.upload_gcs_file(output_dir / "trades.csv", f"gs://{constants.GCS_BUCKET_NAME}/{output_dir.name}/trades.csv")
-
-        with open(output_dir / "metrics.json", "w") as f:
-            json.dump(metrics, f, indent=4)
-        gcs_utils.upload_gcs_file(output_dir / "metrics.json", f"gs://{constants.GCS_BUCKET_NAME}/{output_dir.name}/metrics.json")
+        # Guardar resultados en GCS
+        trades.to_csv(f"{versioned_output_dir_str}/trades.csv", index=False)
+        with tempfile.NamedTemporaryFile(mode='w', suffix=".json", delete=False) as tmp_metrics:
+            json.dump(metrics, tmp_metrics, indent=4)
+            gcs_utils.upload_gcs_file(Path(tmp_metrics.name), f"{versioned_output_dir_str}/metrics.json")
         
+        # Escribir la ruta del directorio de salida para KFP
+        output_gcs_dir_output.parent.mkdir(parents=True, exist_ok=True)
+        output_gcs_dir_output.write_text(versioned_output_dir_str)
+        
+        # Generar artefacto de métricas para KFP
         kfp_metrics_artifact_output.parent.mkdir(parents=True, exist_ok=True)
         with open(kfp_metrics_artifact_output, "w") as f:
             json.dump({
                 "metrics": [{"name": k.replace("_", "-"), "numberValue": v, "format": "RAW"} for k, v in metrics.items()]
             }, f)
         
-        logger.info(f"✅ Backtest para {pair} completado y resultados guardados.")
+        logger.info(f"✅ Backtest para {pair} completado y resultados guardados en {versioned_output_dir_str}")
+
+        # --- AJUSTE AÑADIDO: LÓGICA DE LIMPIEZA ---
+        if cleanup:
+            base_cleanup_path = f"{constants.BACKTEST_RESULTS_PATH}/{pair}/{timeframe}/"
+            logger.info(f"Iniciando limpieza de versiones antiguas de resultados de backtest en: {base_cleanup_path}")
+            gcs_utils.keep_only_latest_version(base_cleanup_path)
+        # --- FIN DEL AJUSTE ---
 
 # --- Punto de Entrada para Ejecución como Script (Ajustado) ---
 if __name__ == "__main__":
@@ -175,6 +187,7 @@ if __name__ == "__main__":
     parser.add_argument("--features-path", required=True)
     parser.add_argument("--pair", required=True)
     parser.add_argument("--timeframe", required=True)
+    parser.add_argument("--cleanup", type=lambda x: (str(x).lower() == 'true'), default=True) # <-- AJUSTE
     parser.add_argument("--output-gcs-dir-output", type=Path, required=True)
     parser.add_argument("--kfp-metrics-artifact-output", type=Path, required=True)
     
@@ -188,4 +201,5 @@ if __name__ == "__main__":
         timeframe=args.timeframe,
         output_gcs_dir_output=args.output_gcs_dir_output,
         kfp_metrics_artifact_output=args.kfp_metrics_artifact_output,
+        cleanup=args.cleanup, # <-- AJUSTE
     )

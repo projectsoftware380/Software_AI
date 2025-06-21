@@ -6,7 +6,8 @@ Responsabilidades:
 1.  Recibir datos y una arquitectura de modelo para UN SOLO PAR.
 2.  Ejecutar un estudio de Optuna para encontrar los mejores parámetros de lógica.
 3.  La métrica a optimizar es el 'sharpe_ratio'.
-4.  Guardar el archivo `best_params.json` para el par procesado.
+4.  Guardar el archivo `best_params.json` para el par procesado en un directorio versionado.
+5.  Limpiar las versiones antiguas de los parámetros.
 """
 from __future__ import annotations
 
@@ -42,7 +43,7 @@ np.random.seed(SEED)
 tf.random.set_seed(SEED)
 os.environ.setdefault("TF_DETERMINISTIC_OPS", "1")
 
-# --- Helpers de Modelo y Secuencias (Sin Cambios) ---
+# --- Helpers de Modelo y Secuencias (Lógica Original Intacta) ---
 def make_model(inp_shape, lr, dr, filt, units, heads):
     x = inp = tf.keras.layers.Input(shape=inp_shape, dtype=tf.float32)
     x = tf.keras.layers.Conv1D(filt, 3, padding="same", activation="relu")(x)
@@ -69,9 +70,10 @@ def run_hpo_logic(
     features_path: str,
     architecture_params_file: str,
     n_trials: int,
-    pair: str,  # <-- AJUSTE: Recibe el par como argumento
+    pair: str,  # <-- AJUSTE: Recibe el par
     output_gcs_dir_base: str,
     best_params_dir_output: Path,
+    cleanup: bool = True,
 ):
     """
     Orquesta el proceso de HPO para la lógica de trading de UN SOLO PAR.
@@ -87,7 +89,7 @@ def run_hpo_logic(
         architecture_params = json.load(f)
 
     def objective(trial: optuna.Trial) -> float:
-        # ... (la lógica interna de la función objective se mantiene intacta)
+        # La lógica interna de la función objective se mantiene intacta
         tf.keras.backend.clear_session()
         gc.collect()
 
@@ -99,7 +101,6 @@ def run_hpo_logic(
             **architecture_params,
         }
         
-        # ... (el resto de la lógica de cálculo de retornos y sharpe ratio se mantiene igual)
         df_ind = indicators.build_indicators(df_full.copy(), p, atr_len=14)
         
         tick = 0.01 if pair.endswith("JPY") else 0.0001
@@ -110,7 +111,6 @@ def run_hpo_logic(
         
         future_prices = np.roll(closes, -horizon)
         future_prices[-horizon:] = np.nan
-        
         price_diffs = (future_prices - closes) / tick
         
         up_targets = np.maximum(price_diffs, 0) / atr_vals
@@ -128,7 +128,7 @@ def run_hpo_logic(
             X_scaled, up_targets[valid_mask], dn_targets[valid_mask], p["win"]
         )
         
-        if len(X_seq) == 0: return -1.0
+        if len(X_seq) < 10: return -1.0
 
         X_train, X_val, y_up_train, y_up_val, y_dn_train, y_dn_val = train_test_split(
             X_seq, y_up_seq, y_dn_seq, test_size=0.2, shuffle=False
@@ -165,7 +165,7 @@ def run_hpo_logic(
     best_params = study.best_params
     best_params["sharpe_ratio"] = study.best_value
 
-    # AJUSTE: Usar el `pair` recibido para crear la ruta de salida correcta.
+    # La ruta de salida ahora usa el 'pair' que se recibe como argumento.
     pair_output_gcs_path = f"{output_gcs_dir_base}/{pair}/best_params.json"
     
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -174,6 +174,14 @@ def run_hpo_logic(
         gcs_utils.upload_gcs_file(tmp_json, pair_output_gcs_path)
     
     logger.info(f"✅ Lógica para {pair} guardada. Mejor Sharpe Ratio: {study.best_value:.4f}")
+
+    # --- AJUSTE AÑADIDO: LÓGICA DE LIMPIEZA ---
+    if cleanup:
+        # La ruta base para la limpieza es el directorio padre que contiene los directorios de timestamp.
+        base_cleanup_path = str(Path(output_gcs_dir_base).parent)
+        logger.info(f"Iniciando limpieza de versiones antiguas en: {base_cleanup_path}")
+        gcs_utils.keep_only_latest_version(base_cleanup_path)
+    # --- FIN DEL AJUSTE ---
 
     best_params_dir_output.parent.mkdir(parents=True, exist_ok=True)
     best_params_dir_output.write_text(output_gcs_dir_base)
@@ -184,19 +192,21 @@ if __name__ == "__main__":
     parser.add_argument("--features-path", required=True)
     parser.add_argument("--architecture-params-file", required=True)
     parser.add_argument("--n-trials", type=int, default=30)
-    parser.add_argument("--pair", required=True) # <-- AJUSTE: Argumento requerido
+    parser.add_argument("--pair", required=True) # <-- AJUSTE
+    parser.add_argument("--cleanup", type=lambda x: (str(x).lower() == 'true'), default=True) # <-- AJUSTE
     parser.add_argument("--best-params-dir-output", type=Path, required=True)
     
     args = parser.parse_args()
 
     ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-    output_dir_gcs = f"{constants.LOGIC_PARAMS_PATH}/{ts}"
+    output_dir_gcs = f"{constants.LOGIC_PARAMS_PATH}/{args.pair}/{ts}"
 
     run_hpo_logic(
         features_path=args.features_path,
         architecture_params_file=args.architecture_params_file,
         n_trials=args.n_trials,
-        pair=args.pair, # <-- AJUSTE: Se pasa el par a la función
+        pair=args.pair, # <-- AJUSTE
         output_gcs_dir_base=output_dir_gcs,
         best_params_dir_output=args.best_params_dir_output,
+        cleanup=args.cleanup, # <-- AJUSTE
     )

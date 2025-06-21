@@ -32,9 +32,6 @@ def clean_and_resample(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     """
     Limpia y remuestrea un DataFrame de precios OHLCV.
     """
-    # --- AJUSTE CLAVE AÑADIDO ---
-    # Se convierte el parámetro 'timeframe' a string para asegurar compatibilidad
-    # con el orquestador de pipelines (KFP), que puede pasar objetos placeholder.
     timeframe = str(timeframe)
 
     if not isinstance(timeframe, str):
@@ -64,7 +61,6 @@ def create_holdout_set(df: pd.DataFrame, holdout_months: int) -> tuple[pd.DataFr
     if not isinstance(df.index, pd.DatetimeIndex):
         raise TypeError("El índice del DataFrame debe ser de tipo DatetimeIndex.")
 
-    # Convertir holdout_months a entero por si KFP lo pasa como otro tipo
     holdout_months = int(holdout_months)
     
     if holdout_months <= 0:
@@ -118,7 +114,6 @@ def run_data_preparation(
     """Orquesta todo el proceso de preparación de datos."""
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
-        # La ruta al archivo de entrada es construida dinámicamente.
         gcs_input_uri = f"gs://{constants.BUCKET_NAME}/{constants.RAW_DATA_PATH}/{timeframe}/{pair}.parquet"
         
         local_raw_path = gcs_utils.download_gcs_file(gcs_input_uri, tmp_path)
@@ -136,10 +131,12 @@ def run_data_preparation(
         )
         
         version_ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-        output_base_path = f"gs://{constants.BUCKET_NAME}/{constants.FEATURES_PATH}/{pair}/{timeframe}/{version_ts}"
+        output_base_path = f"gs://{constants.BUCKET_NAME}/{constants.FEATURES_PATH}/{pair}/{timeframe}"
         
-        prepared_data_path = f"{output_base_path}/{pair}_{timeframe}_train_opt.parquet"
-        holdout_data_path = f"{output_base_path}/{pair}_{timeframe}_holdout.parquet"
+        versioned_output_dir = f"{output_base_path}/{version_ts}"
+        
+        prepared_data_path = f"{versioned_output_dir}/{pair}_{timeframe}_train_opt.parquet"
+        holdout_data_path = f"{versioned_output_dir}/{pair}_{timeframe}_holdout.parquet"
         
         upload_df_to_gcs_and_verify(df_train, prepared_data_path)
         upload_df_to_gcs_and_verify(df_holdout, holdout_data_path)
@@ -155,8 +152,12 @@ def run_data_preparation(
             f"Train='{prepared_data_path}', Holdout='{holdout_data_path}'"
         )
         
+        # --- AJUSTE AÑADIDO: LÓGICA DE LIMPIEZA ---
         if cleanup:
-            logging.info("La lógica de limpieza de versiones antiguas no está implementada.")
+            logging.info(f"Iniciando limpieza de versiones antiguas en: {output_base_path}")
+            # Llama a la función de gcs_utils para mantener solo la última versión
+            gcs_utils.keep_only_latest_version(output_base_path)
+        # --- FIN DEL AJUSTE ---
 
 
 if __name__ == "__main__":
@@ -177,7 +178,6 @@ if __name__ == "__main__":
         default=3,
         help="Meses para reservar para el set de hold-out.",
     )
-    # El tipo `bool` para argparse es complicado; se recomienda manejarlo así
     parser.add_argument(
         "--cleanup",
         type=lambda x: (str(x).lower() == 'true'),

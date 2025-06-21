@@ -4,11 +4,10 @@ Tarea de Optimización de Hiperparámetros para la Arquitectura del Modelo.
 
 Responsabilidades:
 1.  Recibir la ruta a un archivo Parquet de datos preparados para UN SOLO PAR.
-2.  Ejecutar un estudio de Optuna para encontrar los mejores hiperparámetros de arquitectura.
-3.  La métrica a optimizar es la pérdida de validación (`val_loss`).
-4.  Guardar el archivo `best_architecture.json` en una subcarpeta específica
-    para el par procesado.
-5.  Devolver la ruta base donde se guardó el resultado.
+2.  Ejecutar un estudio de Optuna para encontrar los mejores hiperparámetros.
+3.  Guardar el archivo `best_architecture.json` en una ruta GCS versionada.
+4.  Limpiar las versiones antiguas de los parámetros, manteniendo solo la más reciente.
+5.  Devolver la ruta base versionada donde se guardó el resultado.
 """
 from __future__ import annotations
 
@@ -94,8 +93,10 @@ def run_architecture_optimization(
     *,
     features_path: str,
     n_trials: int,
-    pair: str,  # <-- AJUSTE: Recibe el par como argumento
+    pair: str, # <-- AJUSTE: Recibe el par como argumento
+    output_gcs_dir_base: str,
     best_architecture_dir_output: Path,
+    cleanup: bool = True,
 ) -> None:
     """
     Orquesta el proceso completo de optimización de arquitectura para UN SOLO PAR.
@@ -130,7 +131,6 @@ def run_architecture_optimization(
         
         future_prices = np.roll(closes, -horizon)
         future_prices[-horizon:] = np.nan
-        
         price_diffs = (future_prices - closes) / tick
         
         up_targets = np.maximum(price_diffs, 0) / atr_vals
@@ -181,23 +181,27 @@ def run_architecture_optimization(
     best_architecture_params = study.best_params
     best_architecture_params["best_val_loss"] = study.best_value
 
-    # AJUSTE: El directorio de salida ahora es el que KFP le pasa
-    output_dir = Path(best_architecture_dir_output)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # La ruta de salida ahora usa el 'pair' que se recibe como argumento.
+    pair_output_gcs_path = f"{output_gcs_dir_base}/{pair}/best_architecture.json"
     
-    # La ruta al archivo ya no necesita el 'pair' porque KFP maneja el directorio base
-    best_params_path = output_dir / "best_architecture.json"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_json = Path(tmpdir) / "best_architecture.json"
+        tmp_json.write_text(json.dumps(best_architecture_params, indent=2))
+        gcs_utils.upload_gcs_file(tmp_json, pair_output_gcs_path)
     
-    with open(best_params_path, "w") as f:
-        json.dump(best_architecture_params, f, indent=2)
-    
-    logger.info(f"✅ Arquitectura para {pair} guardada en {best_params_path}")
-    
-    # La limpieza de versiones ahora debería ser manejada por un paso separado si es necesario.
-    # gcs_utils.keep_only_latest_version(...) se podría mover a un componente de 'cleanup'.
+    logger.info(f"✅ Arquitectura para {pair} guardada. Mejor val_loss: {study.best_value:.4f}")
 
-    # No es necesario escribir la ruta de salida, KFP lo hace automáticamente.
-    logger.info("✍️  KFP se encargará de registrar la ruta de salida.")
+    # --- AJUSTE AÑADIDO: LÓGICA DE LIMPIEZA ---
+    if cleanup:
+        # La ruta base para la limpieza es el directorio padre que contiene los directorios de timestamp.
+        base_cleanup_path = str(Path(output_gcs_dir_base).parent)
+        logger.info(f"Iniciando limpieza de versiones antiguas en: {base_cleanup_path}")
+        gcs_utils.keep_only_latest_version(base_cleanup_path)
+    # --- FIN DEL AJUSTE ---
+
+    best_architecture_dir_output.parent.mkdir(parents=True, exist_ok=True)
+    best_architecture_dir_output.write_text(output_gcs_dir_base)
+    logger.info("✍️  Ruta de salida %s escrita para KFP.", output_gcs_dir_base)
 
 
 # --- Punto de Entrada para Ejecución como Script (Ajustado) ---
@@ -205,14 +209,21 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("Task de Optimización de Arquitectura de Modelo")
     parser.add_argument("--features-path", required=True)
     parser.add_argument("--n-trials", type=int, default=20)
-    parser.add_argument("--pair", required=True, help="El par de divisas específico a procesar.") # <-- AJUSTE: Argumento requerido
+    parser.add_argument("--pair", required=True, help="El par de divisas específico a procesar.") # <-- AJUSTE
+    parser.add_argument("--cleanup", type=lambda x: (str(x).lower() == 'true'), default=True) # <-- AJUSTE
     parser.add_argument("--best-architecture-dir-output", type=Path, required=True)
     
     args = parser.parse_args()
 
+    ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    # La ruta de salida incluye ahora el par para una mejor organización.
+    output_dir_gcs = f"{constants.ARCHITECTURE_PARAMS_PATH}/{args.pair}/{ts}"
+
     run_architecture_optimization(
         features_path=args.features_path,
         n_trials=args.n_trials,
-        pair=args.pair,  # <-- AJUSTE: Se pasa el par a la función
+        pair=args.pair, # <-- AJUSTE
+        output_gcs_dir_base=output_dir_gcs,
         best_architecture_dir_output=args.best_architecture_dir_output,
+        cleanup=args.cleanup, # <-- AJUSTE
     )

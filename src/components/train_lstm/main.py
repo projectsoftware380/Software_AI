@@ -1,4 +1,4 @@
-# src/components/train_lstm/task.py
+# src/components/train_lstm/main.py
 """
 Tarea de Entrenamiento del Modelo LSTM.
 
@@ -10,7 +10,8 @@ Responsabilidades:
 2.  Preprocesar los datos y crear secuencias para el LSTM.
 3.  Construir el modelo Keras con la arquitectura especificada.
 4.  Entrenar el modelo.
-5.  Guardar el modelo entrenado y el scaler en la ruta GCS de salida especificada.
+5.  Guardar el modelo entrenado y sus artefactos en la ruta GCS de salida especificada.
+6.  Limpiar las versiones antiguas de los modelos para mantener solo el más reciente.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ from tensorflow.keras import callbacks, layers, models, optimizers
 from src.shared import constants, gcs_utils, indicators
 
 # --- Configuración (Sin Cambios) ---
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
 
 SEED = 42
@@ -44,7 +45,7 @@ np.random.seed(SEED)
 tf.random.set_seed(SEED)
 os.environ.setdefault("TF_DETERMINISTIC_OPS", "1")
 
-# --- Helpers de Modelo y Secuencias (Sin Cambios) ---
+# --- Helpers de Modelo y Secuencias (Lógica Original Intacta) ---
 def make_model(inp_shape, lr, dr, filt, units, heads):
     x = inp = layers.Input(shape=inp_shape, dtype=tf.float32)
     x = layers.Conv1D(filt, 3, padding="same", activation="relu")(x)
@@ -71,14 +72,14 @@ def run_lstm_training(
     timeframe: str,
     params_file: str,
     features_gcs_path: str,
-    output_gcs_dir: str,  # <-- AJUSTE: Recibe el directorio de salida final
+    output_gcs_dir: str,
+    cleanup: bool = True, # <-- AJUSTE: Recibe el flag de limpieza
 ):
     """
     Orquesta el proceso completo de entrenamiento del modelo LSTM.
     """
     logger.info(f"--- Iniciando entrenamiento LSTM para el par: {pair} ---")
 
-    # Verificar que estamos en un entorno con GPU
     gpus = tf.config.list_physical_devices("GPU")
     if not gpus:
         raise RuntimeError("GPU requerida y no detectada — abortando entrenamiento.")
@@ -87,7 +88,6 @@ def run_lstm_training(
     tf.keras.mixed_precision.set_global_policy("mixed_float16")
     logger.info(f"🚀 {len(gpus)} GPU(s) detectadas y configuradas.")
 
-    # Cargar datos y parámetros
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
         
@@ -98,7 +98,6 @@ def run_lstm_training(
         with open(local_params_path) as f:
             p = json.load(f)
 
-        # Preprocesamiento de datos
         df_ind = indicators.build_indicators(df_full.copy(), p, atr_len=14)
         
         tick = 0.01 if pair.endswith("JPY") else 0.0001
@@ -133,7 +132,6 @@ def run_lstm_training(
             X_seq, y_up_seq, y_dn_seq, test_size=0.2, shuffle=False
         )
 
-        # Construir y entrenar el modelo
         model = make_model(X_train.shape[1:], p["lr"], p["dr"], p["filt"], p["units"], p["heads"])
         
         model.fit(
@@ -145,31 +143,35 @@ def run_lstm_training(
             callbacks=[callbacks.EarlyStopping(patience=5, restore_best_weights=True)]
         )
         
-        # Guardar artefactos
         logger.info(f"Guardando artefactos del modelo en: {output_gcs_dir}")
         
-        # Guardar modelo Keras
         model_uri = f"{output_gcs_dir}/model.keras"
         model.save(model_uri)
-        gcs_utils.verify_gcs_file_exists(model_uri) # Verificación
+        gcs_utils.verify_gcs_file_exists(model_uri)
         
-        # Guardar scaler
         scaler_uri = f"{output_gcs_dir}/scaler.pkl"
         with tempfile.NamedTemporaryFile() as tmp_scaler:
             joblib.dump(scaler, tmp_scaler.name)
             gcs_utils.upload_gcs_file(Path(tmp_scaler.name), scaler_uri)
-        gcs_utils.verify_gcs_file_exists(scaler_uri) # Verificación
+        gcs_utils.verify_gcs_file_exists(scaler_uri)
 
-        # Guardar los parámetros usados
         params_uri = f"{output_gcs_dir}/params.json"
         with tempfile.NamedTemporaryFile(mode='w', suffix=".json", delete=False) as tmp_params:
             json.dump(p, tmp_params, indent=2)
             tmp_params_path = tmp_params.name
         gcs_utils.upload_gcs_file(Path(tmp_params_path), params_uri)
-        gcs_utils.verify_gcs_file_exists(params_uri) # Verificación
+        gcs_utils.verify_gcs_file_exists(params_uri)
         os.remove(tmp_params_path)
 
         logger.info(f"✅ Entrenamiento y guardado para {pair} completado con éxito.")
+
+        # --- AJUSTE AÑADIDO: LÓGICA DE LIMPIEZA ---
+        if cleanup:
+            # La ruta base para la limpieza es el directorio padre que contiene los directorios de timestamp
+            base_cleanup_path = str(Path(output_gcs_dir).parent)
+            logger.info(f"Iniciando limpieza de versiones antiguas de modelos en: {base_cleanup_path}")
+            gcs_utils.keep_only_latest_version(base_cleanup_path)
+        # --- FIN DEL AJUSTE ---
 
 
 # --- Punto de Entrada para Ejecución como Script (Ajustado) ---
@@ -180,7 +182,8 @@ if __name__ == "__main__":
     parser.add_argument("--timeframe", required=True)
     parser.add_argument("--params-file", required=True)
     parser.add_argument("--features-gcs-path", required=True)
-    parser.add_argument("--output-gcs-dir", required=True) # <-- AJUSTE: Recibe el dir final
+    parser.add_argument("--output-gcs-dir", required=True)
+    parser.add_argument("--cleanup", type=lambda x: (str(x).lower() == 'true'), default=True) # <-- AJUSTE
     
     args = parser.parse_args()
     
@@ -190,4 +193,5 @@ if __name__ == "__main__":
         params_file=args.params_file,
         features_gcs_path=args.features_gcs_path,
         output_gcs_dir=args.output_gcs_dir,
+        cleanup=args.cleanup, # <-- AJUSTE
     )
