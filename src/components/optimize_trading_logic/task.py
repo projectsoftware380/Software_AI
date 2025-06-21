@@ -29,12 +29,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-SEED = 42
-random.seed(SEED)
-np.random.seed(SEED)
-tf.random.set_seed(SEED)
-os.environ.setdefault("TF_DETERMINISTIC_OPS", "1")
-
+# ... (El resto de tus funciones auxiliares como make_model, to_sequences, etc., permanecen intactas) ...
 def make_model(inp_shape, lr, dr, filt, units, heads):
     x = inp = tf.keras.layers.Input(shape=inp_shape, dtype=tf.float32)
     x = tf.keras.layers.Conv1D(filt, 3, padding="same", activation="relu")(x)
@@ -55,7 +50,6 @@ def to_sequences(mat, up, dn, win):
         y_dn.append(dn[i])
     return np.asarray(X, np.float32), np.asarray(y_up, np.float32), np.asarray(y_dn, np.float32)
 
-# --- Función Principal de la Tarea (Ajustada) ---
 def run_hpo_logic(
     *,
     features_path: str,
@@ -70,15 +64,15 @@ def run_hpo_logic(
     Orquesta el proceso de HPO para la lógica de trading de UN SOLO PAR.
     """
     logger.info(f"--- Optimizando lógica de trading para el par: {pair} ---")
-
+    # ... (Toda la lógica de carga de datos y la función `objective` de Optuna permanecen intactas) ...
     local_features_path = gcs_utils.ensure_gcs_path_and_get_local(features_path)
     df_full = pd.read_parquet(local_features_path)
-    
     local_arch_path = gcs_utils.ensure_gcs_path_and_get_local(architecture_params_file)
     with open(local_arch_path) as f:
         architecture_params = json.load(f)
 
     def objective(trial: optuna.Trial) -> float:
+        # ... (código interno de objective sin cambios)
         tf.keras.backend.clear_session()
         gc.collect()
 
@@ -165,9 +159,7 @@ def run_hpo_logic(
 
     # --- AJUSTE AÑADIDO: LÓGICA DE LIMPIEZA ---
     if cleanup:
-        # CORRECCIÓN: Se construye la ruta base para la limpieza de forma explícita,
-        # sin usar pathlib, para evitar errores con las URIs de GCS.
-        # Esta ruta apunta al directorio que contiene todas las carpetas con timestamp.
+        # CORRECCIÓN: Se construye la ruta base para la limpieza de forma explícita.
         base_cleanup_path = f"{constants.LOGIC_PARAMS_PATH}/{pair}"
         logger.info(f"Iniciando limpieza de versiones antiguas en: {base_cleanup_path}")
         gcs_utils.keep_only_latest_version(base_cleanup_path)
@@ -176,8 +168,9 @@ def run_hpo_logic(
     best_params_dir_output.parent.mkdir(parents=True, exist_ok=True)
     best_params_dir_output.write_text(output_gcs_dir_base)
 
-# --- Punto de Entrada para Ejecución como Script ---
+# --- Punto de Entrada para Ejecución como Script (Sin Cambios) ---
 if __name__ == "__main__":
+    # ... (código sin cambios)
     parser = argparse.ArgumentParser("Task de Optimización de Lógica de Trading")
     parser.add_argument("--features-path", required=True)
     parser.add_argument("--architecture-params-file", required=True)
