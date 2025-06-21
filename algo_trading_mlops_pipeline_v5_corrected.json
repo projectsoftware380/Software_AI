@@ -3,6 +3,42 @@
     "comp-for-loop-2": {
       "dag": {
         "tasks": {
+          "ingest-market-data-for-all-pairs": {
+            "cachingOptions": {
+              "enableCache": true
+            },
+            "componentRef": {
+              "name": "comp-ingest-market-data-for-all-pairs"
+            },
+            "inputs": {
+              "parameters": {
+                "end_date": {
+                  "runtimeValue": {
+                    "constant": "2025-06-21"
+                  }
+                },
+                "pair": {
+                  "componentInputParameter": "pipelinechannel--loop-item-param-1"
+                },
+                "polygon_secret_name": {
+                  "runtimeValue": {
+                    "constant": "polygon-api-key"
+                  }
+                },
+                "project_id": {
+                  "runtimeValue": {
+                    "constant": "trading-ai-460823"
+                  }
+                },
+                "timeframe": {
+                  "componentInputParameter": "pipelinechannel--timeframe"
+                }
+              }
+            },
+            "taskInfo": {
+              "name": "ingest-market-data-for-all-pairs"
+            }
+          },
           "launch-vertex-ai-lstm-training-job": {
             "cachingOptions": {
               "enableCache": true
@@ -11,12 +47,16 @@
               "name": "comp-launch-vertex-ai-lstm-training-job"
             },
             "dependentTasks": [
-              "optimize-trading-logic"
+              "optimize-trading-logic",
+              "prepare-training-and-holdout-data"
             ],
             "inputs": {
               "parameters": {
                 "features_gcs_path": {
-                  "componentInputParameter": "pipelinechannel--prepare-training-and-holdout-data-prepared_data_path"
+                  "taskOutputParameter": {
+                    "outputParameterKey": "prepared_data_path",
+                    "producerTask": "prepare-training-and-holdout-data"
+                  }
                 },
                 "output_gcs_base_dir": {
                   "runtimeValue": {
@@ -75,7 +115,7 @@
                 },
                 "vertex_training_image_uri": {
                   "runtimeValue": {
-                    "constant": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250621-014459"
+                    "constant": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250621-114859"
                   }
                 }
               }
@@ -84,24 +124,129 @@
               "name": "launch-vertex-ai-lstm-training-job"
             }
           },
-          "model-promotion-gate": {
+          "optimize-lstm-model-architecture": {
             "cachingOptions": {
               "enableCache": true
             },
             "componentRef": {
-              "name": "comp-model-promotion-gate"
+              "name": "comp-optimize-lstm-model-architecture"
+            },
+            "dependentTasks": [
+              "prepare-training-and-holdout-data"
+            ],
+            "inputs": {
+              "parameters": {
+                "features_path": {
+                  "taskOutputParameter": {
+                    "outputParameterKey": "prepared_data_path",
+                    "producerTask": "prepare-training-and-holdout-data"
+                  }
+                },
+                "n_trials": {
+                  "componentInputParameter": "pipelinechannel--n_trials_arch"
+                },
+                "pair": {
+                  "componentInputParameter": "pipelinechannel--loop-item-param-1"
+                }
+              }
+            },
+            "taskInfo": {
+              "name": "optimize-lstm-model-architecture"
+            }
+          },
+          "optimize-trading-logic": {
+            "cachingOptions": {
+              "enableCache": true
+            },
+            "componentRef": {
+              "name": "comp-optimize-trading-logic"
+            },
+            "dependentTasks": [
+              "optimize-lstm-model-architecture",
+              "prepare-training-and-holdout-data"
+            ],
+            "inputs": {
+              "parameters": {
+                "architecture_params_file": {
+                  "runtimeValue": {
+                    "constant": "{{$.inputs.parameters['pipelinechannel--optimize-lstm-model-architecture-best_architecture_dir']}}/{{$.inputs.parameters['pipelinechannel--loop-item-param-1']}}/best_architecture.json"
+                  }
+                },
+                "features_path": {
+                  "taskOutputParameter": {
+                    "outputParameterKey": "prepared_data_path",
+                    "producerTask": "prepare-training-and-holdout-data"
+                  }
+                },
+                "n_trials": {
+                  "componentInputParameter": "pipelinechannel--n_trials_logic"
+                },
+                "pair": {
+                  "componentInputParameter": "pipelinechannel--loop-item-param-1"
+                },
+                "pipelinechannel--loop-item-param-1": {
+                  "componentInputParameter": "pipelinechannel--loop-item-param-1"
+                },
+                "pipelinechannel--optimize-lstm-model-architecture-best_architecture_dir": {
+                  "taskOutputParameter": {
+                    "outputParameterKey": "best_architecture_dir",
+                    "producerTask": "optimize-lstm-model-architecture"
+                  }
+                }
+              }
+            },
+            "taskInfo": {
+              "name": "optimize-trading-logic"
+            }
+          },
+          "prepare-training-and-holdout-data": {
+            "cachingOptions": {
+              "enableCache": true
+            },
+            "componentRef": {
+              "name": "comp-prepare-training-and-holdout-data"
+            },
+            "dependentTasks": [
+              "ingest-market-data-for-all-pairs"
+            ],
+            "inputs": {
+              "parameters": {
+                "holdout_months": {
+                  "componentInputParameter": "pipelinechannel--holdout_months"
+                },
+                "pair": {
+                  "componentInputParameter": "pipelinechannel--loop-item-param-1"
+                },
+                "timeframe": {
+                  "componentInputParameter": "pipelinechannel--timeframe"
+                },
+                "years_to_keep": {
+                  "componentInputParameter": "pipelinechannel--backtest_years_to_keep"
+                }
+              }
+            },
+            "taskInfo": {
+              "name": "prepare-training-and-holdout-data"
+            }
+          },
+          "promote-model-to-production": {
+            "cachingOptions": {
+              "enableCache": true
+            },
+            "componentRef": {
+              "name": "comp-promote-model-to-production"
             },
             "dependentTasks": [
               "launch-vertex-ai-lstm-training-job",
-              "perform-final-backtest",
-              "train-filter-model"
+              "run-final-backtest",
+              "train-supervised-filter-model"
             ],
             "inputs": {
               "parameters": {
                 "new_filter_model_path": {
                   "taskOutputParameter": {
                     "outputParameterKey": "trained_filter_model_path",
-                    "producerTask": "train-filter-model"
+                    "producerTask": "train-supervised-filter-model"
                   }
                 },
                 "new_lstm_artifacts_dir": {
@@ -113,7 +258,7 @@
                 "new_metrics_dir": {
                   "taskOutputParameter": {
                     "outputParameterKey": "output_gcs_dir",
-                    "producerTask": "perform-final-backtest"
+                    "producerTask": "run-final-backtest"
                   }
                 },
                 "pair": {
@@ -130,61 +275,33 @@
               }
             },
             "taskInfo": {
-              "name": "model-promotion-gate"
+              "name": "promote-model-to-production"
             }
           },
-          "optimize-trading-logic": {
+          "run-final-backtest": {
             "cachingOptions": {
               "enableCache": true
             },
             "componentRef": {
-              "name": "comp-optimize-trading-logic"
-            },
-            "inputs": {
-              "parameters": {
-                "architecture_params_file": {
-                  "runtimeValue": {
-                    "constant": "{{$.inputs.parameters['pipelinechannel--optimize-model-architecture-best_architecture_dir']}}/{{$.inputs.parameters['pipelinechannel--loop-item-param-1']}}/best_architecture.json"
-                  }
-                },
-                "features_path": {
-                  "componentInputParameter": "pipelinechannel--prepare-training-and-holdout-data-prepared_data_path"
-                },
-                "n_trials": {
-                  "componentInputParameter": "pipelinechannel--n_trials_logic"
-                },
-                "pipelinechannel--loop-item-param-1": {
-                  "componentInputParameter": "pipelinechannel--loop-item-param-1"
-                },
-                "pipelinechannel--optimize-model-architecture-best_architecture_dir": {
-                  "componentInputParameter": "pipelinechannel--optimize-model-architecture-best_architecture_dir"
-                }
-              }
-            },
-            "taskInfo": {
-              "name": "optimize-trading-logic"
-            }
-          },
-          "perform-final-backtest": {
-            "cachingOptions": {
-              "enableCache": true
-            },
-            "componentRef": {
-              "name": "comp-perform-final-backtest"
+              "name": "comp-run-final-backtest"
             },
             "dependentTasks": [
               "launch-vertex-ai-lstm-training-job",
-              "train-filter-model"
+              "prepare-training-and-holdout-data",
+              "train-supervised-filter-model"
             ],
             "inputs": {
               "parameters": {
                 "features_path": {
-                  "componentInputParameter": "pipelinechannel--prepare-training-and-holdout-data-holdout_data_path"
+                  "taskOutputParameter": {
+                    "outputParameterKey": "holdout_data_path",
+                    "producerTask": "prepare-training-and-holdout-data"
+                  }
                 },
                 "filter_model_path": {
                   "taskOutputParameter": {
                     "outputParameterKey": "trained_filter_model_path",
-                    "producerTask": "train-filter-model"
+                    "producerTask": "train-supervised-filter-model"
                   }
                 },
                 "lstm_model_dir": {
@@ -202,23 +319,27 @@
               }
             },
             "taskInfo": {
-              "name": "perform-final-backtest"
+              "name": "run-final-backtest"
             }
           },
-          "train-filter-model": {
+          "train-supervised-filter-model": {
             "cachingOptions": {
               "enableCache": true
             },
             "componentRef": {
-              "name": "comp-train-filter-model"
+              "name": "comp-train-supervised-filter-model"
             },
             "dependentTasks": [
-              "launch-vertex-ai-lstm-training-job"
+              "launch-vertex-ai-lstm-training-job",
+              "prepare-training-and-holdout-data"
             ],
             "inputs": {
               "parameters": {
                 "features_path": {
-                  "componentInputParameter": "pipelinechannel--prepare-training-and-holdout-data-prepared_data_path"
+                  "taskOutputParameter": {
+                    "outputParameterKey": "prepared_data_path",
+                    "producerTask": "prepare-training-and-holdout-data"
+                  }
                 },
                 "lstm_model_dir": {
                   "taskOutputParameter": {
@@ -240,27 +361,27 @@
               }
             },
             "taskInfo": {
-              "name": "train-filter-model"
+              "name": "train-supervised-filter-model"
             }
           }
         }
       },
       "inputDefinitions": {
         "parameters": {
+          "pipelinechannel--backtest_years_to_keep": {
+            "parameterType": "NUMBER_INTEGER"
+          },
+          "pipelinechannel--holdout_months": {
+            "parameterType": "NUMBER_INTEGER"
+          },
           "pipelinechannel--loop-item-param-1": {
             "parameterType": "STRING"
           },
-          "pipelinechannel--n_trials_logic": {
+          "pipelinechannel--n_trials_arch": {
             "parameterType": "NUMBER_INTEGER"
           },
-          "pipelinechannel--optimize-model-architecture-best_architecture_dir": {
-            "parameterType": "STRING"
-          },
-          "pipelinechannel--prepare-training-and-holdout-data-holdout_data_path": {
-            "parameterType": "STRING"
-          },
-          "pipelinechannel--prepare-training-and-holdout-data-prepared_data_path": {
-            "parameterType": "STRING"
+          "pipelinechannel--n_trials_logic": {
+            "parameterType": "NUMBER_INTEGER"
           },
           "pipelinechannel--timeframe": {
             "parameterType": "STRING"
@@ -273,14 +394,10 @@
       "inputDefinitions": {
         "parameters": {
           "end_date": {
-            "defaultValue": "2100-01-01",
-            "isOptional": true,
             "parameterType": "STRING"
           },
-          "min_rows": {
-            "defaultValue": 100000.0,
-            "isOptional": true,
-            "parameterType": "NUMBER_INTEGER"
+          "pair": {
+            "parameterType": "STRING"
           },
           "polygon_secret_name": {
             "parameterType": "STRING"
@@ -288,19 +405,7 @@
           "project_id": {
             "parameterType": "STRING"
           },
-          "start_date": {
-            "defaultValue": "2010-01-01",
-            "isOptional": true,
-            "parameterType": "STRING"
-          },
           "timeframe": {
-            "parameterType": "STRING"
-          }
-        }
-      },
-      "outputDefinitions": {
-        "parameters": {
-          "completion_message": {
             "parameterType": "STRING"
           }
         }
@@ -356,49 +461,18 @@
         }
       }
     },
-    "comp-model-promotion-gate": {
-      "executorLabel": "exec-model-promotion-gate",
-      "inputDefinitions": {
-        "parameters": {
-          "new_filter_model_path": {
-            "parameterType": "STRING"
-          },
-          "new_lstm_artifacts_dir": {
-            "parameterType": "STRING"
-          },
-          "new_metrics_dir": {
-            "parameterType": "STRING"
-          },
-          "pair": {
-            "parameterType": "STRING"
-          },
-          "production_base_dir": {
-            "parameterType": "STRING"
-          },
-          "timeframe": {
-            "parameterType": "STRING"
-          }
-        }
-      },
-      "outputDefinitions": {
-        "parameters": {
-          "model_promoted": {
-            "parameterType": "STRING"
-          }
-        }
-      }
-    },
-    "comp-optimize-model-architecture": {
-      "executorLabel": "exec-optimize-model-architecture",
+    "comp-optimize-lstm-model-architecture": {
+      "executorLabel": "exec-optimize-lstm-model-architecture",
       "inputDefinitions": {
         "parameters": {
           "features_path": {
             "parameterType": "STRING"
           },
           "n_trials": {
-            "defaultValue": 20.0,
-            "isOptional": true,
             "parameterType": "NUMBER_INTEGER"
+          },
+          "pair": {
+            "parameterType": "STRING"
           }
         }
       },
@@ -421,55 +495,16 @@
             "parameterType": "STRING"
           },
           "n_trials": {
-            "defaultValue": 25.0,
-            "isOptional": true,
             "parameterType": "NUMBER_INTEGER"
-          }
-        }
-      },
-      "outputDefinitions": {
-        "artifacts": {
-          "optimization_metrics": {
-            "artifactType": {
-              "schemaTitle": "system.Metrics",
-              "schemaVersion": "0.0.1"
-            }
-          }
-        },
-        "parameters": {
-          "best_params_dir": {
-            "parameterType": "STRING"
-          }
-        }
-      }
-    },
-    "comp-perform-final-backtest": {
-      "executorLabel": "exec-perform-final-backtest",
-      "inputDefinitions": {
-        "parameters": {
-          "features_path": {
-            "parameterType": "STRING"
-          },
-          "filter_model_path": {
-            "parameterType": "STRING"
-          },
-          "lstm_model_dir": {
-            "parameterType": "STRING"
           },
           "pair": {
             "parameterType": "STRING"
-          },
-          "timeframe": {
-            "parameterType": "STRING"
           }
         }
       },
       "outputDefinitions": {
         "parameters": {
-          "kfp_metrics_artifact": {
-            "parameterType": "STRING"
-          },
-          "output_gcs_dir": {
+          "best_params_dir": {
             "parameterType": "STRING"
           }
         }
@@ -513,8 +548,70 @@
         }
       }
     },
-    "comp-train-filter-model": {
-      "executorLabel": "exec-train-filter-model",
+    "comp-promote-model-to-production": {
+      "executorLabel": "exec-promote-model-to-production",
+      "inputDefinitions": {
+        "parameters": {
+          "new_filter_model_path": {
+            "parameterType": "STRING"
+          },
+          "new_lstm_artifacts_dir": {
+            "parameterType": "STRING"
+          },
+          "new_metrics_dir": {
+            "parameterType": "STRING"
+          },
+          "pair": {
+            "parameterType": "STRING"
+          },
+          "production_base_dir": {
+            "parameterType": "STRING"
+          },
+          "timeframe": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    },
+    "comp-run-final-backtest": {
+      "executorLabel": "exec-run-final-backtest",
+      "inputDefinitions": {
+        "parameters": {
+          "features_path": {
+            "parameterType": "STRING"
+          },
+          "filter_model_path": {
+            "parameterType": "STRING"
+          },
+          "lstm_model_dir": {
+            "parameterType": "STRING"
+          },
+          "pair": {
+            "parameterType": "STRING"
+          },
+          "timeframe": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "artifacts": {
+          "kfp_metrics_artifact": {
+            "artifactType": {
+              "schemaTitle": "system.Metrics",
+              "schemaVersion": "0.0.1"
+            }
+          }
+        },
+        "parameters": {
+          "output_gcs_dir": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    },
+    "comp-train-supervised-filter-model": {
+      "executorLabel": "exec-train-supervised-filter-model",
       "inputDefinitions": {
         "parameters": {
           "features_path": {
@@ -548,28 +645,22 @@
     "executors": {
       "exec-ingest-market-data-for-all-pairs": {
         "container": {
-          "args": [
-            "--project-id",
-            "{{$.inputs.parameters['project_id']}}",
-            "--timeframe",
-            "{{$.inputs.parameters['timeframe']}}",
-            "--polygon-secret-name",
-            "{{$.inputs.parameters['polygon_secret_name']}}",
-            "--start-date",
-            "{{$.inputs.parameters['start_date']}}",
-            "--end-date",
-            "{{$.inputs.parameters['end_date']}}",
-            "--min-rows",
-            "{{$.inputs.parameters['min_rows']}}",
-            "--completion-message-path",
-            "{{$.outputs.parameters['completion_message'].output_file}}"
-          ],
           "command": [
             "python",
             "-m",
-            "src.components.data_ingestion.task"
+            "src.components.data_ingestion.task",
+            "--project-id",
+            "{{$.inputs.parameters['project_id']}}",
+            "--polygon-secret-name",
+            "{{$.inputs.parameters['polygon_secret_name']}}",
+            "--end-date",
+            "{{$.inputs.parameters['end_date']}}",
+            "--timeframe",
+            "{{$.inputs.parameters['timeframe']}}",
+            "--pair",
+            "{{$.inputs.parameters['pair']}}"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250621-014459",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250621-114859",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -582,7 +673,10 @@
       },
       "exec-launch-vertex-ai-lstm-training-job": {
         "container": {
-          "args": [
+          "command": [
+            "python",
+            "-m",
+            "src.components.train_lstm_launcher.task",
             "--project-id",
             "{{$.inputs.parameters['project_id']}}",
             "--region",
@@ -610,12 +704,7 @@
             "--trained-lstm-dir-path-output",
             "{{$.outputs.parameters['trained_lstm_dir_path'].output_file}}"
           ],
-          "command": [
-            "python",
-            "-m",
-            "src.components.train_lstm_launcher.task"
-          ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250621-014459",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250621-114859",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -626,133 +715,57 @@
           }
         }
       },
-      "exec-model-promotion-gate": {
+      "exec-optimize-lstm-model-architecture": {
         "container": {
-          "args": [
-            "--new-metrics-dir",
-            "{{$.inputs.parameters['new_metrics_dir']}}",
-            "--new-lstm-artifacts-dir",
-            "{{$.inputs.parameters['new_lstm_artifacts_dir']}}",
-            "--new-filter-model-path",
-            "{{$.inputs.parameters['new_filter_model_path']}}",
-            "--pair",
-            "{{$.inputs.parameters['pair']}}",
-            "--timeframe",
-            "{{$.inputs.parameters['timeframe']}}",
-            "--production-base-dir",
-            "{{$.inputs.parameters['production_base_dir']}}"
-          ],
           "command": [
             "python",
             "-m",
-            "src.components.model_promotion.task"
-          ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250621-014459",
-          "resources": {
-            "accelerator": {
-              "count": "1",
-              "resourceCount": "1",
-              "resourceType": "NVIDIA_TESLA_T4",
-              "type": "NVIDIA_TESLA_T4"
-            }
-          }
-        }
-      },
-      "exec-optimize-model-architecture": {
-        "container": {
-          "args": [
+            "src.components.optimize_model_architecture.task",
             "--features-path",
             "{{$.inputs.parameters['features_path']}}",
             "--n-trials",
             "{{$.inputs.parameters['n_trials']}}",
+            "--pair",
+            "{{$.inputs.parameters['pair']}}",
             "--best-architecture-dir-output",
             "{{$.outputs.parameters['best_architecture_dir'].output_file}}"
           ],
-          "command": [
-            "python",
-            "-m",
-            "src.components.optimize_model_architecture.task"
-          ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250621-014459",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250621-114859",
           "resources": {
             "accelerator": {
               "count": "1",
               "resourceCount": "1",
               "resourceType": "NVIDIA_TESLA_T4",
               "type": "NVIDIA_TESLA_T4"
-            },
-            "cpuLimit": 8.0,
-            "memoryLimit": 30.0,
-            "resourceCpuLimit": "8",
-            "resourceMemoryLimit": "30G"
+            }
           }
         }
       },
       "exec-optimize-trading-logic": {
         "container": {
-          "args": [
+          "command": [
+            "python",
+            "-m",
+            "src.components.optimize_trading_logic.task",
             "--features-path",
             "{{$.inputs.parameters['features_path']}}",
             "--architecture-params-file",
             "{{$.inputs.parameters['architecture_params_file']}}",
             "--n-trials",
             "{{$.inputs.parameters['n_trials']}}",
-            "--best-params-dir-output",
-            "{{$.outputs.parameters['best_params_dir'].output_file}}",
-            "--optimization-metrics-output",
-            "{{$.outputs.artifacts['optimization_metrics'].path}}"
-          ],
-          "command": [
-            "python",
-            "-m",
-            "src.components.optimize_trading_logic.task"
-          ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250621-014459",
-          "resources": {
-            "accelerator": {
-              "count": "1",
-              "resourceCount": "1",
-              "resourceType": "NVIDIA_TESLA_T4",
-              "type": "NVIDIA_TESLA_T4"
-            },
-            "cpuLimit": 8.0,
-            "memoryLimit": 30.0,
-            "resourceCpuLimit": "8",
-            "resourceMemoryLimit": "30G"
-          }
-        }
-      },
-      "exec-perform-final-backtest": {
-        "container": {
-          "args": [
-            "--lstm-model-dir",
-            "{{$.inputs.parameters['lstm_model_dir']}}",
-            "--filter-model-path",
-            "{{$.inputs.parameters['filter_model_path']}}",
-            "--features-path",
-            "{{$.inputs.parameters['features_path']}}",
             "--pair",
             "{{$.inputs.parameters['pair']}}",
-            "--timeframe",
-            "{{$.inputs.parameters['timeframe']}}"
+            "--best-params-dir-output",
+            "{{$.outputs.parameters['best_params_dir'].output_file}}"
           ],
-          "command": [
-            "python",
-            "-m",
-            "src.components.backtest.task"
-          ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250621-014459",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250621-114859",
           "resources": {
             "accelerator": {
               "count": "1",
               "resourceCount": "1",
               "resourceType": "NVIDIA_TESLA_T4",
               "type": "NVIDIA_TESLA_T4"
-            },
-            "cpuLimit": 8.0,
-            "memoryLimit": 30.0,
-            "resourceCpuLimit": "8",
-            "resourceMemoryLimit": "30G"
+            }
           }
         }
       },
@@ -779,7 +792,7 @@
             "-m",
             "src.components.data_preparation.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250621-014459",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250621-114859",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -790,9 +803,74 @@
           }
         }
       },
-      "exec-train-filter-model": {
+      "exec-promote-model-to-production": {
         "container": {
-          "args": [
+          "command": [
+            "python",
+            "-m",
+            "src.components.model_promotion.task",
+            "--new-metrics-dir",
+            "{{$.inputs.parameters['new_metrics_dir']}}",
+            "--new-lstm-artifacts-dir",
+            "{{$.inputs.parameters['new_lstm_artifacts_dir']}}",
+            "--new-filter-model-path",
+            "{{$.inputs.parameters['new_filter_model_path']}}",
+            "--pair",
+            "{{$.inputs.parameters['pair']}}",
+            "--timeframe",
+            "{{$.inputs.parameters['timeframe']}}",
+            "--production-base-dir",
+            "{{$.inputs.parameters['production_base_dir']}}"
+          ],
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250621-114859",
+          "resources": {
+            "accelerator": {
+              "count": "1",
+              "resourceCount": "1",
+              "resourceType": "NVIDIA_TESLA_T4",
+              "type": "NVIDIA_TESLA_T4"
+            }
+          }
+        }
+      },
+      "exec-run-final-backtest": {
+        "container": {
+          "command": [
+            "python",
+            "-m",
+            "src.components.backtest.task",
+            "--lstm-model-dir",
+            "{{$.inputs.parameters['lstm_model_dir']}}",
+            "--filter-model-path",
+            "{{$.inputs.parameters['filter_model_path']}}",
+            "--features-path",
+            "{{$.inputs.parameters['features_path']}}",
+            "--pair",
+            "{{$.inputs.parameters['pair']}}",
+            "--timeframe",
+            "{{$.inputs.parameters['timeframe']}}",
+            "--output-gcs-dir-output",
+            "{{$.outputs.parameters['output_gcs_dir'].output_file}}",
+            "--kfp-metrics-artifact-output",
+            "{{$.outputs.artifacts['kfp_metrics_artifact'].path}}"
+          ],
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250621-114859",
+          "resources": {
+            "accelerator": {
+              "count": "1",
+              "resourceCount": "1",
+              "resourceType": "NVIDIA_TESLA_T4",
+              "type": "NVIDIA_TESLA_T4"
+            }
+          }
+        }
+      },
+      "exec-train-supervised-filter-model": {
+        "container": {
+          "command": [
+            "python",
+            "-m",
+            "src.components.train_filter_model.task",
             "--lstm-model-dir",
             "{{$.inputs.parameters['lstm_model_dir']}}",
             "--features-path",
@@ -806,12 +884,7 @@
             "--trained-filter-model-path-output",
             "{{$.outputs.parameters['trained_filter_model_path'].output_file}}"
           ],
-          "command": [
-            "python",
-            "-m",
-            "src.components.train_filter_model.task"
-          ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250621-014459",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250621-114859",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -835,32 +908,19 @@
           "componentRef": {
             "name": "comp-for-loop-2"
           },
-          "dependentTasks": [
-            "optimize-model-architecture",
-            "prepare-training-and-holdout-data"
-          ],
           "inputs": {
             "parameters": {
+              "pipelinechannel--backtest_years_to_keep": {
+                "componentInputParameter": "backtest_years_to_keep"
+              },
+              "pipelinechannel--holdout_months": {
+                "componentInputParameter": "holdout_months"
+              },
+              "pipelinechannel--n_trials_arch": {
+                "componentInputParameter": "n_trials_arch"
+              },
               "pipelinechannel--n_trials_logic": {
                 "componentInputParameter": "n_trials_logic"
-              },
-              "pipelinechannel--optimize-model-architecture-best_architecture_dir": {
-                "taskOutputParameter": {
-                  "outputParameterKey": "best_architecture_dir",
-                  "producerTask": "optimize-model-architecture"
-                }
-              },
-              "pipelinechannel--prepare-training-and-holdout-data-holdout_data_path": {
-                "taskOutputParameter": {
-                  "outputParameterKey": "holdout_data_path",
-                  "producerTask": "prepare-training-and-holdout-data"
-                }
-              },
-              "pipelinechannel--prepare-training-and-holdout-data-prepared_data_path": {
-                "taskOutputParameter": {
-                  "outputParameterKey": "prepared_data_path",
-                  "producerTask": "prepare-training-and-holdout-data"
-                }
               },
               "pipelinechannel--timeframe": {
                 "componentInputParameter": "timeframe"
@@ -874,99 +934,7 @@
             }
           },
           "taskInfo": {
-            "name": "parallel-training-for-each-pair"
-          }
-        },
-        "ingest-market-data-for-all-pairs": {
-          "cachingOptions": {
-            "enableCache": true
-          },
-          "componentRef": {
-            "name": "comp-ingest-market-data-for-all-pairs"
-          },
-          "inputs": {
-            "parameters": {
-              "end_date": {
-                "runtimeValue": {
-                  "constant": "2025-06-21"
-                }
-              },
-              "polygon_secret_name": {
-                "runtimeValue": {
-                  "constant": "polygon-api-key"
-                }
-              },
-              "project_id": {
-                "runtimeValue": {
-                  "constant": "trading-ai-460823"
-                }
-              },
-              "timeframe": {
-                "componentInputParameter": "timeframe"
-              }
-            }
-          },
-          "taskInfo": {
-            "name": "ingest-market-data-for-all-pairs"
-          }
-        },
-        "optimize-model-architecture": {
-          "cachingOptions": {
-            "enableCache": true
-          },
-          "componentRef": {
-            "name": "comp-optimize-model-architecture"
-          },
-          "dependentTasks": [
-            "prepare-training-and-holdout-data"
-          ],
-          "inputs": {
-            "parameters": {
-              "features_path": {
-                "taskOutputParameter": {
-                  "outputParameterKey": "prepared_data_path",
-                  "producerTask": "prepare-training-and-holdout-data"
-                }
-              },
-              "n_trials": {
-                "componentInputParameter": "n_trials_arch"
-              }
-            }
-          },
-          "taskInfo": {
-            "name": "optimize-model-architecture"
-          }
-        },
-        "prepare-training-and-holdout-data": {
-          "cachingOptions": {
-            "enableCache": true
-          },
-          "componentRef": {
-            "name": "comp-prepare-training-and-holdout-data"
-          },
-          "dependentTasks": [
-            "ingest-market-data-for-all-pairs"
-          ],
-          "inputs": {
-            "parameters": {
-              "holdout_months": {
-                "componentInputParameter": "holdout_months"
-              },
-              "pair": {
-                "runtimeValue": {
-                  "constant": "ALL"
-                }
-              },
-              "timeframe": {
-                "componentInputParameter": "timeframe"
-              },
-              "years_to_keep": {
-                "componentInputParameter": "backtest_years_to_keep"
-              }
-            }
-          },
-          "taskInfo": {
-            "name": "prepare-training-and-holdout-data"
+            "name": "parallel-processing-for-each-pair"
           }
         }
       }

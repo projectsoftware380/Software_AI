@@ -7,7 +7,7 @@ Responsabilidades:
 2.  Cargar los datos de entrenamiento.
 3.  Generar predicciones con el modelo LSTM sobre los datos.
 4.  Usar estas predicciones como features para entrenar un clasificador LightGBM.
-5.  Guardar el modelo LightGBM en un directorio GCS versionado y limpiar versiones antiguas.
+5.  Guardar el modelo LightGBM entrenado en un directorio GCS versionado y limpiar versiones antiguas.
 """
 from __future__ import annotations
 
@@ -71,7 +71,7 @@ def run_filter_training(
     timeframe: str,
     output_gcs_base_dir: str,
     trained_filter_model_path_output: Path,
-    cleanup: bool = True, # <-- AJUSTE: Recibe el flag de limpieza
+    cleanup: bool = True,
 ):
     """
     Orquesta el proceso completo de entrenamiento del modelo de filtro.
@@ -159,7 +159,7 @@ if __name__ == "__main__":
     parser.add_argument("--pair", required=True)
     parser.add_argument("--timeframe", required=True)
     parser.add_argument("--output-gcs-base-dir", required=True)
-    parser.add_argument("--cleanup", type=lambda x: (str(x).lower() == 'true'), default=True) # <-- AJUSTE
+    parser.add_argument("--cleanup", type=lambda x: (str(x).lower() == 'true'), default=True)
     parser.add_argument("--trained-filter-model-path-output", type=Path, required=True)
     
     args = parser.parse_args()
@@ -171,5 +171,5 @@ if __name__ == "__main__":
         timeframe=args.timeframe,
         output_gcs_base_dir=args.output_gcs_base_dir,
         trained_filter_model_path_output=args.trained_filter_model_path_output,
-        cleanup=args.cleanup, # <-- AJUSTE
+        cleanup=args.cleanup,
     )

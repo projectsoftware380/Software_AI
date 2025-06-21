@@ -82,7 +82,7 @@ def run_backtest(
     timeframe: str,
     output_gcs_dir_output: Path,
     kfp_metrics_artifact_output: Path,
-    cleanup: bool = True, # <-- AJUSTE: Recibe el flag de limpieza
+    cleanup: bool = True,
 ):
     """
     Orquesta el proceso completo de backtesting para un par específico.
@@ -148,15 +148,22 @@ def run_backtest(
         metrics = calculate_metrics(returns, trades)
         logger.info(f"Métricas de backtest para {pair}: {metrics}")
         
-        # --- AJUSTE: Lógica de guardado en directorio versionado ---
         ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
         versioned_output_dir_str = f"{constants.BACKTEST_RESULTS_PATH}/{pair}/{timeframe}/{ts}"
         
         # Guardar resultados en GCS
-        trades.to_csv(f"{versioned_output_dir_str}/trades.csv", index=False)
-        with tempfile.NamedTemporaryFile(mode='w', suffix=".json", delete=False) as tmp_metrics:
-            json.dump(metrics, tmp_metrics, indent=4)
-            gcs_utils.upload_gcs_file(Path(tmp_metrics.name), f"{versioned_output_dir_str}/metrics.json")
+        with tempfile.TemporaryDirectory() as tmp_output_dir:
+            temp_dir = Path(tmp_output_dir)
+            
+            trades_path = temp_dir / "trades.csv"
+            metrics_path = temp_dir / "metrics.json"
+
+            trades.to_csv(trades_path, index=False)
+            with open(metrics_path, "w") as f:
+                json.dump(metrics, f, indent=4)
+            
+            gcs_utils.upload_gcs_file(trades_path, f"{versioned_output_dir_str}/trades.csv")
+            gcs_utils.upload_gcs_file(metrics_path, f"{versioned_output_dir_str}/metrics.json")
         
         # Escribir la ruta del directorio de salida para KFP
         output_gcs_dir_output.parent.mkdir(parents=True, exist_ok=True)
@@ -173,7 +180,8 @@ def run_backtest(
 
         # --- AJUSTE AÑADIDO: LÓGICA DE LIMPIEZA ---
         if cleanup:
-            base_cleanup_path = f"{constants.BACKTEST_RESULTS_PATH}/{pair}/{timeframe}/"
+            # CORRECCIÓN: Se construye la ruta base para la limpieza de forma explícita.
+            base_cleanup_path = f"{constants.BACKTEST_RESULTS_PATH}/{pair}/{timeframe}"
             logger.info(f"Iniciando limpieza de versiones antiguas de resultados de backtest en: {base_cleanup_path}")
             gcs_utils.keep_only_latest_version(base_cleanup_path)
         # --- FIN DEL AJUSTE ---

@@ -25,15 +25,28 @@ from tensorflow.keras import callbacks, layers, models, optimizers
 
 from src.shared import constants, gcs_utils, indicators
 
-# ... (Toda la configuración y funciones auxiliares permanecen sin cambios) ...
+# --- Configuración y Funciones Auxiliares (Sin Cambios) ---
 warnings.filterwarnings("ignore", category=FutureWarning)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 SEED = 42
-# ... (resto de la configuración de semillas)
+random.seed(SEED)
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
+os.environ.setdefault("TF_DETERMINISTIC_OPS", "1")
 
-# ... (definiciones de make_model, optuna_pruning_callback, to_sequences sin cambios)
+try:
+    gpus = tf.config.list_physical_devices("GPU")
+    if gpus:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        tf.keras.mixed_precision.set_global_policy("mixed_float16")
+    else:
+        raise RuntimeError("No se encontró ninguna GPU.")
+except Exception as exc:
+    logger.warning("⚠️ No se utilizará GPU (%s). Continuando con CPU.", exc)
+
 def make_model(inp_shape, lr, dr, filt, units, heads):
     x = inp = layers.Input(shape=inp_shape, dtype=tf.float32)
     x = layers.Conv1D(filt, 3, padding="same", activation="relu")(x)
@@ -59,7 +72,7 @@ def to_sequences(mat, up, dn, win):
         y_dn.append(dn[i])
     return np.asarray(X, np.float32), np.asarray(y_up, np.float32), np.asarray(y_dn, np.float32)
 
-
+# --- Función Principal de la Tarea (Ajustada) ---
 def run_architecture_optimization(
     *,
     features_path: str,
@@ -69,9 +82,11 @@ def run_architecture_optimization(
     best_architecture_dir_output: Path,
     cleanup: bool = True,
 ) -> None:
-    
-    # ... (toda la lógica de optimización y la función objective permanece intacta) ...
+    """
+    Orquesta el proceso completo de optimización de arquitectura para UN SOLO PAR.
+    """
     logger.info(f"--- Optimizando arquitectura para el par: {pair} con {n_trials} trials ---")
+
     local_features_path = gcs_utils.ensure_gcs_path_and_get_local(features_path)
     df_raw = pd.read_parquet(local_features_path)
     df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"], unit="ms", errors="coerce")
@@ -134,14 +149,10 @@ def run_architecture_optimization(
     )
     study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
 
-    # --- AJUSTE FINAL Y DEFINITIVO ---
-    # `study.best_params` devuelve un diccionario. Hacemos una copia para no modificar el original.
     best_architecture_params = study.best_params.copy()
-    # Ahora, añadimos la nueva clave al diccionario copiado. Esto es seguro y correcto.
     best_architecture_params["best_val_loss"] = study.best_value
-    # --- FIN DEL AJUSTE ---
 
-    pair_output_gcs_path = f"{output_gcs_dir_base}/{pair}/best_architecture.json"
+    pair_output_gcs_path = f"{output_gcs_dir_base}/best_architecture.json"
     
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_json = Path(tmpdir) / "best_architecture.json"
@@ -150,19 +161,22 @@ def run_architecture_optimization(
     
     logger.info(f"✅ Arquitectura para {pair} guardada. Mejor val_loss: {study.best_value:.4f}")
 
+    # --- AJUSTE AÑADIDO: LÓGICA DE LIMPIEZA ---
     if cleanup:
-        base_cleanup_path = str(Path(output_gcs_dir_base).parent)
+        # CORRECCIÓN: Se construye la ruta base para la limpieza de forma explícita.
+        base_cleanup_path = f"{constants.ARCHITECTURE_PARAMS_PATH}/{pair}"
         logger.info(f"Iniciando limpieza de versiones antiguas en: {base_cleanup_path}")
         gcs_utils.keep_only_latest_version(base_cleanup_path)
+    # --- FIN DEL AJUSTE ---
 
     best_architecture_dir_output.parent.mkdir(parents=True, exist_ok=True)
     best_architecture_dir_output.write_text(output_gcs_dir_base)
     logger.info("✍️  Ruta de salida %s escrita para KFP.", output_gcs_dir_base)
 
 
+# --- Punto de Entrada para Ejecución como Script ---
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Task de Optimización de Arquitectura de Modelo")
-    # ... (argumentos sin cambios)
     parser.add_argument("--features-path", required=True)
     parser.add_argument("--n-trials", type=int, default=20)
     parser.add_argument("--pair", required=True)

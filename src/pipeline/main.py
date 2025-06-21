@@ -17,11 +17,11 @@ from kfp.components import load_component_from_text
 from src.shared import constants
 
 # --- Configuración del CLI ---
-parser = argparse.ArgumentParser("Compila y/o envía la pipeline v5")
+parser = argparse.ArgumentParser("Compila y/o envía la pipeline v5 final con filtro supervisado")
 parser.add_argument(
     "--common-image-uri",
     required=True,
-    help="URI Docker – MISMA imagen para todos los componentes",
+    help="URI Docker – MISMA imagen para **todos** los componentes",
 )
 args, _ = parser.parse_known_args()
 
@@ -33,26 +33,32 @@ def load_utf8_component(rel_path: str):
     yaml_text = (COMPONENTS_DIR / rel_path).read_text(encoding="utf-8")
     return load_component_from_text(yaml_text)
 
+# Cargar todos los componentes necesarios para la v5
 component_op_factory = {
     "data_ingestion": load_utf8_component("data_ingestion/component.yaml"),
     "data_preparation": load_utf8_component("data_preparation/component.yaml"),
-    "optimize_model_architecture": load_utf8_component("optimize_model_architecture/component.yaml"),
-    "optimize_trading_logic": load_utf8_component("optimize_trading_logic/component.yaml"),
+    "optimize_model_architecture": load_utf8_component(
+        "optimize_model_architecture/component.yaml"
+    ),
+    "optimize_trading_logic": load_utf8_component(
+        "optimize_trading_logic/component.yaml"
+    ),
     "train_lstm_launcher": load_utf8_component("train_lstm_launcher/component.yaml"),
     "train_filter_model": load_utf8_component("train_filter_model/component.yaml"),
     "backtest": load_utf8_component("backtest/component.yaml"),
     "model_promotion": load_utf8_component("model_promotion/component.yaml"),
 }
 
+# Asignar la misma imagen Docker a todos los contenedores para simplificar
 for comp in component_op_factory.values():
-    if hasattr(comp.component_spec.implementation, "container"):
-        comp.component_spec.implementation.container.image = args.common_image_uri
-
+    impl = comp.component_spec.implementation
+    if hasattr(impl, "container") and impl.container:
+        impl.container.image = args.common_image_uri
 
 # --- Definición de la Pipeline Corregida ---
 @dsl.pipeline(
     name="algo-trading-mlops-pipeline-v5-robust-paths",
-    description="Versión final con estructura de bucle corregida.",
+    description="Versión final con gestión de rutas centralizada, versionada y robusta.",
     pipeline_root=constants.PIPELINE_ROOT,
 )
 def trading_pipeline_v5(
@@ -63,16 +69,13 @@ def trading_pipeline_v5(
     holdout_months: int = 3,
 ):
     """Pipeline de entrenamiento y despliegue para IA de trading Forex."""
-    
+
     pairs_to_process = list(constants.SPREADS_PIP.keys())
 
-    # AJUSTE ESTRUCTURAL: El bucle ahora engloba las tareas que dependen del par.
     with dsl.ParallelFor(
         items=pairs_to_process, name="parallel-processing-for-each-pair"
     ) as pair:
 
-        # 1 ▸ Ingestión de datos (AHORA DENTRO DEL BUCLE)
-        # Se ejecuta una vez por cada par, pasándole el par correcto.
         ingest_task = component_op_factory["data_ingestion"](
             project_id=constants.PROJECT_ID,
             polygon_secret_name=constants.POLYGON_API_KEY_SECRET_NAME,
@@ -82,8 +85,6 @@ def trading_pipeline_v5(
         )
         ingest_task.set_accelerator_type("NVIDIA_TESLA_T4").set_accelerator_limit(1)
 
-        # 2 ▸ Preparación de datos (AHORA DENTRO DEL BUCLE)
-        # Recibe el par del bucle y ahora sí buscará el archivo correcto.
         prepare_data_task = component_op_factory["data_preparation"](
             pair=pair,
             timeframe=timeframe,
@@ -92,8 +93,6 @@ def trading_pipeline_v5(
         ).after(ingest_task)
         prepare_data_task.set_accelerator_type("NVIDIA_TESLA_T4").set_accelerator_limit(1)
         
-        # 3 ▸ Optimizar arquitectura LSTM
-        # Usa los datos de entrenamiento específicos del par.
         optimize_arch_task = component_op_factory["optimize_model_architecture"](
             features_path=prepare_data_task.outputs["prepared_data_path"],
             n_trials=n_trials_arch,
@@ -106,10 +105,12 @@ def trading_pipeline_v5(
             features_path=prepare_data_task.outputs["prepared_data_path"],
             architecture_params_file=f"{optimize_arch_task.outputs['best_architecture_dir']}/{pair}/best_architecture.json",
             n_trials=n_trials_logic,
+            # --- AJUSTE FINAL Y DEFINITIVO ---
+            # Se añade el parámetro 'pair' que faltaba.
+            pair=pair
         )
         optimize_logic_task.set_accelerator_type("NVIDIA_TESLA_T4").set_accelerator_limit(1)
 
-        # 5 ▸ Entrenamiento LSTM
         train_lstm_task = component_op_factory["train_lstm_launcher"](
             project_id=constants.PROJECT_ID,
             region=constants.REGION,
@@ -126,7 +127,6 @@ def trading_pipeline_v5(
         )
         train_lstm_task.set_accelerator_type("NVIDIA_TESLA_T4").set_accelerator_limit(1)
 
-        # 6 ▸ Entrenamiento del modelo filtro
         train_filter_task = component_op_factory["train_filter_model"](
             lstm_model_dir=train_lstm_task.outputs["trained_lstm_dir_path"],
             features_path=prepare_data_task.outputs["prepared_data_path"],
@@ -136,7 +136,6 @@ def trading_pipeline_v5(
         )
         train_filter_task.set_accelerator_type("NVIDIA_TESLA_T4").set_accelerator_limit(1)
 
-        # 7 ▸ Backtest final
         backtest_task = component_op_factory["backtest"](
             lstm_model_dir=train_lstm_task.outputs["trained_lstm_dir_path"],
             filter_model_path=train_filter_task.outputs["trained_filter_model_path"],
@@ -146,7 +145,6 @@ def trading_pipeline_v5(
         )
         backtest_task.set_accelerator_type("NVIDIA_TESLA_T4").set_accelerator_limit(1)
 
-        # 8 ▸ Promoción a producción
         promotion_task = component_op_factory["model_promotion"](
             new_metrics_dir=backtest_task.outputs["output_gcs_dir"],
             new_lstm_artifacts_dir=train_lstm_task.outputs["trained_lstm_dir_path"],
@@ -159,11 +157,11 @@ def trading_pipeline_v5(
         promotion_task.set_accelerator_type("NVIDIA_TESLA_T4").set_accelerator_limit(1)
 
 
-# --- Bloque de Ejecución ---
+# --- Bloque de Ejecución (Sin Cambios) ---
 if __name__ == "__main__":
     PIPELINE_JSON = "algo_trading_mlops_pipeline_v5_corrected.json"
     Compiler().compile(trading_pipeline_v5, PIPELINE_JSON)
-    print(f"✅ Pipeline v5 (estructura corregida) compilada a {PIPELINE_JSON}")
+    print(f"✅ Pipeline v5 (estructura final) compilada a {PIPELINE_JSON}")
 
     if os.getenv("SUBMIT_PIPELINE_TO_VERTEX", "true").lower() == "true":
         aip.init(project=constants.PROJECT_ID, location=constants.REGION)
@@ -177,4 +175,4 @@ if __name__ == "__main__":
         job.run(service_account=constants.VERTEX_LSTM_SERVICE_ACCOUNT)
         print(f"🚀 Pipeline lanzada con Display Name: {display_name}")
     else:
-        print("⏭️ La pipeline no se envió a Vertex AI.")
+        print("⏭️ La pipeline no se envió a Vertex AI (SUBMIT_PIPELINE_TO_VERTEX está en 'false').")
