@@ -112,6 +112,7 @@ def run_architecture_optimization(
                 "units": trial.suggest_categorical("units", [32, 64, 128]),
                 "heads": trial.suggest_categorical("heads", [2, 4, 8]),
             }
+            # Se crea un diccionario completo con todos los parámetros necesarios
             p = {**trial_params, **constants.DUMMY_INDICATOR_PARAMS}
             
             logger.debug(f"Trial #{trial.number}: Probando parámetros {p}")
@@ -119,7 +120,7 @@ def run_architecture_optimization(
             # Esta llamada ahora recibe un diccionario 'p' completo y no fallará.
             df_ind = indicators.build_indicators(df_raw.copy(), p, atr_len=14)
             tick = 0.01 if pair.endswith("JPY") else 0.0001
-            horizon = p.get("horizon", 20)
+            horizon = p.get("win", 20) # Se usa 'win' como el horizonte
             closes = df_ind.close.values
             atr_vals = df_ind[f"atr_14"].values / tick
             future_prices = np.roll(closes, -horizon)
