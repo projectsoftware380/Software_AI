@@ -16,7 +16,7 @@ implementation:
   container:
     image: "gcr.io/your-project/your-image:latest" # Reemplazado por main.py
     command: [
-      python, -m, src.components.optimize_trading_logic.task,
+      python, -u, -m, src.components.optimize_trading_logic.task,
       --features-path, {inputValue: features_path},
       --architecture-params-file, {inputValue: architecture_params_file},
       --n-trials, {inputValue: n_trials},

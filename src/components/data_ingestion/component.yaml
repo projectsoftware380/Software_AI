@@ -19,7 +19,7 @@ implementation:
   container:
     image: "gcr.io/your-project/your-image:latest"  # Esta será reemplazada por el main.py
     command: [
-      python, -m, src.components.data_ingestion.task,
+      python, -u, -m, src.components.data_ingestion.task,
       --project-id,           {inputValue: project_id},
       --polygon-secret-name,  {inputValue: polygon_secret_name},
       --end-date,             {inputValue: end_date},

@@ -17,7 +17,7 @@ implementation:
   container:
     image: "gcr.io/your-project/your-image:latest" # Reemplazado por main.py
     command: [
-      python, -m, src.components.train_filter_model.task,
+      python, -u, -m, src.components.train_filter_model.task,
       --lstm-model-dir, {inputValue: lstm_model_dir},
       --features-path, {inputValue: features_path},
       # --- AJUSTE AÑADIDO ---

@@ -15,7 +15,7 @@ implementation:
   container:
     image: "gcr.io/your-project/your-image:latest" # Reemplazado por main.py
     command: [
-      python, -m, src.components.model_promotion.task,
+      python, -u, -m, src.components.model_promotion.task,
       --new-metrics-dir, {inputValue: new_metrics_dir},
       --new-lstm-artifacts-dir, {inputValue: new_lstm_artifacts_dir},
       --new-filter-model-path, {inputValue: new_filter_model_path},

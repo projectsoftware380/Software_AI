@@ -38,6 +38,7 @@ implementation:
     image: gcr.io/trading-ai-460823/trading-ai-gpu:v1
     command:
       - python
+      - -u
       - -m
       - src.components.data_preparation.task
     args:

@@ -25,7 +25,7 @@ implementation:
   container:
     image: "gcr.io/your-project/your-image:latest" # Reemplazado por main.py
     command: [
-      python, -m, src.components.train_lstm_launcher.task,
+      python, -u, -m, src.components.train_lstm_launcher.task,
       --project-id, {inputValue: project_id},
       --region, {inputValue: region},
       # --- AJUSTE AÑADIDO ---

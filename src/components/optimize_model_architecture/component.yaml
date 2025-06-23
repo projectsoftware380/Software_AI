@@ -15,7 +15,7 @@ implementation:
   container:
     image: "gcr.io/your-project/your-image:latest" # Reemplazado por main.py
     command: [
-      python, -m, src.components.optimize_model_architecture.task,
+      python, -u, -m, src.components.optimize_model_architecture.task,
       --features-path, {inputValue: features_path},
       --n-trials, {inputValue: n_trials},
       # --- AJUSTE AÑADIDO ---
