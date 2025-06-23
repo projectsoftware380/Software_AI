@@ -1,10 +1,6 @@
 # src/components/data_preparation/task.py
 """
-Tarea del componente de Preparación de Datos (con Logging Robusto).
-
-Este script orquesta la carga de datos crudos, su limpieza, resampling,
-la creación de un conjunto de hold-out para validación final, y la subida
-de los artefactos resultantes a Google Cloud Storage.
+Tarea del componente de Preparación de Datos (Corregido y con Logging Robusto).
 """
 
 import argparse
@@ -56,7 +52,6 @@ def create_holdout_set(df: pd.DataFrame, holdout_months: int) -> tuple[pd.DataFr
     return train_df, holdout_df
 
 def upload_df_to_gcs_and_verify(df: pd.DataFrame, gcs_uri: str) -> None:
-    # Esta función ya tiene buen logging, se mantiene como está.
     logger.info(f"Intentando subir DataFrame a {gcs_uri}...")
     try:
         df.to_parquet(gcs_uri, engine="pyarrow", index=True)
@@ -78,8 +73,7 @@ def upload_df_to_gcs_and_verify(df: pd.DataFrame, gcs_uri: str) -> None:
 # -----------------------------------------------------------------------------
 
 def run_data_preparation(
-    pair: str,
-    timeframe: str,
+    input_data_path: str, # CORRECCIÓN: Se recibe la ruta completa
     years_to_keep: int,
     holdout_months: int,
     cleanup: bool,
@@ -88,9 +82,7 @@ def run_data_preparation(
 ):
     """Orquesta todo el proceso de preparación de datos."""
     
-    # [LOG] Punto de control inicial con todos los parámetros recibidos.
-    logger.info(f"▶️ Iniciando data_preparation para el par '{pair}' con los siguientes parámetros:")
-    logger.info(f"  - Timeframe: {timeframe}")
+    logger.info(f"▶️ Iniciando data_preparation desde el archivo: {input_data_path}")
     logger.info(f"  - Años a mantener: {years_to_keep}")
     logger.info(f"  - Meses de Holdout: {holdout_months}")
     logger.info(f"  - Limpieza activada: {cleanup}")
@@ -99,20 +91,24 @@ def run_data_preparation(
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
             
-            # [LOG] Registrar la ruta exacta que se va a buscar.
-            gcs_input_uri = f"gs://{constants.BUCKET_NAME}/{constants.RAW_DATA_PATH}/{timeframe}/{pair}.parquet"
-            logger.info(f"Intentando descargar datos crudos desde: {gcs_input_uri}")
+            # CORRECCIÓN: Ya no se construye la URI, se usa la que se recibe como argumento
+            logger.info(f"Intentando descargar datos crudos desde: {input_data_path}")
             
-            local_raw_path = gcs_utils.download_gcs_file(gcs_input_uri, tmp_path)
+            local_raw_path = gcs_utils.download_gcs_file(input_data_path, tmp_path)
             
             if local_raw_path is None:
-                raise FileNotFoundError(f"No se pudo descargar el archivo de datos crudos desde: {gcs_input_uri}")
+                raise FileNotFoundError(f"No se pudo descargar el archivo de datos crudos desde: {input_data_path}")
             
             logger.info(f"✅ Datos crudos descargados exitosamente a: {local_raw_path}")
             
             df_raw = pd.read_parquet(local_raw_path)
             logger.info(f"DataFrame crudo cargado. Shape: {df_raw.shape}")
             
+            # Extraer pair y timeframe de la ruta para el nombrado de archivos
+            path_parts = Path(input_data_path).parts
+            pair = path_parts[-2]
+            timeframe = Path(path_parts[-1]).stem.split('_')[1]
+
             df_processed = clean_and_resample(df_raw, timeframe)
             logger.info(f"DataFrame procesado y limpiado. Shape: {df_processed.shape}")
             
@@ -120,7 +116,7 @@ def run_data_preparation(
             logger.info(f"División de datos completada. Shape entrenamiento: {df_train.shape}, Shape hold-out: {df_holdout.shape}")
             
             version_ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-            output_base_path = f"gs://{constants.BUCKET_NAME}/{constants.FEATURES_PATH}/{pair}/{timeframe}"
+            output_base_path = f"{constants.DATA_FILTERED_FOR_OPT_PATH}/{pair}/{timeframe}"
             versioned_output_dir = f"{output_base_path}/{version_ts}"
             
             prepared_data_path = f"{versioned_output_dir}/{pair}_{timeframe}_train_opt.parquet"
@@ -143,16 +139,15 @@ def run_data_preparation(
                 gcs_utils.keep_only_latest_version(output_base_path)
 
     except Exception as e:
-        # [LOG] Bloque de captura de errores con contexto completo.
-        logger.critical(f"❌ Fallo fatal en el componente data_preparation para el par '{pair}'. Error: {e}", exc_info=True)
+        logger.critical(f"❌ Fallo fatal en el componente data_preparation. Error: {e}", exc_info=True)
         raise
 
-    logger.info(f"🏁 Componente data_preparation para '{pair}' completado exitosamente.")
+    logger.info("🏁 Componente data_preparation completado exitosamente.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Prepara datos para entrenamiento y backtesting.")
-    parser.add_argument("--pair", required=True)
-    parser.add_argument("--timeframe", required=True)
+    # CORRECCIÓN: Se cambia el argumento de entrada para que sea más robusto
+    parser.add_argument("--input-data-path", required=True, help="GCS path to the raw input data Parquet file.")
     parser.add_argument("--years-to-keep", type=int, default=5)
     parser.add_argument("--holdout-months", type=int, default=3)
     parser.add_argument("--cleanup", type=lambda x: (str(x).lower() == 'true'), default=True)
@@ -161,14 +156,12 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    # [LOG] Registro de los argumentos recibidos al iniciar el script.
     logger.info("Componente 'data_preparation' iniciado con los siguientes argumentos:")
     for key, value in vars(args).items():
         logger.info(f"  - {key}: {value}")
     
     run_data_preparation(
-        pair=args.pair,
-        timeframe=args.timeframe,
+        input_data_path=args.input_data_path,
         years_to_keep=args.years_to_keep,
         holdout_months=args.holdout_months,
         cleanup=args.cleanup,

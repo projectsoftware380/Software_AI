@@ -1,5 +1,5 @@
 # -----------------------------------------------------------------------------
-# main.py: Definición y Ejecución de la Pipeline de MLOps v5 (con Logging Robusto)
+# main.py: Definición y Ejecución de la Pipeline de MLOps v5 (Corregido)
 # -----------------------------------------------------------------------------
 # Versión final con estructura de bucle corregida y gestión de rutas robusta.
 # -----------------------------------------------------------------------------
@@ -91,9 +91,10 @@ def trading_pipeline_v5(
         )
         ingest_task.set_accelerator_type("NVIDIA_TESLA_T4").set_accelerator_limit(1)
 
+        # --- CORRECCIÓN: El input del paso de preparación ahora se conecta
+        # directamente a la salida del paso de ingestión.
         prepare_data_task = component_op_factory["data_preparation"](
-            pair=pair,
-            timeframe=timeframe,
+            input_data_path=ingest_task.outputs["output_gcs_path"],
             years_to_keep=backtest_years_to_keep,
             holdout_months=holdout_months,
         ).after(ingest_task)
@@ -110,8 +111,6 @@ def trading_pipeline_v5(
             features_path=prepare_data_task.outputs["prepared_data_path"],
             architecture_params_file=f"{optimize_arch_task.outputs['best_architecture_dir']}/{pair}/best_architecture.json",
             n_trials=n_trials_logic,
-            # --- AJUSTE FINAL Y DEFINITIVO ---
-            # Se añade el parámetro 'pair' que faltaba y causaba el TypeError.
             pair=pair
         )
         optimize_logic_task.set_accelerator_type("NVIDIA_TESLA_T4").set_accelerator_limit(1)

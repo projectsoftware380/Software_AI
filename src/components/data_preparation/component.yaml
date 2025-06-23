@@ -1,51 +1,39 @@
 # src/components/data_preparation/component.yaml
 name: Prepare Training and Holdout Data
 description: >
-  Loads raw data, computes indicators, and splits the recent data into two sets:
-  1. A main set for optimization and training.
-  2. A final hold-out set for backtesting, using the most recent data.
+  Loads raw data, computes indicators, and splits the data.
 
+# --- CORRECCIÓN ---
 inputs:
-  - name: pair
+  - name: input_data_path # Nuevo input para recibir la ruta
     type: String
-    description: 'The trading pair to process, e.g., EURUSD.'
-  - name: timeframe
-    type: String
-    description: 'The timeframe of the data, e.g., 15minute.'
+    description: 'The GCS path to the raw Parquet file from the ingestion step.'
   - name: years_to_keep
     type: Integer
-    description: 'Total number of recent years of data to consider for the split.'
     default: 5
   - name: holdout_months
     type: Integer
-    description: 'Number of recent months to reserve for the final hold-out set.'
     default: 3
   - name: cleanup_old_versions
     type: Boolean
-    description: 'If true, old versioned directories will be removed to save space.'
     default: true
 
 outputs:
-  - name: prepared_data_path
-    type: String
-    description: 'The GCS path to the Parquet file for optimization/training.'
-  - name: holdout_data_path
-    type: String
-    description: 'The GCS path to the final hold-out Parquet file for backtesting.'
+  - {name: prepared_data_path, type: String}
+  - {name: holdout_data_path, type: String}
 
 implementation:
   container:
     image: gcr.io/trading-ai-460823/trading-ai-gpu:v1
     command:
       - python
-      - -u
+      - -u # Mantener el unbuffered output
       - -m
       - src.components.data_preparation.task
     args:
-      - --pair
-      - {inputValue: pair}
-      - --timeframe
-      - {inputValue: timeframe}
+      # --- CORRECCIÓN ---
+      - --input-data-path
+      - {inputValue: input_data_path}
       - --years-to-keep
       - {inputValue: years_to_keep}
       - --holdout-months
