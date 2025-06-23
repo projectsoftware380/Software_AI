@@ -1,5 +1,5 @@
 # -----------------------------------------------------------------------------
-# component.yaml: Componente de Ingestión de Datos
+# component.yaml: Componente de Ingestión de Datos (Corregido)
 # -----------------------------------------------------------------------------
 name: Ingest Market Data for All Pairs
 description: |
@@ -11,9 +11,12 @@ inputs:
   - {name: polygon_secret_name, type: String, description: "Nombre del secreto en Secret Manager para la API key de Polygon."}
   - {name: end_date,            type: String, description: "Fecha final para la descarga de datos (YYYY-MM-DD)."}
   - {name: timeframe,           type: String, description: "Timeframe de las velas (ej: '15minute')."}
-  # --- AJUSTE AÑADIDO ---
-  # Se añade el parámetro 'pair' para que el componente sepa qué par procesar.
   - {name: pair,                type: String, description: "El par de divisas específico a procesar (ej: 'EURUSD')."}
+
+# --- CORRECCIÓN: Añadida la sección de 'outputs' ---
+# Se declara la salida que el script necesita para poder pasar su ruta.
+outputs:
+  - {name: completion_message,  type: String, description: "Mensaje que indica la finalización de la tarea."}
 
 implementation:
   container:
@@ -24,7 +27,8 @@ implementation:
       --polygon-secret-name,  {inputValue: polygon_secret_name},
       --end-date,             {inputValue: end_date},
       --timeframe,            {inputValue: timeframe},
-      # --- AJUSTE AÑADIDO ---
-      # Se pasa el nuevo input al script de Python.
       --pair,                 {inputValue: pair},
+      # --- CORRECCIÓN: Se pasa la ruta de la salida al script ---
+      # Esto resuelve el error del argumento '--completion-message-path' faltante.
+      --completion-message-path, {outputPath: completion_message},
     ]
