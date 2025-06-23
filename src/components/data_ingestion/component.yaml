@@ -13,10 +13,11 @@ inputs:
   - {name: timeframe,           type: String, description: "Timeframe de las velas (ej: '15minute')."}
   - {name: pair,                type: String, description: "El par de divisas específico a procesar (ej: 'EURUSD')."}
 
-# --- CORRECCIÓN: Añadida la sección de 'outputs' ---
-# Se declara la salida que el script necesita para poder pasar su ruta.
+# --- CORRECCIÓN: Se añaden las salidas que los siguientes componentes necesitan ---
 outputs:
-  - {name: completion_message,  type: String, description: "Mensaje que indica la finalización de la tarea."}
+  - {name: output_gcs_path,     type: String, description: "La ruta completa en GCS al archivo Parquet con los datos crudos."}
+  - {name: completion_message,  type: String, description: "Un mensaje que indica la finalización."}
+
 
 implementation:
   container:
@@ -28,7 +29,7 @@ implementation:
       --end-date,             {inputValue: end_date},
       --timeframe,            {inputValue: timeframe},
       --pair,                 {inputValue: pair},
-      # --- CORRECCIÓN: Se pasa la ruta de la salida al script ---
-      # Esto resuelve el error del argumento '--completion-message-path' faltante.
-      --completion-message-path, {outputPath: completion_message},
+      # --- CORRECCIÓN: Se pasan las rutas de los archivos de salida al script ---
+      --output-gcs-path-output,    {outputPath: output_gcs_path},
+      --completion-message-path,   {outputPath: completion_message},
     ]

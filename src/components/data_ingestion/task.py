@@ -1,6 +1,6 @@
 # src/components/data_ingestion/task.py
 """
-Tarea del componente de ingestión de datos. (Versión con Logging Robusto)
+Tarea del componente de ingestión de datos. (Versión con Logging Robusto y Salidas Corregidas)
 
 Responsabilidades:
 1.  Obtener la API Key de Polygon desde Google Secret Manager.
@@ -9,6 +9,7 @@ Responsabilidades:
 4.  Validar que se ha descargado un número mínimo de registros para cada par.
 5.  Guardar los datos consolidados en un nuevo archivo Parquet en GCS.
 6.  Enviar notificaciones de éxito o fracaso a un topic de Pub/Sub para cada par.
+7.  Producir la ruta GCS del artefacto como una salida de la pipeline.
 
 Este script está diseñado para ser ejecutado por un componente de KFP.
 """
@@ -54,7 +55,6 @@ def get_polygon_api_key(
     """
     Obtiene la API Key de Polygon desde Google Secret Manager.
     """
-    # [LOG] Punto de control de inicio de la función.
     logger.info("Iniciando obtención de API Key desde Secret Manager...")
     try:
         logger.info(
@@ -67,7 +67,6 @@ def get_polygon_api_key(
         logger.info(f"✅ API Key obtenida exitosamente de Secret Manager ({secret_name}).")
         return api_key
     except Exception as e:
-        # [LOG] Error contextualizado.
         logger.error(f"❌ Error al obtener la API Key de Secret Manager: {e}", exc_info=True)
         raise RuntimeError(
             f"Fallo al obtener la API Key de Secret Manager '{secret_name}': {e}"
@@ -90,7 +89,6 @@ def _fetch_window(
     end_date: str,
     api_key: str,
 ) -> List[Dict[str, Any]]:
-    # ... (lógica interna sin cambios) ...
     match = re.match(r"^(\d+)([a-zA-Z]+)$", timeframe)
     if not match:
         raise ValueError(f"Timeframe inválido: {timeframe!r}")
@@ -109,7 +107,6 @@ def _fetch_window(
 
 
 def _results_to_df(results: List[Dict[str, Any]]) -> pd.DataFrame:
-    # ... (lógica interna sin cambios) ...
     if not results:
         return pd.DataFrame()
     df = (
@@ -129,7 +126,6 @@ def _results_to_df(results: List[Dict[str, Any]]) -> pd.DataFrame:
     return df
 
 def upload_df_to_gcs_and_verify(df: pd.DataFrame, gcs_uri: str, local_path: Path):
-    # ... (lógica interna sin cambios, ya tiene buen logging) ...
     logger.info(f"Guardando DataFrame en archivo local temporal: {local_path}")
     df.to_parquet(local_path, index=True, engine="pyarrow")
     
@@ -155,10 +151,14 @@ def run_ingestion(
     end_date: str,
     min_rows: int,
     api_key: str,
+    # --- CORRECCIÓN: Se añaden los paths de los archivos de salida como argumentos ---
+    output_gcs_path_output: str,
+    completion_message_path: str,
 ) -> bool:
     status_success = False
+    final_message = ""
+    parquet_uri = "" # Inicializar la variable
     try:
-        # [LOG] Registrar la ruta de salida que se va a utilizar.
         parquet_uri = f"{gcs_data_path}/{pair}/{timeframe}/{pair}_{timeframe}.parquet"
         logger.info(f"Ruta de destino del artefacto: {parquet_uri}")
 
@@ -194,7 +194,6 @@ def run_ingestion(
             raise RuntimeError(f"No se descargaron datos para {pair}. La lista de DataFrames está vacía.")
 
         df_full = pd.concat(all_dfs, ignore_index=False).drop_duplicates()
-        # [LOG] Registrar el estado de los datos después de la consolidación.
         logger.info(f"Consolidados {len(df_full):,} registros en total para {pair}.")
 
         if len(df_full) < min_rows:
@@ -208,15 +207,24 @@ def run_ingestion(
             upload_df_to_gcs_and_verify(df_full, parquet_uri, local_parquet_path)
 
         status_success = True
-        logger.info(f"🏁 Descarga y guardado para {pair}/{timeframe} completados con éxito.")
+        final_message = f"Ingestión para {pair} completada. {len(df_full)} filas guardadas en {parquet_uri}"
+        logger.info(f"🏁 {final_message}")
 
     except Exception as e:
-        # [LOG] Captura de error fatal con contexto completo.
-        logger.critical(f"❌ Fallo crítico en la ingestión de {pair}/{timeframe}: {e}", exc_info=True)
+        final_message = f"❌ Fallo crítico en la ingestión de {pair}/{timeframe}: {e}"
+        logger.critical(final_message, exc_info=True)
         status_success = False
 
     finally:
-        # [LOG] El bloque finally asegura que esto siempre se ejecute.
+        # --- CORRECCIÓN: Escribir las rutas de salida para KFP ---
+        # Escribir la ruta GCS del artefacto para que el siguiente componente la use
+        Path(output_gcs_path_output).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_gcs_path_output).write_text(parquet_uri if status_success else "failed")
+        
+        # Escribir el mensaje de finalización
+        Path(completion_message_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(completion_message_path).write_text(final_message)
+
         logger.info("Iniciando proceso de notificación a Pub/Sub...")
         topic_id = constants.SUCCESS_TOPIC_ID if status_success else constants.FAILURE_TOPIC_ID
         publisher = pubsub_v1.PublisherClient()
@@ -227,6 +235,8 @@ def run_ingestion(
             "status": "SUCCESS" if status_success else "FAILURE",
             "pair": pair,
             "timeframe": timeframe,
+            "gcs_path": parquet_uri if status_success else "N/A",
+            "message": final_message,
             "timestamp_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         }
         
@@ -250,11 +260,13 @@ if __name__ == "__main__":
     parser.add_argument("--start-date", default="2010-01-01")
     parser.add_argument("--end-date", default=dt.date.today().isoformat())
     parser.add_argument("--min-rows", type=int, default=100_000)
-    parser.add_argument("--completion-message-path", type=Path, required=True)
+    
+    # --- CORRECCIÓN: Se añaden los argumentos de salida que el component.yaml ahora pasa ---
+    parser.add_argument("--output-gcs-path-output", required=True, type=str)
+    parser.add_argument("--completion-message-path", required=True, type=str)
     
     args = parser.parse_args()
 
-    # [LOG] Registro de los argumentos recibidos al iniciar el script.
     logger.info("Componente 'data_ingestion' iniciado con los siguientes argumentos:")
     for key, value in vars(args).items():
         logger.info(f"  - {key}: {value}")
@@ -270,13 +282,11 @@ if __name__ == "__main__":
         start_date=args.start_date,
         end_date=args.end_date,
         min_rows=args.min_rows,
-        api_key=api_key
+        api_key=api_key,
+        # --- CORRECCIÓN: Se pasan los nuevos argumentos a la función ---
+        output_gcs_path_output=args.output_gcs_path_output,
+        completion_message_path=args.completion_message_path,
     )
-    
-    message = f"Ingestion for {args.pair}: {'SUCCESS' if success else 'FAILURE'}"
-    args.completion_message_path.parent.mkdir(parents=True, exist_ok=True)
-    args.completion_message_path.write_text(message)
-    logger.info(f"Mensaje de finalización escrito: '{message}'")
     
     if not success:
         sys.exit(1)
