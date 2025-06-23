@@ -41,7 +41,6 @@ def load_utf8_component(rel_path: str):
     yaml_text = (COMPONENTS_DIR / rel_path).read_text(encoding="utf-8")
     return load_component_from_text(yaml_text)
 
-# [LOG] Se registra el inicio de la carga de componentes.
 logger.info("Iniciando carga de definiciones de componentes desde archivos YAML...")
 component_op_factory = {
     "data_ingestion": load_utf8_component("data_ingestion/component.yaml"),
@@ -55,7 +54,6 @@ component_op_factory = {
 }
 logger.info("✅ Todos los componentes han sido cargados.")
 
-# Asignar la misma imagen Docker a todos los contenedores para simplificar
 logger.info(f"Asignando imagen Docker común a todos los componentes: {args.common_image_uri}")
 for name, comp in component_op_factory.items():
     if hasattr(comp.component_spec.implementation, "container"):
@@ -112,6 +110,8 @@ def trading_pipeline_v5(
             features_path=prepare_data_task.outputs["prepared_data_path"],
             architecture_params_file=f"{optimize_arch_task.outputs['best_architecture_dir']}/{pair}/best_architecture.json",
             n_trials=n_trials_logic,
+            # --- AJUSTE FINAL Y DEFINITIVO ---
+            # Se añade el parámetro 'pair' que faltaba y causaba el TypeError.
             pair=pair
         )
         optimize_logic_task.set_accelerator_type("NVIDIA_TESLA_T4").set_accelerator_limit(1)
@@ -166,14 +166,12 @@ def trading_pipeline_v5(
 if __name__ == "__main__":
     PIPELINE_JSON = "algo_trading_mlops_pipeline_v5_final.json"
 
-    # [LOG] Se registra el inicio de la compilación.
     logger.info(f"Iniciando compilación del pipeline a '{PIPELINE_JSON}'...")
     Compiler().compile(trading_pipeline_v5, PIPELINE_JSON)
     logger.info(f"✅ Pipeline compilada exitosamente.")
 
     if os.getenv("SUBMIT_PIPELINE_TO_VERTEX", "true").lower() == "true":
         try:
-            # [LOG] Se registra el inicio del proceso de envío.
             logger.info("Iniciando envío del pipeline a Vertex AI...")
             aip.init(project=constants.PROJECT_ID, location=constants.REGION)
             logger.info(f"Cliente de AI Platform inicializado para el proyecto '{constants.PROJECT_ID}' en la región '{constants.REGION}'.")
@@ -187,7 +185,6 @@ if __name__ == "__main__":
                 enable_caching=True,
             )
             
-            # [LOG] Se registran los parámetros del PipelineJob.
             logger.info("Configuración del PipelineJob a enviar:")
             logger.info(f"  - Display Name: {display_name}")
             logger.info(f"  - Template Path: {PIPELINE_JSON}")
@@ -201,7 +198,6 @@ if __name__ == "__main__":
             logger.info(f"   Puedes verla en la consola de Vertex AI.")
             
         except Exception as e:
-            # [LOG] Captura de error fatal durante el lanzamiento.
             logger.critical(f"❌ Fallo fatal al compilar o lanzar el pipeline. Error: {e}", exc_info=True)
             raise
     else:
