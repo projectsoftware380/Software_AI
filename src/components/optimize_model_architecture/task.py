@@ -4,11 +4,9 @@ Tarea de Optimización de Hiperparámetros para la Arquitectura del Modelo. (Ver
 
 Responsabilidades:
 1.  Recibir la ruta a un archivo Parquet de datos preparados para UN SOLO PAR.
-2.  Ejecutar un estudio de Optuna para encontrar los mejores hiperparámetros.
-3.  La métrica a optimizar es la pérdida de validación (`val_loss`).
-4.  Guardar el archivo `best_architecture.json` en una ruta GCS versionada.
-5.  Limpiar las versiones antiguas de los parámetros, manteniendo solo la más reciente.
-6.  Devolver la ruta base versionada donde se guardó el resultado.
+2.  Ejecutar un estudio de Optuna para encontrar los mejores hiperparámetros de arquitectura.
+3.  Guardar el archivo `best_architecture.json` en una ruta GCS versionada.
+4.  Limpiar las versiones antiguas de los parámetros, manteniendo solo la más reciente.
 """
 from __future__ import annotations
 
@@ -53,7 +51,6 @@ try:
         tf.keras.mixed_precision.set_global_policy("mixed_float16")
         logger.info("🚀 GPU(s) detectadas y configuradas para el HPO de arquitectura.")
     else:
-        # No lanzamos un error aquí porque la optimización podría correr en CPU si es necesario
         logger.warning("⚠️ No se encontró ninguna GPU. La optimización se ejecutará en CPU y será muy lenta.")
 except Exception as exc:
     logger.warning("⚠️ No se pudo configurar la GPU (%s). Continuando con CPU.", exc)
@@ -122,8 +119,6 @@ def run_architecture_optimization(
                 "heads": trial.suggest_categorical("heads", [2, 4, 8]),
                 **constants.DUMMY_INDICATOR_PARAMS
             }
-            
-            # [LOG] Registrar los parámetros de cada trial.
             logger.debug(f"Trial #{trial.number}: Probando parámetros {p}")
 
             df_ind = indicators.build_indicators(df_raw.copy(), p, atr_len=14)
@@ -186,7 +181,6 @@ def run_architecture_optimization(
         best_architecture_params = study.best_params.copy()
         best_architecture_params["best_val_loss"] = study.best_value
 
-        # [LOG] Registrar el resultado final de la optimización.
         logger.info(f"Mejor arquitectura encontrada para {pair}. Val_loss: {study.best_value:.5f}")
         logger.info(f"Mejores parámetros: {json.dumps(best_architecture_params, indent=2)}")
 
@@ -200,6 +194,7 @@ def run_architecture_optimization(
             gcs_utils.verify_gcs_file_exists(pair_output_gcs_path)
 
         if cleanup:
+            # CORRECCIÓN: Se construye la ruta base para la limpieza de forma explícita.
             base_cleanup_path = f"{constants.ARCHITECTURE_PARAMS_PATH}/{pair}"
             logger.info(f"Iniciando limpieza de versiones antiguas en: {base_cleanup_path}")
             gcs_utils.keep_only_latest_version(base_cleanup_path)
@@ -215,7 +210,6 @@ def run_architecture_optimization(
 
     logger.info(f"🏁 Componente optimize_model_architecture para '{pair}' completado exitosamente.")
 
-
 # --- Punto de Entrada para Ejecución como Script ---
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Task de Optimización de Arquitectura de Modelo")
@@ -226,8 +220,7 @@ if __name__ == "__main__":
     parser.add_argument("--best-architecture-dir-output", type=Path, required=True)
     
     args = parser.parse_args()
-    
-    # [LOG] Registro de los argumentos recibidos.
+
     logger.info("Componente 'optimize_model_architecture' iniciado con los siguientes argumentos:")
     for key, value in vars(args).items():
         logger.info(f"  - {key}: {value}")
