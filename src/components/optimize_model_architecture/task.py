@@ -1,12 +1,6 @@
 # src/components/optimize_model_architecture/task.py
 """
-Tarea de Optimización de Hiperparámetros para la Arquitectura del Modelo. (Versión con Logging Robusto)
-
-Responsabilidades:
-1.  Recibir la ruta a un archivo Parquet de datos preparados para UN SOLO PAR.
-2.  Ejecutar un estudio de Optuna para encontrar los mejores hiperparámetros de arquitectura.
-3.  Guardar el archivo `best_architecture.json` en una ruta GCS versionada.
-4.  Limpiar las versiones antiguas de los parámetros, manteniendo solo la más reciente.
+Tarea de Optimización de Hiperparámetros para la Arquitectura del Modelo. (Corregido y con Logging Robusto)
 """
 from __future__ import annotations
 
@@ -95,7 +89,6 @@ def run_architecture_optimization(
     """
     Orquesta el proceso completo de optimización de arquitectura para UN SOLO PAR.
     """
-    # [LOG] Punto de control inicial.
     logger.info(f"▶️ Iniciando optimize_model_architecture para el par '{pair}' con {n_trials} trials.")
     logger.info(f"  - Features de entrada: {features_path}")
     logger.info(f"  - Directorio base de salida: {output_gcs_dir_base}")
@@ -110,17 +103,20 @@ def run_architecture_optimization(
             tf.keras.backend.clear_session()
             gc.collect()
 
-            p = {
+            # --- CORRECCIÓN: Se unen los parámetros del trial con los de los indicadores ---
+            trial_params = {
                 "win": trial.suggest_int("win", 20, 60),
                 "lr": trial.suggest_float("lr", 1e-4, 3e-3, log=True),
                 "dr": trial.suggest_float("dr", 0.1, 0.5),
                 "filt": trial.suggest_categorical("filt", [16, 32, 64]),
                 "units": trial.suggest_categorical("units", [32, 64, 128]),
                 "heads": trial.suggest_categorical("heads", [2, 4, 8]),
-                **constants.DUMMY_INDICATOR_PARAMS
             }
+            p = {**trial_params, **constants.DUMMY_INDICATOR_PARAMS}
+            
             logger.debug(f"Trial #{trial.number}: Probando parámetros {p}")
 
+            # Esta llamada ahora recibe un diccionario 'p' completo y no fallará.
             df_ind = indicators.build_indicators(df_raw.copy(), p, atr_len=14)
             tick = 0.01 if pair.endswith("JPY") else 0.0001
             horizon = p.get("horizon", 20)
@@ -178,23 +174,25 @@ def run_architecture_optimization(
         study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
         logger.info(f"Estudio de Optuna para {pair} completado.")
 
-        best_architecture_params = study.best_params.copy()
-        best_architecture_params["best_val_loss"] = study.best_value
+        # --- CORRECCIÓN: Se guardan tanto los mejores parámetros del trial como los de los indicadores ---
+        best_params_from_trial = study.best_params
+        final_best_params = {**best_params_from_trial, **constants.DUMMY_INDICATOR_PARAMS}
+        final_best_params["best_val_loss"] = study.best_value
 
         logger.info(f"Mejor arquitectura encontrada para {pair}. Val_loss: {study.best_value:.5f}")
-        logger.info(f"Mejores parámetros: {json.dumps(best_architecture_params, indent=2)}")
+        logger.info(f"Mejores parámetros finales: {json.dumps(final_best_params, indent=2)}")
 
         pair_output_gcs_path = f"{output_gcs_dir_base}/best_architecture.json"
         
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_json = Path(tmpdir) / "best_architecture.json"
-            tmp_json.write_text(json.dumps(best_architecture_params, indent=2))
+            # Se guardan los parámetros combinados
+            tmp_json.write_text(json.dumps(final_best_params, indent=2))
             logger.info(f"Guardando mejores parámetros en: {pair_output_gcs_path}")
             gcs_utils.upload_gcs_file(tmp_json, pair_output_gcs_path)
             gcs_utils.verify_gcs_file_exists(pair_output_gcs_path)
 
         if cleanup:
-            # CORRECCIÓN: Se construye la ruta base para la limpieza de forma explícita.
             base_cleanup_path = f"{constants.ARCHITECTURE_PARAMS_PATH}/{pair}"
             logger.info(f"Iniciando limpieza de versiones antiguas en: {base_cleanup_path}")
             gcs_utils.keep_only_latest_version(base_cleanup_path)
@@ -204,11 +202,11 @@ def run_architecture_optimization(
         logger.info(f"Ruta de salida '{output_gcs_dir_base}' escrita para KFP.")
 
     except Exception as e:
-        # [LOG] Captura de error fatal.
         logger.critical(f"❌ Fallo fatal en optimize_model_architecture para el par '{pair}'. Error: {e}", exc_info=True)
         raise
 
     logger.info(f"🏁 Componente optimize_model_architecture para '{pair}' completado exitosamente.")
+
 
 # --- Punto de Entrada para Ejecución como Script ---
 if __name__ == "__main__":
@@ -220,7 +218,7 @@ if __name__ == "__main__":
     parser.add_argument("--best-architecture-dir-output", type=Path, required=True)
     
     args = parser.parse_args()
-
+    
     logger.info("Componente 'optimize_model_architecture' iniciado con los siguientes argumentos:")
     for key, value in vars(args).items():
         logger.info(f"  - {key}: {value}")
