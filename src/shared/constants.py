@@ -23,6 +23,9 @@ TENSORBOARD_LOGS_PATH = f"{BASE_GCS_PATH}/tensorboard_logs_v3"
 
 # Rutas de datos
 DATA_PATH = f"{BASE_GCS_PATH}/data"
+# --- CORRECCIÓN: Se añade la constante RAW_DATA_PATH que faltaba ---
+RAW_DATA_PATH = f"{DATA_PATH}/raw"
+# --------------------------------------------------------------------
 DATA_FILTERED_FOR_OPT_PATH = f"{BASE_GCS_PATH}/params/data_filtered_for_opt_v3"
 
 # Rutas de parámetros y optimización
