@@ -1,11 +1,12 @@
 # -----------------------------------------------------------------------------
-# main.py: Definición y Ejecución de la Pipeline de MLOps v5
+# main.py: Definición y Ejecución de la Pipeline de MLOps v5 (con Logging Robusto)
 # -----------------------------------------------------------------------------
 # Versión final con estructura de bucle corregida y gestión de rutas robusta.
 # -----------------------------------------------------------------------------
 
 import argparse
 import os
+import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -15,6 +16,13 @@ from kfp.compiler import Compiler
 from kfp.components import load_component_from_text
 
 from src.shared import constants
+
+# --- Configuración del Logging ---
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 # --- Configuración del CLI ---
 parser = argparse.ArgumentParser("Compila y/o envía la pipeline v5 final con filtro supervisado")
@@ -33,27 +41,27 @@ def load_utf8_component(rel_path: str):
     yaml_text = (COMPONENTS_DIR / rel_path).read_text(encoding="utf-8")
     return load_component_from_text(yaml_text)
 
-# Cargar todos los componentes necesarios para la v5
+# [LOG] Se registra el inicio de la carga de componentes.
+logger.info("Iniciando carga de definiciones de componentes desde archivos YAML...")
 component_op_factory = {
     "data_ingestion": load_utf8_component("data_ingestion/component.yaml"),
     "data_preparation": load_utf8_component("data_preparation/component.yaml"),
-    "optimize_model_architecture": load_utf8_component(
-        "optimize_model_architecture/component.yaml"
-    ),
-    "optimize_trading_logic": load_utf8_component(
-        "optimize_trading_logic/component.yaml"
-    ),
+    "optimize_model_architecture": load_utf8_component("optimize_model_architecture/component.yaml"),
+    "optimize_trading_logic": load_utf8_component("optimize_trading_logic/component.yaml"),
     "train_lstm_launcher": load_utf8_component("train_lstm_launcher/component.yaml"),
     "train_filter_model": load_utf8_component("train_filter_model/component.yaml"),
     "backtest": load_utf8_component("backtest/component.yaml"),
     "model_promotion": load_utf8_component("model_promotion/component.yaml"),
 }
+logger.info("✅ Todos los componentes han sido cargados.")
 
 # Asignar la misma imagen Docker a todos los contenedores para simplificar
-for comp in component_op_factory.values():
-    impl = comp.component_spec.implementation
-    if hasattr(impl, "container") and impl.container:
-        impl.container.image = args.common_image_uri
+logger.info(f"Asignando imagen Docker común a todos los componentes: {args.common_image_uri}")
+for name, comp in component_op_factory.items():
+    if hasattr(comp.component_spec.implementation, "container"):
+        comp.component_spec.implementation.container.image = args.common_image_uri
+logger.info("✅ Imagen Docker asignada.")
+
 
 # --- Definición de la Pipeline Corregida ---
 @dsl.pipeline(
@@ -69,7 +77,7 @@ def trading_pipeline_v5(
     holdout_months: int = 3,
 ):
     """Pipeline de entrenamiento y despliegue para IA de trading Forex."""
-
+    
     pairs_to_process = list(constants.SPREADS_PIP.keys())
 
     with dsl.ParallelFor(
@@ -100,13 +108,10 @@ def trading_pipeline_v5(
         )
         optimize_arch_task.set_accelerator_type("NVIDIA_TESLA_T4").set_accelerator_limit(1)
 
-        # 4 ▸ Optimizar lógica de trading
         optimize_logic_task = component_op_factory["optimize_trading_logic"](
             features_path=prepare_data_task.outputs["prepared_data_path"],
             architecture_params_file=f"{optimize_arch_task.outputs['best_architecture_dir']}/{pair}/best_architecture.json",
             n_trials=n_trials_logic,
-            # --- AJUSTE FINAL Y DEFINITIVO ---
-            # Se añade el parámetro 'pair' que faltaba.
             pair=pair
         )
         optimize_logic_task.set_accelerator_type("NVIDIA_TESLA_T4").set_accelerator_limit(1)
@@ -157,22 +162,47 @@ def trading_pipeline_v5(
         promotion_task.set_accelerator_type("NVIDIA_TESLA_T4").set_accelerator_limit(1)
 
 
-# --- Bloque de Ejecución (Sin Cambios) ---
+# --- Bloque de Ejecución ---
 if __name__ == "__main__":
-    PIPELINE_JSON = "algo_trading_mlops_pipeline_v5_corrected.json"
+    PIPELINE_JSON = "algo_trading_mlops_pipeline_v5_final.json"
+
+    # [LOG] Se registra el inicio de la compilación.
+    logger.info(f"Iniciando compilación del pipeline a '{PIPELINE_JSON}'...")
     Compiler().compile(trading_pipeline_v5, PIPELINE_JSON)
-    print(f"✅ Pipeline v5 (estructura final) compilada a {PIPELINE_JSON}")
+    logger.info(f"✅ Pipeline compilada exitosamente.")
 
     if os.getenv("SUBMIT_PIPELINE_TO_VERTEX", "true").lower() == "true":
-        aip.init(project=constants.PROJECT_ID, location=constants.REGION)
-        display_name = f"algo-trading-v5-final-{datetime.utcnow():%Y%m%d-%H%M%S}"
-        job = aip.PipelineJob(
-            display_name=display_name,
-            template_path=PIPELINE_JSON,
-            pipeline_root=constants.PIPELINE_ROOT,
-            enable_caching=True,
-        )
-        job.run(service_account=constants.VERTEX_LSTM_SERVICE_ACCOUNT)
-        print(f"🚀 Pipeline lanzada con Display Name: {display_name}")
+        try:
+            # [LOG] Se registra el inicio del proceso de envío.
+            logger.info("Iniciando envío del pipeline a Vertex AI...")
+            aip.init(project=constants.PROJECT_ID, location=constants.REGION)
+            logger.info(f"Cliente de AI Platform inicializado para el proyecto '{constants.PROJECT_ID}' en la región '{constants.REGION}'.")
+            
+            display_name = f"algo-trading-v5-final-{datetime.utcnow():%Y%m%d-%H%M%S}"
+            
+            job = aip.PipelineJob(
+                display_name=display_name,
+                template_path=PIPELINE_JSON,
+                pipeline_root=constants.PIPELINE_ROOT,
+                enable_caching=True,
+            )
+            
+            # [LOG] Se registran los parámetros del PipelineJob.
+            logger.info("Configuración del PipelineJob a enviar:")
+            logger.info(f"  - Display Name: {display_name}")
+            logger.info(f"  - Template Path: {PIPELINE_JSON}")
+            logger.info(f"  - Pipeline Root: {constants.PIPELINE_ROOT}")
+            logger.info(f"  - Service Account: {constants.VERTEX_LSTM_SERVICE_ACCOUNT}")
+            
+            logger.info("Llamando a job.run() para lanzar la ejecución...")
+            job.run(service_account=constants.VERTEX_LSTM_SERVICE_ACCOUNT)
+            
+            logger.info(f"🚀 Pipeline lanzada exitosamente con Display Name: {display_name}")
+            logger.info(f"   Puedes verla en la consola de Vertex AI.")
+            
+        except Exception as e:
+            # [LOG] Captura de error fatal durante el lanzamiento.
+            logger.critical(f"❌ Fallo fatal al compilar o lanzar el pipeline. Error: {e}", exc_info=True)
+            raise
     else:
-        print("⏭️ La pipeline no se envió a Vertex AI (SUBMIT_PIPELINE_TO_VERTEX está en 'false').")
+        logger.warning("⏭️ La pipeline no se envió a Vertex AI (la variable de entorno SUBMIT_PIPELINE_TO_VERTEX está en 'false' o no está definida).")

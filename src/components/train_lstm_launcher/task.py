@@ -1,6 +1,6 @@
 # src/components/train_lstm_launcher/task.py
 """
-Tarea del componente "Lanzador" de Entrenamiento LSTM.
+Tarea del componente "Lanzador" de Entrenamiento LSTM. (Versión con Logging Robusto)
 
 Responsabilidades:
 1.  Recibir todos los parámetros necesarios para un entrenamiento.
@@ -11,28 +11,28 @@ Responsabilidades:
 5.  Escribir la ruta del modelo entrenado como un artefacto de salida para KFP.
 """
 from __future__ import annotations
-import google.cloud.aiplatform as aip
 
 import argparse
 import logging
 from datetime import datetime
 from pathlib import Path
 
+# Se importa `aiplatform` con un alias para evitar conflictos y por claridad.
 from google.cloud import aiplatform
 
-# --- Configuración del Logging (Sin Cambios) ---
+# --- Configuración del Logging ---
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# --- Lógica Principal del Componente (Ajustada) ---
+# --- Lógica Principal del Componente ---
 def run_training_job(
     project_id: str,
     region: str,
-    pair: str,                      # <-- AJUSTE: Recibe el par
-    timeframe: str,                 # <-- AJUSTE: Recibe el timeframe
+    pair: str,
+    timeframe: str,
     params_file: str,
     features_gcs_path: str,
     output_gcs_base_dir: str,
@@ -46,18 +46,30 @@ def run_training_job(
     """
     Configura y lanza un CustomJob en Vertex AI para entrenar el modelo LSTM.
     """
+    # [LOG] Punto de control inicial con todos los parámetros recibidos.
+    logger.info(f"▶️ Iniciando train_lstm_launcher para el par '{pair}':")
+    logger.info(f"  - Project ID: {project_id}, Región: {region}")
+    logger.info(f"  - Archivo de Parámetros: {params_file}")
+    logger.info(f"  - Features GCS Path: {features_gcs_path}")
+    logger.info(f"  - URI de la Imagen de Entrenamiento: {vertex_training_image_uri}")
+    logger.info(f"  - Configuración de Vertex: {vertex_machine_type}, {vertex_accelerator_type} (x{vertex_accelerator_count})")
+    logger.info(f"  - Cuenta de Servicio para el Job: {vertex_service_account}")
+
     try:
-        aip.init(project=project_id, location=region)
-        
+        # [LOG] Inicialización del cliente de AI Platform.
+        logger.info("Inicializando cliente de Google Cloud AI Platform...")
+        aiplatform.init(project=project_id, location=region)
+        logger.info("Cliente inicializado exitosamente.")
+
         timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
         job_display_name = f"train-lstm-{pair.lower()}-{timeframe.lower()}-{timestamp}"
         
-        # El directorio de salida ahora incluye el par y timeframe
+        # El directorio de salida único para esta ejecución de entrenamiento.
         output_gcs_dir = f"{output_gcs_base_dir}/{pair}/{timeframe}/{job_display_name}"
         
-        logger.info(f"🚀 Lanzando CustomJob de Vertex AI: {job_display_name}")
-        logger.info(f"   - Par: {pair}, Timeframe: {timeframe}")
-        logger.info(f"   - Directorio de salida: {output_gcs_dir}")
+        # [LOG] Registrar la configuración clave del job antes de crearlo.
+        logger.info(f"Configurando CustomJob de Vertex AI con Display Name: {job_display_name}")
+        logger.info(f"  - Directorio de Salida del Modelo: {output_gcs_dir}")
         
         worker_pool_specs = [
             {
@@ -81,33 +93,41 @@ def run_training_job(
             }
         ]
         
-        job = aip.CustomJob(
+        logger.info(f"Especificaciones del Worker Pool: {worker_pool_specs}")
+        
+        job = aiplatform.CustomJob(
             display_name=job_display_name,
             worker_pool_specs=worker_pool_specs,
-            stating_dir=str(Path(__file__).parent.parent.parent), # Sube el directorio 'src'
+            # El staging_dir sube el código local a GCS para que el job lo pueda usar.
+            staging_dir=str(Path(__file__).parent.parent.parent),
         )
         
+        logger.info("🚀 Lanzando CustomJob y esperando a que se complete (sync=True)...")
         job.run(service_account=vertex_service_account, sync=True)
         
-        logger.info(f"✅ Job {job_display_name} completado con éxito.")
+        logger.info(f"✅ Job '{job_display_name}' completado con éxito.")
         
-        # Escribir la ruta de salida para el siguiente componente
+        # Escribir la ruta de salida para el siguiente componente del pipeline.
         trained_lstm_dir_path_output.parent.mkdir(parents=True, exist_ok=True)
         trained_lstm_dir_path_output.write_text(output_gcs_dir)
         logger.info(f"✍️  Ruta de salida '{output_gcs_dir}' escrita para KFP.")
         
     except Exception as e:
-        logger.critical(f"❌ Fallo crítico al lanzar el job de entrenamiento para {pair}: {e}", exc_info=True)
+        # [LOG] Captura de error fatal con contexto completo.
+        logger.critical(f"❌ Fallo crítico al lanzar el job de entrenamiento para '{pair}'. Error: {e}", exc_info=True)
         raise
 
-# --- Punto de Entrada para Ejecución como Script (Ajustado) ---
+    logger.info(f"🏁 Componente train_lstm_launcher para '{pair}' completado exitosamente.")
+
+
+# --- Punto de Entrada para Ejecución como Script ---
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Lanzador de trabajos de entrenamiento LSTM en Vertex AI.")
     
     parser.add_argument("--project-id", required=True)
     parser.add_argument("--region", required=True)
-    parser.add_argument("--pair", required=True) # <-- AJUSTE: Argumento requerido
-    parser.add_argument("--timeframe", required=True) # <-- AJUSTE: Argumento requerido
+    parser.add_argument("--pair", required=True)
+    parser.add_argument("--timeframe", required=True)
     parser.add_argument("--params-file", required=True)
     parser.add_argument("--features-gcs-path", required=True)
     parser.add_argument("--output-gcs-base-dir", required=True)
@@ -120,6 +140,11 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
+    # [LOG] Registro de los argumentos recibidos al iniciar el script.
+    logger.info("Componente 'train_lstm_launcher' iniciado con los siguientes argumentos:")
+    for key, value in vars(args).items():
+        logger.info(f"  - {key}: {value}")
+        
     run_training_job(
         project_id=args.project_id,
         region=args.region,
