@@ -91,8 +91,6 @@ def trading_pipeline_v5(
         )
         ingest_task.set_accelerator_type("NVIDIA_TESLA_T4").set_accelerator_limit(1)
 
-        # --- CORRECCIÓN: El input del paso de preparación ahora se conecta
-        # directamente a la salida del paso de ingestión.
         prepare_data_task = component_op_factory["data_preparation"](
             input_data_path=ingest_task.outputs["output_gcs_path"],
             years_to_keep=backtest_years_to_keep,
@@ -106,10 +104,11 @@ def trading_pipeline_v5(
             pair=pair
         )
         optimize_arch_task.set_accelerator_type("NVIDIA_TESLA_T4").set_accelerator_limit(1)
-
+        
+        # --- CORRECCIÓN: Se elimina el {pair} extra de la ruta del archivo de parámetros. ---
         optimize_logic_task = component_op_factory["optimize_trading_logic"](
             features_path=prepare_data_task.outputs["prepared_data_path"],
-            architecture_params_file=f"{optimize_arch_task.outputs['best_architecture_dir']}/{pair}/best_architecture.json",
+            architecture_params_file=f"{optimize_arch_task.outputs['best_architecture_dir']}/best_architecture.json",
             n_trials=n_trials_logic,
             pair=pair
         )
@@ -120,7 +119,7 @@ def trading_pipeline_v5(
             region=constants.REGION,
             pair=pair,
             timeframe=timeframe,
-            params_file=f"{optimize_logic_task.outputs['best_params_dir']}/{pair}/best_params.json",
+            params_file=f"{optimize_logic_task.outputs['best_params_dir']}/best_params.json",
             features_gcs_path=prepare_data_task.outputs["prepared_data_path"],
             output_gcs_base_dir=constants.LSTM_MODELS_PATH,
             vertex_training_image_uri=args.common_image_uri,
