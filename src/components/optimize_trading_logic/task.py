@@ -1,12 +1,13 @@
 # src/components/optimize_trading_logic/task.py
 """
-Tarea de Optimización de Hiperparámetros para la Lógica de Trading. (Versión con Logging Robusto)
+Tarea de Optimización de Hiperparámetros para la Lógica de Trading. (Corregido y con Logging Robusto)
 
 Responsabilidades:
 1.  Recibir datos y una arquitectura de modelo para UN SOLO PAR.
 2.  Ejecutar un estudio de Optuna para encontrar los mejores parámetros de lógica.
 3.  La métrica a optimizar es el 'sharpe_ratio'.
-4.  Guardar el archivo `best_params.json` para el par procesado en un directorio versionado.
+4.  Guardar el archivo `best_params.json` (conteniendo la lógica Y la arquitectura) 
+    para el par procesado en un directorio versionado.
 5.  Limpiar las versiones antiguas de los parámetros.
 """
 from __future__ import annotations
@@ -60,7 +61,7 @@ def make_model(inp_shape, lr, dr, filt, units, heads):
 def to_sequences(mat, up, dn, win):
     X, y_up, y_dn = [], [], []
     for i in range(win, len(mat)):
-        X.append(mat[i - win : i])
+        X.append(mat[i - win:i])
         y_up.append(up[i])
         y_dn.append(dn[i])
     return np.asarray(X, np.float32), np.asarray(y_up, np.float32), np.asarray(y_dn, np.float32)
@@ -79,14 +80,12 @@ def run_hpo_logic(
     """
     Orquesta el proceso de HPO para la lógica de trading de UN SOLO PAR.
     """
-    # [LOG] Punto de control inicial con todos los parámetros recibidos.
     logger.info(f"▶️ Iniciando optimize_trading_logic para el par '{pair}' con {n_trials} trials.")
     logger.info(f"  - Features de entrada: {features_path}")
     logger.info(f"  - Archivo de arquitectura: {architecture_params_file}")
     logger.info(f"  - Directorio base de salida: {output_gcs_dir_base}")
 
     try:
-        # Cargar datos y arquitectura
         logger.info("Cargando artefactos de entrada...")
         local_features_path = gcs_utils.ensure_gcs_path_and_get_local(features_path)
         df_full = pd.read_parquet(local_features_path)
@@ -101,6 +100,8 @@ def run_hpo_logic(
             tf.keras.backend.clear_session()
             gc.collect()
 
+            # --- CORRECCIÓN: Se combinan los parámetros del trial con los de la arquitectura ---
+            # Esto asegura que todas las claves necesarias (sma_len, macd_fast, etc.) estén presentes.
             p = {
                 "take_profit": trial.suggest_float("take_profit", 0.5, 3.0),
                 "stop_loss": trial.suggest_float("stop_loss", 0.5, 3.0),
@@ -171,17 +172,20 @@ def run_hpo_logic(
         study.optimize(objective, n_trials=n_trials)
         logger.info(f"Estudio de Optuna para {pair} completado.")
         
-        best_params = study.best_params
-        best_params["sharpe_ratio"] = study.best_value
+        # --- CORRECCIÓN: Se combinan los parámetros de lógica Y de arquitectura para guardar un artefacto completo ---
+        best_logic_params = study.best_params
+        best_final_params = {**architecture_params, **best_logic_params}
+        best_final_params["sharpe_ratio"] = study.best_value
 
         logger.info(f"Mejor lógica encontrada para {pair}. Sharpe Ratio: {study.best_value:.5f}")
-        logger.info(f"Mejores parámetros: {json.dumps(best_params, indent=2)}")
+        logger.info(f"Mejores parámetros combinados guardados: {json.dumps(best_final_params, indent=2)}")
 
         pair_output_gcs_path = f"{output_gcs_dir_base}/best_params.json"
         
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_json = Path(tmpdir) / "best_params.json"
-            tmp_json.write_text(json.dumps(best_params, indent=2))
+            # Se guardan los parámetros combinados para el siguiente paso de la pipeline
+            tmp_json.write_text(json.dumps(best_final_params, indent=2))
             logger.info(f"Guardando mejores parámetros en: {pair_output_gcs_path}")
             gcs_utils.upload_gcs_file(tmp_json, pair_output_gcs_path)
         
@@ -195,7 +199,6 @@ def run_hpo_logic(
         logger.info(f"Ruta de salida '{output_gcs_dir_base}' escrita para KFP.")
 
     except Exception as e:
-        # [LOG] Captura de error fatal con contexto completo.
         logger.critical(f"❌ Fallo fatal en optimize_trading_logic para el par '{pair}'. Error: {e}", exc_info=True)
         raise
     
@@ -213,7 +216,6 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
 
-    # [LOG] Registro de los argumentos recibidos al iniciar el script.
     logger.info("Componente 'optimize_trading_logic' iniciado con los siguientes argumentos:")
     for key, value in vars(args).items():
         logger.info(f"  - {key}: {value}")
