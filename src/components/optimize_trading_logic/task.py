@@ -96,8 +96,6 @@ def run_hpo_logic(
             tf.keras.backend.clear_session()
             gc.collect()
 
-            # --- CORRECCIÓN: Se unen los parámetros del trial con los de la arquitectura ---
-            # Esto asegura que todas las claves necesarias (sma_len, macd_fast, etc.) estén presentes.
             p = {
                 "take_profit": trial.suggest_float("take_profit", 0.5, 3.0),
                 "stop_loss": trial.suggest_float("stop_loss", 0.5, 3.0),

@@ -1,27 +1,30 @@
+# src/components/optimize_trading_logic/component.yaml
 name: Optimize Trading Logic
-description: Runs Optuna hyperparameter optimization for the trading logic (thresholds, etc.).
+description: |
+  Finds the best trading logic parameters (take profit, stop loss) for a
+  given model architecture using Optuna.
 
 inputs:
-  - {name: features_path,            type: String, description: "GCS path to the training data Parquet file."}
-  - {name: architecture_params_file, type: String, description: "GCS path to the best_architecture.json file."}
-  - {name: n_trials,                 type: Integer, description: "Number of Optuna trials to run."}
-  # --- AJUSTE AÑADIDO ---
-  # Se añade 'pair' para que el componente sepa en qué subcarpeta guardar el resultado.
-  - {name: pair,                     type: String, description: "The currency pair being processed (e.g., 'EURUSD')."}
+  - {name: features_path,            type: String, description: "GCS path to the Parquet file with features."}
+  - {name: architecture_params_file, type: String, description: "GCS path to the JSON file with the best architecture parameters."}
+  - {name: n_trials,                 type: Integer, default: 30, description: "Number of Optuna trials to run."}
+  # --- CORRECCIÓN: Se añade el input 'pair' que faltaba ---
+  - {name: pair,                     type: String, description: "The currency pair to process, e.g., 'EURUSD'."}
+  - {name: cleanup_old_versions,     type: Boolean, default: true, description: "Whether to remove older versions of the parameters."}
 
 outputs:
-  - {name: best_params_dir, type: String, description: "GCS directory where the best trading logic parameters JSON is saved."}
+  - {name: best_params_dir,          type: String, description: "GCS directory containing the best found parameters."}
 
 implementation:
   container:
-    image: "gcr.io/your-project/your-image:latest" # Reemplazado por main.py
+    image: "gcr.io/your-project/your-image:latest"
     command: [
       python, -u, -m, src.components.optimize_trading_logic.task,
-      --features-path, {inputValue: features_path},
-      --architecture-params-file, {inputValue: architecture_params_file},
-      --n-trials, {inputValue: n_trials},
-      # --- AJUSTE AÑADIDO ---
-      # Se pasa el nuevo parámetro al script.
-      --pair, {inputValue: pair},
-      --best-params-dir-output, {outputPath: best_params_dir},
+      --features-path,              {inputValue: features_path},
+      --architecture-params-file,   {inputValue: architecture_params_file},
+      --n-trials,                   {inputValue: n_trials},
+      # --- CORRECCIÓN: Se pasa el nuevo input 'pair' al script ---
+      --pair,                       {inputValue: pair},
+      --cleanup,                    {inputValue: cleanup_old_versions},
+      --best-params-dir-output,     {outputPath: best_params_dir}
     ]
