@@ -1,14 +1,6 @@
 # src/components/optimize_trading_logic/task.py
 """
 Tarea de Optimización de Hiperparámetros para la Lógica de Trading. (Corregido y con Logging Robusto)
-
-Responsabilidades:
-1.  Recibir datos y una arquitectura de modelo para UN SOLO PAR.
-2.  Ejecutar un estudio de Optuna para encontrar los mejores parámetros de lógica.
-3.  La métrica a optimizar es el 'sharpe_ratio'.
-4.  Guardar el archivo `best_params.json` (conteniendo la lógica Y la arquitectura) 
-    para el par procesado en un directorio versionado.
-5.  Limpiar las versiones antiguas de los parámetros.
 """
 from __future__ import annotations
 
@@ -104,7 +96,7 @@ def run_hpo_logic(
             tf.keras.backend.clear_session()
             gc.collect()
 
-            # --- CORRECCIÓN #1: Se unen los parámetros del trial con los de la arquitectura ---
+            # --- CORRECCIÓN: Se unen los parámetros del trial con los de la arquitectura ---
             # Esto asegura que todas las claves necesarias (sma_len, macd_fast, etc.) estén presentes.
             p = {
                 "take_profit": trial.suggest_float("take_profit", 0.5, 3.0),
@@ -176,7 +168,6 @@ def run_hpo_logic(
         study.optimize(objective, n_trials=n_trials)
         logger.info(f"Estudio de Optuna para {pair} completado.")
         
-        # --- CORRECCIÓN #2: Se combinan los parámetros de lógica Y de arquitectura para guardar un artefacto completo ---
         best_logic_params = study.best_params
         best_final_params = {**architecture_params, **best_logic_params}
         best_final_params["sharpe_ratio"] = study.best_value
