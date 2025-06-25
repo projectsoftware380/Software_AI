@@ -99,6 +99,10 @@ def run_architecture_optimization(
             if not local_features_path:
                 raise FileNotFoundError(f"No se pudo descargar el archivo de features: {features_path}")
             df_raw = pd.read_parquet(local_features_path)
+            
+        # AJUSTE: Convertir el índice 'timestamp' en una columna para evitar KeyError.
+        df_raw = df_raw.reset_index()
+        
         df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"], unit="ms", errors="coerce")
         logger.info(f"DataFrame cargado para {pair}. Shape: {df_raw.shape}")
 
