@@ -94,8 +94,11 @@ def run_architecture_optimization(
     logger.info(f"  - Directorio base de salida: {output_gcs_dir_base}")
 
     try:
-        local_features_path = gcs_utils.ensure_gcs_path_and_get_local(features_path)
-        df_raw = pd.read_parquet(local_features_path)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_features_path = gcs_utils.download_gcs_file(features_path, Path(tmpdir))
+            if not local_features_path:
+                raise FileNotFoundError(f"No se pudo descargar el archivo de features: {features_path}")
+            df_raw = pd.read_parquet(local_features_path)
         df_raw["timestamp"] = pd.to_datetime(df_raw["timestamp"], unit="ms", errors="coerce")
         logger.info(f"DataFrame cargado para {pair}. Shape: {df_raw.shape}")
 
@@ -191,7 +194,6 @@ def run_architecture_optimization(
             tmp_json.write_text(json.dumps(final_best_params, indent=2))
             logger.info(f"Guardando mejores parámetros en: {pair_output_gcs_path}")
             gcs_utils.upload_gcs_file(tmp_json, pair_output_gcs_path)
-            gcs_utils.verify_gcs_file_exists(pair_output_gcs_path)
 
         if cleanup:
             base_cleanup_path = f"{constants.ARCHITECTURE_PARAMS_PATH}/{pair}"

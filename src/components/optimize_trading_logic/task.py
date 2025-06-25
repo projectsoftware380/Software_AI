@@ -1,6 +1,14 @@
 # src/components/optimize_trading_logic/task.py
 """
 Tarea de Optimización de Hiperparámetros para la Lógica de Trading. (Corregido y con Logging Robusto)
+
+Responsabilidades:
+1.  Recibir datos y una arquitectura de modelo para UN SOLO PAR.
+2.  Ejecutar un estudio de Optuna para encontrar los mejores parámetros de lógica.
+3.  La métrica a optimizar es el 'sharpe_ratio'.
+4.  Guardar el archivo `best_params.json` (conteniendo la lógica Y la arquitectura) 
+    para el par procesado en un directorio versionado.
+5.  Limpiar las versiones antiguas de los parámetros.
 """
 from __future__ import annotations
 
@@ -79,24 +87,26 @@ def run_hpo_logic(
 
     try:
         logger.info("Cargando artefactos de entrada...")
-        local_features_path = gcs_utils.ensure_gcs_path_and_get_local(features_path)
-        if local_features_path is None:
-            raise FileNotFoundError(f"No se pudo descargar el archivo de features: {features_path}")
-        df_full = pd.read_parquet(local_features_path)
-        logger.info(f"DataFrame de features cargado. Shape: {df_full.shape}")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            local_features_path = gcs_utils.download_gcs_file(features_path, Path(tmpdir))
+            if not local_features_path:
+                raise FileNotFoundError(f"No se pudo descargar el archivo de features: {features_path}")
+            df_full = pd.read_parquet(local_features_path)
+            
+            local_arch_path = gcs_utils.download_gcs_file(architecture_params_file, Path(tmpdir))
+            if not local_arch_path:
+                raise FileNotFoundError(f"No se pudo descargar el archivo de parámetros de arquitectura: {architecture_params_file}")
+            with open(local_arch_path) as f:
+                architecture_params = json.load(f)
         
-        local_arch_path = gcs_utils.ensure_gcs_path_and_get_local(architecture_params_file)
-        if local_arch_path is None:
-            raise FileNotFoundError(f"No se pudo descargar el archivo de parámetros de arquitectura: {architecture_params_file}")
-        with open(local_arch_path) as f:
-            architecture_params = json.load(f)
+        logger.info(f"DataFrame de features cargado. Shape: {df_full.shape}")
         logger.info(f"Parámetros de arquitectura cargados: {architecture_params}")
 
         def objective(trial: optuna.Trial) -> float:
             tf.keras.backend.clear_session()
             gc.collect()
 
-            # --- CORRECCIÓN: Se unen los parámetros del trial con los de la arquitectura ---
+            # --- CORRECCIÓN #1: Se unen los parámetros del trial con los de la arquitectura ---
             # Esto asegura que todas las claves necesarias (sma_len, macd_fast, etc.) estén presentes.
             p = {
                 "take_profit": trial.suggest_float("take_profit", 0.5, 3.0),
@@ -168,6 +178,7 @@ def run_hpo_logic(
         study.optimize(objective, n_trials=n_trials)
         logger.info(f"Estudio de Optuna para {pair} completado.")
         
+        # --- CORRECCIÓN #2: Se combinan los parámetros de lógica Y de arquitectura para guardar un artefacto completo ---
         best_logic_params = study.best_params
         best_final_params = {**architecture_params, **best_logic_params}
         best_final_params["sharpe_ratio"] = study.best_value
