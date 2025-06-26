@@ -26,6 +26,8 @@ ENV GOOGLE_CLOUD_PROJECT=trading-ai-460823
 WORKDIR /app
 
 # Paso 4: Copiar solo el archivo de requerimientos primero.
+# Esta es la clave para el caché de capas - las dependencias solo se reinstalan
+# cuando requirements.txt cambia, no cuando cambia el código.
 COPY requirements.txt .
 
 # Paso 5: Instalar PyTorch de forma aislada y robusta.
@@ -37,6 +39,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
         torch==2.1.2 --index-url https://download.pytorch.org/whl/cu121
 
 # Paso 6: Instalar el resto de las dependencias de Python.
+# Esta capa se cachea independientemente y solo se reconstruye si requirements.txt cambia.
 RUN sed -i '/tensorflow/d' requirements.txt && \
     pip install \
         --no-cache-dir \
@@ -44,8 +47,15 @@ RUN sed -i '/tensorflow/d' requirements.txt && \
         --retries 10 \
         -r requirements.txt
 
-# Paso 7: Copiar todo el código del proyecto al contenedor.
+# Paso 7: Copiar solo los archivos de configuración y utilidades compartidas.
+# Estos archivos cambian menos frecuentemente que el código principal.
+COPY pyproject.toml .
+COPY src/shared/ ./src/shared/
+
+# Paso 8: Copiar el resto del código del proyecto.
+# Esta capa se reconstruye cada vez que el código cambia, pero las dependencias
+# ya están instaladas y cacheadas en las capas anteriores.
 COPY . .
 
-# Paso 8: Definir un comando por defecto.
+# Paso 9: Definir un comando por defecto.
 CMD ["/bin/bash"]
