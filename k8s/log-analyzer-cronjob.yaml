@@ -1,0 +1,90 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: log-analyzer-cron
+  namespace: trading
+  labels:
+    app: log-analyzer
+    component: monitoring
+spec:
+  schedule: "*/5 * * * *"  # Cada 5 minutos
+  concurrencyPolicy: Forbid  # No ejecutar si ya hay una instancia corriendo
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: log-analyzer-sa
+          restartPolicy: OnFailure
+          containers:
+          - name: log-analyzer
+            image: gcr.io/trading-ai-460823/log-analyzer:latest
+            imagePullPolicy: Always
+            env:
+            - name: GCP_PROJECT_ID
+              value: "trading-ai-460823"
+            - name: GCP_REGION
+              value: "europe-west1"
+            - name: LOG_VERBOSE
+              value: "false"
+            - name: LOG_CONSOLE_OUTPUT
+              value: "false"
+            - name: LOG_OUTPUT_FILE
+              value: "/app/logs/trading_log_analysis_$(date +%Y%m%d_%H%M%S).json"
+            - name: LOG_STREAM_TIMEOUT
+              value: "300"  # 5 minutos máximo
+            command:
+            - python
+            - src/log_analyzer/main.py
+            - --project-id=trading-ai-460823
+            - --export-report=/app/logs/analysis_report_$(date +%Y%m%d_%H%M%S).json
+            - --severity-threshold=HIGH
+            resources:
+              requests:
+                memory: "512Mi"
+                cpu: "250m"
+              limits:
+                memory: "1Gi"
+                cpu: "500m"
+            volumeMounts:
+            - name: log-volume
+              mountPath: /app/logs
+          volumes:
+          - name: log-volume
+            persistentVolumeClaim:
+              claimName: log-analyzer-pvc
+---
+# ConfigMap para configuración del analizador
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: log-analyzer-config
+  namespace: trading
+data:
+  log_analyzer_config.yaml: |
+    project_id: "trading-ai-460823"
+    region: "europe-west1"
+    verbose: false
+    console_output: false
+    log_filters:
+      resource_type: "k8s_container"
+      pod_app_label: "trading-pipeline"
+      min_severity: "WARNING"
+    patterns:
+      latency:
+        keywords: ["timeout", "slow response", "high latency"]
+        threshold_ms: 1000
+        priority: "HIGH"
+      performance:
+        keywords: ["OOMKilled", "memory spike", "CPU throttling"]
+        priority: "CRITICAL"
+      connectivity:
+        keywords: ["connection error", "gRPC failure", "network issue"]
+        priority: "HIGH"
+      ml_model:
+        keywords: ["inference error", "model loading", "prediction failure"]
+        priority: "CRITICAL"
+      market_data:
+        keywords: ["data feed", "quote delay", "market data"]
+        priority: "HIGH" 

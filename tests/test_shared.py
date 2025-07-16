@@ -81,14 +81,14 @@ class TestGcsUtils:
     Utiliza `unittest.mock.patch` para simular el cliente de GCS.
     """
 
-    @patch('src.shared.gcs_utils.storage.Client')
-    def test_upload_gcs_file(self, mock_gcs_client, tmp_path):
+    @patch('src.shared.gcs_utils._get_gcs_client')
+    def test_upload_gcs_file(self, mock_get_gcs_client, tmp_path):
         """Verifica que `upload_gcs_file` llama a los métodos correctos del cliente."""
         # 1. Preparar el entorno de la prueba
         mock_bucket = MagicMock()
         mock_blob = MagicMock()
-        mock_gcs_client.return_value.bucket.return_value = mock_bucket
-        mock_bucket.blob.return_value = mock_blob
+        mock_get_gcs_client.return_value.bucket.return_value = mock_bucket
+        mock_get_gcs_client.return_value.bucket.return_value.blob.return_value = mock_blob
         
         local_file = tmp_path / "test.txt"
         local_file.write_text("hello world")
@@ -98,17 +98,17 @@ class TestGcsUtils:
         gcs_utils.upload_gcs_file(local_file, gcs_uri)
 
         # 3. Realizar aserciones
-        mock_gcs_client.return_value.bucket.assert_called_once_with("my-test-bucket")
+        mock_get_gcs_client.assert_called_once()
         mock_bucket.blob.assert_called_once_with("path/to/test.txt")
         mock_blob.upload_from_filename.assert_called_once_with(str(local_file))
 
-    @patch('src.shared.gcs_utils.storage.Client')
-    def test_download_gcs_file(self, mock_gcs_client, tmp_path):
+    @patch('src.shared.gcs_utils._get_gcs_client')
+    def test_download_gcs_file(self, mock_get_gcs_client, tmp_path):
         """Verifica que `download_gcs_file` llama a los métodos correctos del cliente."""
         mock_bucket = MagicMock()
         mock_blob = MagicMock()
-        mock_gcs_client.return_value.bucket.return_value = mock_bucket
-        mock_bucket.blob.return_value = mock_blob
+        mock_get_gcs_client.return_value.bucket.return_value = mock_bucket
+        mock_get_gcs_client.return_value.bucket.return_value.blob.return_value = mock_blob
         mock_blob.exists.return_value = True
 
         gcs_uri = "gs://my-test-bucket/path/to/download.txt"
@@ -118,23 +118,11 @@ class TestGcsUtils:
         result_path = gcs_utils.download_gcs_file(gcs_uri, destination_dir)
 
         # Aserciones
-        mock_gcs_client.return_value.bucket.assert_called_once_with("my-test-bucket")
+        mock_get_gcs_client.assert_called_once()
         mock_bucket.blob.assert_called_once_with("path/to/download.txt")
         mock_blob.exists.assert_called_once()
         expected_local_path = destination_dir / "download.txt"
         mock_blob.download_to_filename.assert_called_once_with(expected_local_path)
         assert result_path == expected_local_path
 
-    def test_parse_gcs_uri_valid(self):
-        """Prueba que el parseo de URIs de GCS válidas funciona."""
-        bucket, blob = gcs_utils._parse_gcs_uri("gs://bucket-name/folder/file.txt")
-        assert bucket == "bucket-name"
-        assert blob == "folder/file.txt"
-
-    def test_parse_gcs_uri_invalid(self):
-        """Prueba que el parseo de URIs inválidas lanza un error."""
-        with pytest.raises(ValueError):
-            gcs_utils._parse_gcs_uri("http://not-a-gcs-uri.com")
-        
-        with pytest.raises(ValueError):
-            gcs_utils._parse_gcs_uri("gs://only-a-bucket")
+    

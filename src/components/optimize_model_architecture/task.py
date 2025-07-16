@@ -27,7 +27,9 @@ from src.shared import constants, gcs_utils, indicators
 
 # --- Configuración del Logging ---
 warnings.filterwarnings("ignore", category=FutureWarning)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+from src.shared.logging_config import setup_logging
+
+setup_logging() # Asegurar que el logging esté configurado
 logger = logging.getLogger(__name__)
 
 # --- Reproducibilidad y Configuración de GPU ---
@@ -209,7 +211,7 @@ def run_architecture_optimization(
         logger.info(f"Ruta de salida '{output_gcs_dir_base}' escrita para KFP.")
 
     except Exception as e:
-        logger.critical(f"❌ Fallo fatal en optimize_model_architecture para el par '{pair}'. Error: {e}", exc_info=True)
+        logger.exception(f"❌ Fallo fatal en optimize_model_architecture para el par '{pair}'. Error: {e}")
         raise
 
     logger.info(f"🏁 Componente optimize_model_architecture para '{pair}' completado exitosamente.")

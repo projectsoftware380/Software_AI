@@ -1,33 +1,56 @@
 # Software_AI
 
-This repository contains the sources for the trading pipeline.  The Python
-package uses a `src` layout so all modules live under the `src/` directory.
+Este repositorio contiene las fuentes para la tubería de trading algorítmico.
 
-## Installation
+## Estructura del Proyecto
 
-1.  Clone the repository and change into its directory.
-2.  Install the package using `pip`.  All runtime dependencies from
-   `requirements.txt` are declared in `pyproject.toml`.
-
-```bash
-pip install .
+```
+Software_AI/
+├── src/
+│   ├── components/         # Componentes individuales de la pipeline (ej. ingestión, preparación)
+│   │   └── dukascopy_ingestion/ # Nuevo componente de ingestión de datos desde Dukascopy
+│   ├── config/             # Configuración centralizada de la pipeline
+│   ├── deploy/             # Lógica de despliegue y CLI para Vertex AI
+│   ├── pipeline/           # Definición de la pipeline de Kubeflow
+│   ├── log_analyzer/       # Módulo para análisis de logs en tiempo real
+│   └── shared/             # Módulos compartidos (constantes, utilidades GCS, logging)
+├── scripts/                # Scripts de automatización (ej. despliegue a GCP)
+├── tests/                  # Pruebas unitarias e integración
+├── docs/                   # Documentación del proyecto
+├── requirements.txt        # Dependencias del proyecto
+├── pyproject.toml          # Configuración del paquete Python
+└── ... (otros archivos de configuración y logs)
 ```
 
-This installs the `src` package along with all required third party
-libraries.
+## Instalación
 
-> **Note**
-> The pipeline requires Kubeflow Pipelines SDK **2.0** or newer in order to use
-> `dsl.Concat`.  If you encounter import errors, ensure that `kfp>=2.13.0` is
-> installed.
+1.  Clona el repositorio y navega a su directorio.
+2.  Instala las dependencias del proyecto:
 
-## Running tests
+```bash
+pip install -r requirements.txt
+```
 
-After installing the package you can run the unit tests with `pytest`:
+## Despliegue de la Pipeline
+
+Para compilar y desplegar la pipeline en Google Cloud Vertex AI, utiliza el script de despliegue:
+
+```bash
+bash scripts/deploy_to_gcp.sh
+```
+
+Este script se encargará de:
+1.  Construir la imagen Docker común para los componentes.
+2.  Subir la imagen a Google Artifact Registry.
+3.  Compilar la definición de la pipeline en un archivo JSON.
+4.  Lanzar la pipeline en Vertex AI.
+
+## Ejecución de Tests
+
+Después de instalar las dependencias, puedes ejecutar las pruebas unitarias con `pytest`:
 
 ```bash
 pytest
 ```
 
-
-For details on the critical bug fixed in pipeline v5, see [docs/Pipeline_v5_error_fix.md](docs/Pipeline_v5_error_fix.md).
+Para detalles sobre la corrección crítica de errores en la pipeline v5, consulta [docs/Pipeline_v5_error_fix.md](docs/Pipeline_v5_error_fix.md).

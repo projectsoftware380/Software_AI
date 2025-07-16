@@ -1,0 +1,40 @@
+# Dockerfile para el Analizador de Logs
+# =====================================
+
+FROM python:3.10-slim
+
+# Instalar dependencias del sistema incluyendo compiladores
+RUN apt-get update && apt-get install -y \
+    curl \
+    gnupg \
+    build-essential \
+    pkg-config \
+    libcairo2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configurar directorio de trabajo
+WORKDIR /app
+
+# Copiar requirements específicos para el analizador
+COPY requirements-analyzer.txt .
+
+# Instalar dependencias específicas del analizador
+RUN pip install --no-cache-dir -r requirements-analyzer.txt
+
+# Copiar código del analizador
+COPY src/log_analyzer/ ./src/log_analyzer/
+COPY src/shared/ ./src/shared/
+
+# Crear directorio para logs
+RUN mkdir -p /app/logs
+
+# Configurar variables de entorno
+ENV PYTHONPATH=/app
+ENV LOG_VERBOSE=false
+ENV LOG_CONSOLE_OUTPUT=true
+
+# Exponer puerto para health checks
+EXPOSE 8080
+
+# Comando por defecto
+CMD ["python", "src/log_analyzer/main.py", "--project-id=trading-ai-460823"] 

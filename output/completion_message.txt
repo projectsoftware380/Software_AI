@@ -1,0 +1,1 @@
+Ingestión para EURUSD completada. 1863690 filas guardadas en output\dukascopy_EURUSD_m1.parquet

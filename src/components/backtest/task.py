@@ -28,7 +28,9 @@ import tensorflow as tf
 from src.shared import constants, gcs_utils, indicators
 
 # --- Configuración del Logging ---
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+from src.shared.logging_config import setup_logging
+
+setup_logging() # Asegurar que el logging esté configurado
 logger = logging.getLogger(__name__)
 
 # --- Funciones de Métricas (Lógica Original Intacta) ---
@@ -189,8 +191,7 @@ def run_backtest(
                 gcs_utils.keep_only_latest_version(base_cleanup_path)
 
     except Exception as e:
-        # [LOG] Captura de error fatal.
-        logger.critical(f"❌ Fallo fatal en el backtest para el par '{pair}'. Error: {e}", exc_info=True)
+        logger.exception(f"❌ Fallo fatal en el backtest para el par '{pair}'. Error: {e}")
         raise
     
     logger.info(f"🏁 Componente backtest para '{pair}' completado exitosamente.")

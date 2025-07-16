@@ -1,0 +1,128 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: log-analyzer
+  namespace: trading
+  labels:
+    app: log-analyzer
+    component: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: log-analyzer
+  template:
+    metadata:
+      labels:
+        app: log-analyzer
+        component: monitoring
+    spec:
+      serviceAccountName: log-analyzer-sa
+      containers:
+      - name: log-analyzer
+        image: log-analyzer:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: GCP_PROJECT_ID
+          value: "trading-ai-460823"
+        - name: GCP_REGION
+          value: "europe-west1"
+        - name: LOG_VERBOSE
+          value: "false"
+        - name: LOG_CONSOLE_OUTPUT
+          value: "true"
+        - name: LOG_OUTPUT_FILE
+          value: "/app/logs/trading_log_analysis.json"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        volumeMounts:
+        - name: log-volume
+          mountPath: /app/logs
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import requests; requests.get('http://localhost:8080/health')"
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import requests; requests.get('http://localhost:8080/ready')"
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        ports:
+        - containerPort: 8080
+          name: http
+      volumes:
+      - name: log-volume
+        persistentVolumeClaim:
+          claimName: log-analyzer-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: log-analyzer-service
+  namespace: trading
+  labels:
+    app: log-analyzer
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: log-analyzer
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: log-analyzer-pvc
+  namespace: trading
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: log-analyzer-sa
+  namespace: trading
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: log-analyzer-role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods/logs"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: log-analyzer-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: log-analyzer-role
+subjects:
+- kind: ServiceAccount
+  name: log-analyzer-sa
+  namespace: trading 

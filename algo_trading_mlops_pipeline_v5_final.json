@@ -3,27 +3,20 @@
     "comp-for-loop-2": {
       "dag": {
         "tasks": {
-          "ingest-market-data-for-all-pairs": {
+          "ingest-market-data-from-dukascopy": {
             "cachingOptions": {
               "enableCache": true
             },
             "componentRef": {
-              "name": "comp-ingest-market-data-for-all-pairs"
+              "name": "comp-ingest-market-data-from-dukascopy"
             },
             "inputs": {
               "parameters": {
                 "end_date": {
-                  "runtimeValue": {
-                    "constant": "2025-06-25"
-                  }
+                  "componentInputParameter": "pipelinechannel--end_date"
                 },
                 "pair": {
                   "componentInputParameter": "pipelinechannel--loop-item-param-1"
-                },
-                "polygon_secret_name": {
-                  "runtimeValue": {
-                    "constant": "polygon-api-key"
-                  }
                 },
                 "project_id": {
                   "runtimeValue": {
@@ -36,7 +29,7 @@
               }
             },
             "taskInfo": {
-              "name": "ingest-market-data-for-all-pairs"
+              "name": "ingest-market-data-from-dukascopy"
             }
           },
           "launch-vertex-ai-lstm-training-job": {
@@ -60,7 +53,7 @@
                 },
                 "output_gcs_base_dir": {
                   "runtimeValue": {
-                    "constant": "gs://trading-ai-models-460823/models/LSTM_v3"
+                    "constant": "gs://trading-ai-460823-vertex-pipelines-europe-west1/models/LSTM_v3"
                   }
                 },
                 "pair": {
@@ -111,9 +104,7 @@
                   }
                 },
                 "vertex_training_image_uri": {
-                  "runtimeValue": {
-                    "constant": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250624-211236"
-                  }
+                  "componentInputParameter": "pipelinechannel--common_image_uri"
                 }
               }
             },
@@ -201,7 +192,7 @@
               "name": "comp-prepare-training-and-holdout-data"
             },
             "dependentTasks": [
-              "ingest-market-data-for-all-pairs"
+              "ingest-market-data-from-dukascopy"
             ],
             "inputs": {
               "parameters": {
@@ -211,7 +202,7 @@
                 "input_data_path": {
                   "taskOutputParameter": {
                     "outputParameterKey": "output_gcs_path",
-                    "producerTask": "ingest-market-data-for-all-pairs"
+                    "producerTask": "ingest-market-data-from-dukascopy"
                   }
                 },
                 "years_to_keep": {
@@ -260,7 +251,7 @@
                 },
                 "production_base_dir": {
                   "runtimeValue": {
-                    "constant": "gs://trading-ai-models-460823/models/production_v3"
+                    "constant": "gs://trading-ai-460823-vertex-pipelines-europe-west1/models/production_v3"
                   }
                 },
                 "timeframe": {
@@ -343,7 +334,7 @@
                 },
                 "output_gcs_base_dir": {
                   "runtimeValue": {
-                    "constant": "gs://trading-ai-models-460823/models/Filter_v5"
+                    "constant": "gs://trading-ai-460823-vertex-pipelines-europe-west1/models/Filter_v5"
                   }
                 },
                 "pair": {
@@ -365,6 +356,12 @@
           "pipelinechannel--backtest_years_to_keep": {
             "parameterType": "NUMBER_INTEGER"
           },
+          "pipelinechannel--common_image_uri": {
+            "parameterType": "STRING"
+          },
+          "pipelinechannel--end_date": {
+            "parameterType": "STRING"
+          },
           "pipelinechannel--holdout_months": {
             "parameterType": "NUMBER_INTEGER"
           },
@@ -383,17 +380,14 @@
         }
       }
     },
-    "comp-ingest-market-data-for-all-pairs": {
-      "executorLabel": "exec-ingest-market-data-for-all-pairs",
+    "comp-ingest-market-data-from-dukascopy": {
+      "executorLabel": "exec-ingest-market-data-from-dukascopy",
       "inputDefinitions": {
         "parameters": {
           "end_date": {
             "parameterType": "STRING"
           },
           "pair": {
-            "parameterType": "STRING"
-          },
-          "polygon_secret_name": {
             "parameterType": "STRING"
           },
           "project_id": {
@@ -648,20 +642,18 @@
       }
     }
   },
-  "defaultPipelineRoot": "gs://trading-ai-models-460823/pipeline_root_v3",
+  "defaultPipelineRoot": "gs://trading-ai-460823-vertex-pipelines-europe-west1/pipeline_root_v3",
   "deploymentSpec": {
     "executors": {
-      "exec-ingest-market-data-for-all-pairs": {
+      "exec-ingest-market-data-from-dukascopy": {
         "container": {
           "command": [
             "python",
             "-u",
             "-m",
-            "src.components.data_ingestion.task",
+            "src.components.dukascopy_ingestion.task",
             "--project-id",
             "{{$.inputs.parameters['project_id']}}",
-            "--polygon-secret-name",
-            "{{$.inputs.parameters['polygon_secret_name']}}",
             "--end-date",
             "{{$.inputs.parameters['end_date']}}",
             "--timeframe",
@@ -673,7 +665,7 @@
             "--completion-message-path",
             "{{$.outputs.parameters['completion_message'].output_file}}"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250624-211236",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/trading-pipeline-runner:latest",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -718,7 +710,7 @@
             "--trained-lstm-dir-path-output",
             "{{$.outputs.parameters['trained_lstm_dir_path'].output_file}}"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250624-211236",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/trading-pipeline-runner:latest",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -745,7 +737,7 @@
             "--best-architecture-dir-output",
             "{{$.outputs.parameters['best_architecture_dir'].output_file}}"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250624-211236",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/trading-pipeline-runner:latest",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -776,7 +768,7 @@
             "--best-params-dir-output",
             "{{$.outputs.parameters['best_params_dir'].output_file}}"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250624-211236",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/trading-pipeline-runner:latest",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -809,7 +801,7 @@
             "-m",
             "src.components.data_preparation.task"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250624-211236",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/trading-pipeline-runner:latest",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -840,7 +832,7 @@
             "--production-base-dir",
             "{{$.inputs.parameters['production_base_dir']}}"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250624-211236",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/trading-pipeline-runner:latest",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -873,7 +865,7 @@
             "--kfp-metrics-artifact-output",
             "{{$.outputs.artifacts['kfp_metrics_artifact'].path}}"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250624-211236",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/trading-pipeline-runner:latest",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -904,7 +896,7 @@
             "--trained-filter-model-path-output",
             "{{$.outputs.parameters['trained_filter_model_path'].output_file}}"
           ],
-          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/data-ingestion-agent:20250624-211236",
+          "image": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/trading-pipeline-runner:latest",
           "resources": {
             "accelerator": {
               "count": "1",
@@ -932,6 +924,12 @@
             "parameters": {
               "pipelinechannel--backtest_years_to_keep": {
                 "componentInputParameter": "backtest_years_to_keep"
+              },
+              "pipelinechannel--common_image_uri": {
+                "componentInputParameter": "common_image_uri"
+              },
+              "pipelinechannel--end_date": {
+                "componentInputParameter": "end_date"
               },
               "pipelinechannel--holdout_months": {
                 "componentInputParameter": "holdout_months"
@@ -963,27 +961,30 @@
       "parameters": {
         "backtest_years_to_keep": {
           "defaultValue": 5.0,
-          "isOptional": true,
           "parameterType": "NUMBER_INTEGER"
+        },
+        "common_image_uri": {
+          "defaultValue": "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/trading-pipeline-runner:latest",
+          "parameterType": "STRING"
+        },
+        "end_date": {
+          "defaultValue": "2025-07-09",
+          "parameterType": "STRING"
         },
         "holdout_months": {
           "defaultValue": 3.0,
-          "isOptional": true,
           "parameterType": "NUMBER_INTEGER"
         },
         "n_trials_arch": {
           "defaultValue": 20.0,
-          "isOptional": true,
           "parameterType": "NUMBER_INTEGER"
         },
         "n_trials_logic": {
           "defaultValue": 30.0,
-          "isOptional": true,
           "parameterType": "NUMBER_INTEGER"
         },
         "timeframe": {
           "defaultValue": "15minute",
-          "isOptional": true,
           "parameterType": "STRING"
         }
       }

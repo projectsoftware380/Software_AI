@@ -1,0 +1,1 @@
+output\dukascopy_EURUSD_m1.parquet
