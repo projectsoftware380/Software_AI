@@ -21,10 +21,9 @@ from pathlib import Path
 from google.cloud import aiplatform
 
 # --- Configuración del Logging ---
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-)
+from src.shared.logging_config import setup_logging
+
+setup_logging() # Asegurar que el logging esté configurado
 logger = logging.getLogger(__name__)
 
 # --- Lógica Principal del Componente ---
@@ -113,8 +112,7 @@ def run_training_job(
         logger.info(f"✍️  Ruta de salida '{output_gcs_dir}' escrita para KFP.")
         
     except Exception as e:
-        # [LOG] Captura de error fatal con contexto completo.
-        logger.critical(f"❌ Fallo crítico al lanzar el job de entrenamiento para '{pair}'. Error: {e}", exc_info=True)
+        logger.exception(f"❌ Fallo crítico al lanzar el job de entrenamiento para '{pair}'. Error: {e}")
         raise
 
     logger.info(f"🏁 Componente train_lstm_launcher para '{pair}' completado exitosamente.")

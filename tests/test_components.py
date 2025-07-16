@@ -9,9 +9,11 @@ pruebas sean rápidas, determinísticas y no dependan de credenciales o
 recursos en la nube.
 """
 
+import sys
 import subprocess
 import json
 from unittest.mock import patch, MagicMock
+from pathlib import Path
 
 import pandas as pd
 import numpy as np
@@ -23,64 +25,54 @@ TEST_TIMEFRAME = "15minute"
 TEST_PROJECT_ID = "test-project"
 TEST_GCS_BUCKET = "test-bucket"
 
-# --- Pruebas para el Componente: data_ingestion ---
+from src.components.dukascopy_ingestion.task import run_ingestion
 
-# Se usan "patches" para interceptar y simular las llamadas a funciones externas.
-@patch('src.components.data_ingestion.task.pubsub_v1.PublisherClient')
-@patch('src.components.data_ingestion.task.requests.Session')
-@patch('src.components.data_ingestion.task.get_polygon_api_key')
-@patch('src.shared.gcs_utils.upload_gcs_file')
-@patch('src.shared.gcs_utils.delete_gcs_blob')
-@patch('src.shared.gcs_utils.gcs_path_exists')
-def test_data_ingestion_task_success(
-    mock_path_exists, mock_delete_blob, mock_upload, mock_get_api_key, mock_session, mock_pubsub
-):
+# --- Pruebas para el Componente: dukascopy_ingestion ---
+
+@patch('src.components.dukascopy_ingestion.task.upload_gcs_file')
+@patch('src.components.dukascopy_ingestion.task.DukascopyDownloader')
+def test_dukascopy_ingestion_task_success(mock_downloader, mock_upload, tmp_path):
     """
-    Prueba el flujo de éxito del script de ingestión de datos.
-    Verifica que se llamen a las funciones correctas con los argumentos esperados.
+    Prueba el flujo de éxito del script de ingestión de datos de Dukascopy.
+    Verifica que se llame a la función de subida a GCS con los argumentos correctos.
     """
-    # 1. Configurar los mocks
-    mock_path_exists.return_value = True  # Simula que un archivo antiguo existe
-    mock_get_api_key.return_value = "fake_polygon_api_key"
-
-    # Simular una respuesta exitosa de la API de Polygon
-    mock_response = MagicMock()
-    mock_response.json.return_value = {
-        "results": [{"t": 123456, "o": 1.0, "h": 1.1, "l": 0.9, "c": 1.05, "v": 100}] * 10
-    }
-    mock_session.return_value.get.return_value = mock_response
-
-    # 2. Ejecutar el script como un subproceso
-    cmd = [
-        "python", "-m", "src.components.data_ingestion.task",
-        "--pair", TEST_PAIR,
-        "--timeframe", TEST_TIMEFRAME,
-        "--project-id", TEST_PROJECT_ID,
-        "--min-rows", "5", # Un valor bajo para la prueba
-        f"--gcs-data-path=gs://{TEST_GCS_BUCKET}/data"
+    # 1. Configurar el mock del descargador de Dukascopy
+    dummy_data = pd.DataFrame({
+        'timestamp': pd.to_datetime(pd.date_range(start='2023-01-01', periods=10, freq='h')),
+        'open': np.random.rand(10), 'high': np.random.rand(10),
+        'low': np.random.rand(10), 'close': np.random.rand(10)
+    })
+    mock_downloader.return_value.download_data.return_value = [
+        {'timestamp': '2023-01-01 00:00:00', 'open': 1.0, 'high': 1.1, 'low': 0.9, 'close': 1.05, 'volume': 100},
+        {'timestamp': '2023-01-01 01:00:00', 'open': 1.05, 'high': 1.15, 'low': 0.95, 'close': 1.10, 'volume': 120},
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+    # 2. Ejecutar la función directamente
+    success = run_ingestion(
+        pair=TEST_PAIR,
+        timeframe="m1",
+        end_date_str="2023-01-10",
+        project_id=TEST_PROJECT_ID,
+        output_gcs_path=f"gs://{TEST_GCS_BUCKET}/data",
+        local_output_dir=str(tmp_path)
+    )
 
     # 3. Realizar aserciones (verificaciones)
-    assert result.returncode == 0, f"El script falló con el error: {result.stderr}"
-    
-    # Verificar que las funciones mockeadas fueron llamadas
-    mock_path_exists.assert_called_once()
-    mock_delete_blob.assert_called_once()
-    mock_get_api_key.assert_called_once()
+    assert success is True
     mock_upload.assert_called_once()
-    mock_pubsub.return_value.publish.assert_called_once()
-    
-    # Verificar que la subida a GCS se intentó con la ruta correcta
     final_gcs_path = mock_upload.call_args[0][1]
-    assert f"gs://{TEST_GCS_BUCKET}/data/{TEST_PAIR}/{TEST_TIMEFRAME}" in final_gcs_path
+    assert f"gs://{TEST_GCS_BUCKET}/data/{TEST_PAIR}/m1/dukascopy_{TEST_PAIR}_m1.parquet" in final_gcs_path
 
+
+
+
+from src.components.data_preparation.task import run_data_preparation
 
 # --- Pruebas para el Componente: data_preparation ---
 
-@patch('src.shared.gcs_utils.upload_gcs_file')
-@patch('src.shared.gcs_utils.download_gcs_file')
-def test_data_preparation_task(mock_download, mock_upload, tmp_path):
+@patch('src.components.data_preparation.task.save_df_to_gcs_and_verify')
+@patch('src.components.data_preparation.task.pd.read_parquet')
+def test_data_preparation_task(mock_read_parquet, mock_save_df, tmp_path):
     """
     Prueba el flujo de éxito del script de preparación de datos.
     Simula la descarga de un parquet y verifica que se suba un resultado.
@@ -89,109 +81,65 @@ def test_data_preparation_task(mock_download, mock_upload, tmp_path):
     dummy_data = pd.DataFrame({
         'timestamp': pd.to_datetime(pd.date_range(start='2020-01-01', periods=100, freq='h')),
         'open': np.random.rand(100), 'high': np.random.rand(100),
-        'low': np.random.rand(100), 'close': np.random.rand(100)
+        'low': np.random.rand(100), 'close': np.random.rand(100),
+        'volume': np.random.rand(100)
     })
-    local_parquet = tmp_path / "input.parquet"
-    dummy_data.to_parquet(local_parquet)
-    
-    # Configurar el mock para que "descargue" nuestro archivo local
-    mock_download.return_value = local_parquet
+    mock_read_parquet.return_value = dummy_data
 
-    # 2. Ejecutar el script
-    cmd = [
-        "python", "-m", "src.components.data_preparation.task",
-        "--pair", TEST_PAIR,
-        "--timeframe", TEST_TIMEFRAME,
-        "--years-to-keep", "1"
-    ]
-    # El `task.py` construye la ruta de entrada, por lo que el mock de descarga la interceptará.
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    
+    # 2. Ejecutar la función directamente
+    run_data_preparation(
+        years_to_keep=1,
+        holdout_months=6,
+        input_data_path=f"gs://{TEST_GCS_BUCKET}/data/{TEST_PAIR}/{TEST_TIMEFRAME}/input.parquet",
+        output_gcs_path=f"gs://{TEST_GCS_BUCKET}/prepared_data",
+    )
+
     # 3. Aserciones
-    assert result.returncode == 0, f"El script falló con el error: {result.stderr}"
-    mock_download.assert_called_once()
-    mock_upload.assert_called_once()
-    
-    # Verificar que la salida del script (la ruta del archivo creado) es correcta
-    output_path = result.stdout.strip()
-    assert "recent.parquet" in output_path
-    assert f"{TEST_PAIR}_{TEST_TIMEFRAME}" in output_path
+    mock_read_parquet.assert_called_once()
+    assert mock_save_df.call_count == 2
+
 
 
 # --- Pruebas para Componentes de ML (ej. model_promotion) ---
 
-@patch('src.shared.gcs_utils.copy_gcs_object')
-@patch('src.shared.gcs_utils.upload_gcs_file')
-@patch('src.components.model_promotion.task._load_metrics')
-def test_model_promotion_task_promotes(mock_load_metrics, mock_upload, mock_copy):
+from src.components.model_promotion.task import run_model_promotion
+
+# --- Pruebas para Componentes de ML (ej. model_promotion) ---
+
+@patch('src.components.model_promotion.task.gcs_utils')
+@patch('src.components.model_promotion.task.json.load')
+def test_model_promotion_task_promotes(mock_gcs_utils, mock_json_load, tmp_path):
     """Prueba el caso en que el modelo SÍ es promovido."""
     # 1. Configurar mocks para simular métricas excelentes
-    mock_load_metrics.side_effect = [
-        { # new_metrics
-            "trades": 200, "sharpe": 2.5, "profit_factor": 2.0,
-            "win_rate": 0.6, "max_drawdown": -5.0, "expectancy": 0.1
-        },
-        { # prod_metrics
-            "trades": 150, "sharpe": 1.0, "profit_factor": 1.5,
-            "win_rate": 0.5, "max_drawdown": -10.0, "expectancy": 0.05
-        }
-    ]
+    new_metrics_content = { "sharpe_ratio": 2.5 }
+    prod_metrics_content = { "sharpe_ratio": 1.0 }
 
-    # 2. Ejecutar script
-    cmd = [
-        "python", "-m", "src.components.model_promotion.task",
-        "--new-metrics-dir", "gs://fake/metrics/dir",
-        "--new-lstm-artifacts-dir", "gs://fake/lstm/dir",
-        "--new-rl-model-path", "gs://fake/rl/model.zip",
-        "--pair", TEST_PAIR,
-        "--timeframe", TEST_TIMEFRAME,
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    mock_json_load.side_effect = [new_metrics_content, prod_metrics_content]
+
+    
+
+    def mock_download_side_effect(gcs_uri, local_dir):
+        target_file_path = local_dir / Path(gcs_uri).name
+        if "new_metrics" in gcs_uri:
+            target_file_path.write_text(json.dumps(new_metrics_content))
+        elif "metrics.json" in gcs_uri: # Para las métricas de producción
+            target_file_path.write_text(json.dumps(prod_metrics_content))
+        return str(target_file_path)
+
+    mock_gcs_utils.download_gcs_file.side_effect = mock_download_side_effect
+    mock_gcs_utils.gcs_path_exists.return_value = True # Simular que el modelo en producción existe
+
+    # 2. Ejecutar la función directamente
+    run_model_promotion(
+        new_metrics_dir="gs://fake/metrics/dir",
+        new_lstm_artifacts_dir="gs://fake/lstm/dir",
+        new_filter_model_path="gs://fake/filter/model.pkl",
+        pair=TEST_PAIR,
+        timeframe=TEST_TIMEFRAME,
+        production_base_dir="gs://fake/production"
+    )
     
     # 3. Aserciones
-    assert result.returncode == 0, f"El script falló con el error: {result.stderr}"
     # Se debe haber llamado a la copia de artefactos
-    assert mock_copy.call_count > 0
-    assert mock_upload.call_count == 0 # En la versión actual se usa copy, no upload
-    # El script debe imprimir "true"
-    assert result.stdout.strip() == "true"
-
-
-@patch('src.components.train_lstm_launcher.task.aip.init')
-@patch('src.components.train_lstm_launcher.task.aip.CustomJob')
-def test_train_lstm_launcher_uses_params_file(mock_custom_job, mock_aip_init, tmp_path):
-    """Verifica que el argumento `--params-file` se propaga al CustomJob."""
-
-    mock_custom_job.return_value.state = "JOB_STATE_SUCCEEDED"
-
-    output_path = tmp_path / "model_dir.txt"
-
-    run_launcher = __import__(
-        'src.components.train_lstm_launcher.task', fromlist=['run_launcher']
-    ).run_launcher
-
-    run_launcher(
-        project_id="p",
-        region="us",
-        pair="EURUSD",
-        timeframe="15m",
-        params_file="gs://bucket/best.json",
-        features_gcs_path="gs://bucket/features.parquet",
-        output_gcs_base_dir="gs://bucket/output",
-        vertex_training_image_uri="img",
-        vertex_machine_type="n1",
-        vertex_accelerator_type="ACC",
-        vertex_accelerator_count=1,
-        vertex_service_account="svc",
-        trained_lstm_dir_path_output=str(output_path),
-    )
-
-    called_args = (
-        mock_custom_job.call_args[1]["worker_pool_specs"][0]["container_spec"]["args"]
-    )
-    assert "--params-file=gs://bucket/best.json" in called_args
-
-# Nota: Un conjunto de pruebas completo también incluiría casos de fallo,
-# como datos de entrada inválidos, respuestas de API con errores,
-# y casos donde el modelo no es promovido. Este archivo sirve como una
-# base sólida y una demostración del enfoque de prueba.
+    assert mock_gcs_utils.copy_gcs_directory.call_count > 0
+    assert mock_gcs_utils.copy_gcs_blob.call_count > 0

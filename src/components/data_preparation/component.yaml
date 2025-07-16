@@ -3,20 +3,16 @@ name: Prepare Training and Holdout Data
 description: >
   Loads raw data, computes indicators, and splits the data.
 
-# --- CORRECCIÓN ---
 inputs:
-  - name: input_data_path # Nuevo input para recibir la ruta
+  - name: input_data_dir # Cambiado a directorio local
     type: String
-    description: 'The GCS path to the raw Parquet file from the ingestion step.'
+    description: 'The local directory containing raw Parquet files from the ingestion step.'
   - name: years_to_keep
     type: Integer
     default: 5
   - name: holdout_months
     type: Integer
     default: 3
-  - name: cleanup_old_versions
-    type: Boolean
-    default: true
 
 outputs:
   - {name: prepared_data_path, type: String}
@@ -24,22 +20,21 @@ outputs:
 
 implementation:
   container:
-    image: gcr.io/trading-ai-460823/trading-ai-gpu:v1
+    image: "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/trading-pipeline-runner:latest"
     command:
       - python
       - -u # Mantener el unbuffered output
       - -m
       - src.components.data_preparation.task
     args:
-      # --- CORRECCIÓN ---
-      - --input-data-path
-      - {inputValue: input_data_path}
+      - --input-data-dir # Cambiado a directorio local
+      - {inputValue: input_data_dir}
       - --years-to-keep
       - {inputValue: years_to_keep}
       - --holdout-months
       - {inputValue: holdout_months}
-      - --cleanup
-      - {inputValue: cleanup_old_versions}
+      - --output-dir # Nuevo argumento para el directorio de salida
+      - {outputPath: prepared_data_path} # Usamos prepared_data_path como el directorio base para las salidas
       - --prepared-data-path-output
       - {outputPath: prepared_data_path}
       - --holdout-data-path-output

@@ -1,0 +1,27 @@
+name: Ingest Market Data from Dukascopy
+description: |
+  Descarga datos históricos de velas OHLCV de Forex desde Dukascopy y los guarda en GCS.
+
+inputs:
+  - {name: project_id,          type: String, description: "ID del proyecto de Google Cloud."}
+  - {name: end_date,            type: String, description: "Fecha final para la descarga de datos (YYYY-MM-DD)."}
+  - {name: timeframe,           type: String, description: "Timeframe de las velas (ej: 'h1')."}
+  - {name: pair,                type: String, description: "El par de divisas específico a procesar (ej: 'EURUSD')."}
+
+outputs:
+  - {name: output_gcs_path,     type: String, description: "La ruta completa en GCS al archivo Parquet con los datos crudos."}
+  - {name: completion_message,  type: String, description: "Un mensaje que indica la finalización."}
+
+implementation:
+  container:
+    image: "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/trading-pipeline-runner:latest"
+    
+    command: [
+      python, -u, -m, src.components.dukascopy_ingestion.task,
+      --project-id,           {inputValue: project_id},
+      --end-date,             {inputValue: end_date},
+      --timeframe,            {inputValue: timeframe},
+      --pair,                 {inputValue: pair},
+      --output-gcs-path-output,    {outputPath: output_gcs_path},
+      --completion-message-path,   {outputPath: completion_message},
+    ]

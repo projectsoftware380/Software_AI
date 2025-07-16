@@ -45,6 +45,7 @@ RUN sed -i '/tensorflow/d' requirements.txt && \
         --no-cache-dir \
         --default-timeout=100 \
         --retries 10 \
+        --ignore-installed blinker \
         -r requirements.txt
 
 # Paso 7: Copiar solo los archivos de configuración y utilidades compartidas.

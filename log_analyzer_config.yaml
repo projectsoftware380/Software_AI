@@ -1,0 +1,22 @@
+# Configuración del Analizador de Logs para Pipeline de Trading
+# =============================================================
+
+# Configuración del proyecto GCP
+project_id: "trading-ai-460823"
+
+
+# Configuración de logging
+
+
+
+
+# Filtros para logs de GCP
+log_filters:
+  resource_type: "aiplatform.googleapis.com/PipelineJob"
+
+# Configuración de alertas
+
+
+
+# Configuración de patrones específicos para trading
+

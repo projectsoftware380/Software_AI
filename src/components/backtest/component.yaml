@@ -16,7 +16,7 @@ outputs:
 
 implementation:
   container:
-    image: "gcr.io/your-project/your-image:latest" # Reemplazado por main.py
+    image: "europe-west1-docker.pkg.dev/trading-ai-460823/data-ingestion-repo/trading-pipeline-runner:latest" # Reemplazado por main.py
     command: [
       python, -u, -m, src.components.backtest.task,
       --lstm-model-dir, {inputValue: lstm_model_dir},

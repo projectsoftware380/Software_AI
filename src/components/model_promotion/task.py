@@ -21,7 +21,9 @@ from pathlib import Path
 from src.shared import gcs_utils, constants
 
 # --- Configuración del Logging ---
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+from src.shared.logging_config import setup_logging
+
+setup_logging() # Asegurar que el logging esté configurado
 logger = logging.getLogger(__name__)
 
 # --- Lógica Principal de la Tarea ---
@@ -103,8 +105,7 @@ def run_model_promotion(
             logger.info(f"❌ Promoción RECHAZADA para {pair}. El modelo de producción actual es superior o igual.")
 
     except Exception as e:
-        # [LOG] Captura de error fatal.
-        logger.critical(f"❌ Fallo fatal durante el proceso de promoción para '{pair}'. Error: {e}", exc_info=True)
+        logger.exception(f"❌ Fallo fatal durante el proceso de promoción para '{pair}'. Error: {e}")
         raise
         
     logger.info(f"🏁 Componente model_promotion para '{pair}' completado exitosamente.")

@@ -1,0 +1,24 @@
+# Dependencias mínimas para el Analizador de Logs
+# ===============================================
+
+# Google Cloud Logging (principal)
+google-cloud-logging>=3.9.0
+
+# Google Cloud Core
+google-api-core>=2.24.2,<3
+google-auth>=2.40,<3
+google-auth-oauthlib>=1.2.2
+googleapis-common-protos>=1.62,<2
+
+# gRPC y Protobuf
+protobuf==4.25.3
+grpcio==1.62.3
+grpcio-status==1.62.3
+
+# Utilidades
+PyYAML>=6.0.2
+requests>=2.31
+python-json-logger
+loguru==0.7.3
+python-dotenv==1.1.0
+click>=8.2,<9 

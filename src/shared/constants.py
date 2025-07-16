@@ -10,7 +10,7 @@ from __future__ import annotations
 # ──────────────────── CONFIG GLOBAL GCP ────────────────────
 PROJECT_ID: str = "trading-ai-460823"
 REGION: str = "europe-west1"
-GCS_BUCKET_NAME: str = "trading-ai-models-460823"
+GCS_BUCKET_NAME: str = "trading-ai-460823-vertex-pipelines-europe-west1"
 BASE_GCS_PATH = f"gs://{GCS_BUCKET_NAME}"
 
 # ──────────────────── RUTAS DE ARTEFACTOS ───────────────────────
@@ -58,6 +58,7 @@ DEFAULT_VERTEX_GPU_MACHINE_TYPE = "n1-standard-8"
 DEFAULT_VERTEX_GPU_ACCELERATOR_TYPE = "NVIDIA_TESLA_T4"
 DEFAULT_VERTEX_GPU_ACCELERATOR_COUNT = 1
 DEFAULT_VERTEX_CPU_MACHINE_TYPE = "n1-standard-4"
+COMMON_IMAGE_URI = f"gcr.io/{PROJECT_ID}/vertex-ai-custom-image:latest" # Imagen base para custom jobs
 
 # ──────────────────── PIPELINE & TRADING DEFAULTS ────────────────────
 DEFAULT_TIMEFRAME = "15minute"
