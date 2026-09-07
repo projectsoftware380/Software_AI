@@ -1,18 +1,46 @@
-# Entorno virtual
+# Virtual environments
+.venv/
 venv/
+env/
 
-# VS Code
-.vscode/
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+credentials*.json
+service-account*.json
 
 # Python
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
 *.so
 *.egg
 *.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 dist/
 build/
 
-# Entorno local
-.env
-*.env
+# IDE / OS
+.vscode/
+.vs/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs / local artifacts
+*.log
+logs/
+.tmp/
+tmp/
+
+# Generated pipeline specs. A single curated final artifact may remain tracked.
+algo_trading_mlops_pipeline_*.json
+algo_trading_mlops_modular_pipeline_*.json

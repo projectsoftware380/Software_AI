@@ -5,11 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "software-ai"
 version = "0.1.0"
-description = "Algo trading ML pipeline"
+description = "Modular MLOps pipeline for financial time-series experimentation on Google Cloud"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
-authors = [{name = "Unknown"}]
+authors = [{name = "Manuel Alfonso Rincón Méndez"}]
 
 # Dependencies from requirements.txt
 dependencies = [
