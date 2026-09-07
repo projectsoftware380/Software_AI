@@ -73,6 +73,11 @@ $PythonExe = if (Test-Path ".\.venv\Scripts\python.exe") {
     "python"
 }
 
+# La ejecución de este script es una acción explícita de despliegue, por lo que
+# habilita el envío cloud para esta invocación. Ejecutar main.py directamente
+# solo compila por defecto.
+$env:SUBMIT_PIPELINE_TO_VERTEX = "true"
+
 Write-Host "Lanzando pipeline con $PythonExe ..."
 & $PythonExe -m src.pipeline.main --common-image-uri $ImageUri
 if ($LASTEXITCODE -ne 0) {
