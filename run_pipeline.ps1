@@ -1,6 +1,7 @@
 # =========================================================================
-# FUNCIÓN PARA ELIMINAR IMÁGENES EXISTENTES
+# Build + push de imagen y lanzamiento de pipeline en Vertex AI
 # =========================================================================
+
 function Remove-ExistingImages {
     param(
         [string]$ProjectID,
@@ -10,94 +11,78 @@ function Remove-ExistingImages {
     )
 
     $RepoUrl = "${Region}-docker.pkg.dev/${ProjectID}/${RepoName}"
+    Write-Host "Buscando imágenes existentes en '$RepoUrl'..."
 
-    Write-Host "--------------------------------------------------"
-    Write-Host "Paso 0: Buscando y eliminando imágenes existentes en '$RepoUrl'..."
-    Write-Host "--------------------------------------------------"
-
-    # Comando para listar todas las imágenes, incluyendo sus etiquetas y digest
     $images = gcloud artifacts docker images list $RepoUrl --filter="package~${ImageName}" --format="get(image)" --quiet
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "¡Falló la obtención de la lista de imágenes de Artifact Registry!"
-        # Se decide continuar aunque falle, para no bloquear el pipeline si solo es un problema de listado
+        Write-Warning "No fue posible listar imágenes existentes; se continuará sin limpieza previa."
         return
     }
 
     if ($images) {
-        # Convertir la salida en un array de líneas
         $imageList = $images -split "`n" | ForEach-Object { $_.Trim() }
-
         foreach ($imageUri in $imageList) {
             if ($imageUri) {
                 Write-Host "Eliminando imagen: $imageUri"
-                # Se usa --quiet para evitar la confirmación interactiva (y/n)
                 gcloud artifacts docker images delete $imageUri --quiet
                 if ($LASTEXITCODE -ne 0) {
-                    Write-Warning "No se pudo eliminar la imagen: $imageUri. Puede que ya no exista o haya un problema de permisos."
+                    Write-Warning "No se pudo eliminar la imagen: $imageUri"
                 }
             }
         }
-        Write-Host "Limpieza de imágenes completada."
-    } else {
-        Write-Host "No se encontraron imágenes existentes para eliminar."
     }
 }
 
+# Configuración por entorno. No se incluyen IDs reales en el repositorio.
+$ProjectID = $env:GCP_PROJECT_ID
+$Region = if ($env:GCP_REGION) { $env:GCP_REGION } else { "europe-west1" }
+$RepoName = if ($env:ARTIFACT_REPOSITORY) { $env:ARTIFACT_REPOSITORY } else { "mlops-images" }
+$ImageName = if ($env:PIPELINE_IMAGE_NAME) { $env:PIPELINE_IMAGE_NAME } else { "software-ai-pipeline" }
 
-# --- 1. Configuración ---
-$ProjectID = "trading-ai-460823"
-$RepoName = "data-ingestion-repo"
-$ImageName = "data-ingestion-agent"
-$Region = "europe-west1"
+if (-not $ProjectID) {
+    Write-Error "Falta GCP_PROJECT_ID. Defínelo antes de ejecutar este script."
+    exit 1
+}
 
-# --- Llamada a la función de limpieza ---
 Remove-ExistingImages -ProjectID $ProjectID -Region $Region -RepoName $RepoName -ImageName $ImageName
 
-
-# --- 2. Generar Etiqueta Única ---
 $VersionTag = Get-Date -Format "yyyyMMdd-HHmmss"
 $ImageUri = "${Region}-docker.pkg.dev/${ProjectID}/${RepoName}/${ImageName}:${VersionTag}"
 
-Write-Host "--------------------------------------------------"
-Write-Host "Paso 1: Usando la URI de la imagen: $ImageUri"
-Write-Host "--------------------------------------------------"
-
-
-# --- 3. Construir y Subir la Imagen Docker ---
-Write-Host "Paso 2: Construyendo la imagen Docker..."
-# NOTA: Se añade --no-cache para forzar la reinstalación de las dependencias
-# y evitar problemas si requirements.txt cambió.
+Write-Host "Construyendo imagen: $ImageUri"
 docker build --no-cache -t $ImageUri .
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "¡Falló la construcción de la imagen Docker!"
+    Write-Error "Falló la construcción de la imagen Docker."
     exit 1
 }
 
-Write-Host "Paso 3: Subiendo la imagen a Artifact Registry..."
+Write-Host "Subiendo imagen a Artifact Registry..."
 docker push $ImageUri
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "¡Falló la subida de la imagen a Artifact Registry!"
+    Write-Error "Falló la subida de la imagen."
     exit 1
 }
 
-
-# --- 4. Ejecutar la Pipeline Pasando la URI como Parámetro ---
-Write-Host "Paso 4: Lanzando la pipeline de Vertex AI..."
-
-# =========================================================================
-# === AJUSTE CRÍTICO: Usar la ruta explícita al Python del entorno venv ===
-# Esto garantiza que se use el intérprete correcto con las librerías
-# instaladas (kfp, google-cloud-aiplatform, etc.) y evita el error
-# 'ModuleNotFoundError' en la máquina local.
-.\venv\Scripts\python.exe -m src.pipeline.main --common-image-uri $ImageUri
-# =========================================================================
-
-# Verificación final
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "--------------------------------------------------"
-    Write-Host "¡Pipeline lanzada con éxito con la imagen $VersionTag!"
-    Write-Host "--------------------------------------------------"
+# Usa el intérprete del entorno virtual si existe; de lo contrario usa Python
+# disponible en PATH.
+$PythonExe = if (Test-Path ".\.venv\Scripts\python.exe") {
+    ".\.venv\Scripts\python.exe"
+} elseif (Test-Path ".\venv\Scripts\python.exe") {
+    ".\venv\Scripts\python.exe"
 } else {
-    Write-Error "¡Falló el lanzamiento de la pipeline!"
+    "python"
+}
+
+# La ejecución de este script es una acción explícita de despliegue, por lo que
+# habilita el envío cloud para esta invocación. Ejecutar main.py directamente
+# solo compila por defecto.
+$env:SUBMIT_PIPELINE_TO_VERTEX = "true"
+
+Write-Host "Lanzando pipeline con $PythonExe ..."
+& $PythonExe -m src.pipeline.main --common-image-uri $ImageUri
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Falló el lanzamiento de la pipeline."
     exit 1
 }
+
+Write-Host "Pipeline lanzada con la imagen $ImageUri"

@@ -3,9 +3,8 @@ name: Prepare Training and Holdout Data
 description: >
   Loads raw data, computes indicators, and splits the data.
 
-# --- CORRECCIÓN ---
 inputs:
-  - name: input_data_path # Nuevo input para recibir la ruta
+  - name: input_data_path
     type: String
     description: 'The GCS path to the raw Parquet file from the ingestion step.'
   - name: years_to_keep
@@ -24,14 +23,15 @@ outputs:
 
 implementation:
   container:
-    image: gcr.io/trading-ai-460823/trading-ai-gpu:v1
+    # Placeholder seguro. src/pipeline/main.py reemplaza esta imagen en runtime
+    # con --common-image-uri antes de compilar/enviar el pipeline.
+    image: python:3.10-slim
     command:
       - python
-      - -u # Mantener el unbuffered output
+      - -u
       - -m
       - src.components.data_preparation.task
     args:
-      # --- CORRECCIÓN ---
       - --input-data-path
       - {inputValue: input_data_path}
       - --years-to-keep
