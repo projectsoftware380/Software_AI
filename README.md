@@ -89,13 +89,14 @@ Software_AI/
 ├── docs/
 ├── Dockerfile
 ├── pyproject.toml
-├── requirements.txt
-└── algo_trading_mlops_pipeline_v5_final.json
+└── requirements.txt
 ```
 
-## Configuración segura
+Los archivos JSON compilados de KFP son **artefactos generados** durante la ejecución y no se versionan, porque pueden incorporar valores específicos del entorno. El código fuente de la pipeline permanece en `src/pipeline/main.py`.
 
-El repositorio **no debe contener credenciales reales ni identificadores privados de infraestructura**. La configuración de entorno se toma desde variables de entorno.
+## Configuración segura y portable
+
+El repositorio no contiene credenciales reales ni depende de identificadores de una cuenta GCP concreta. La infraestructura se parametriza mediante variables de entorno.
 
 Copia el archivo de ejemplo y completa los valores únicamente en tu entorno local:
 
@@ -117,9 +118,11 @@ GCP_REGION=europe-west1
 GCS_BUCKET_NAME=your-gcs-bucket
 VERTEX_SERVICE_ACCOUNT=your-service-account@your-gcp-project-id.iam.gserviceaccount.com
 POLYGON_API_KEY_SECRET_NAME=polygon-api-key
+ARTIFACT_REPOSITORY=mlops-images
+PIPELINE_IMAGE_NAME=software-ai-pipeline
 ```
 
-El archivo `.env` está excluido de Git.
+El archivo `.env` está excluido de Git. El `Dockerfile`, los scripts de lanzamiento y las definiciones de componentes usan valores proporcionados en runtime en lugar de IDs personales hardcodeados.
 
 ## Instalación
 
@@ -152,6 +155,8 @@ El pipeline utiliza **Kubeflow Pipelines 2.x** y requiere `kfp>=2.13.0` para las
 
 La entrada principal del pipeline se encuentra en `src/pipeline/main.py`. La ejecución completa requiere un proyecto de Google Cloud configurado con los permisos y recursos descritos en las variables de entorno.
 
+Para compilar/ejecutar se proporciona una imagen común a todos los componentes mediante `--common-image-uri`. En Windows también puede utilizarse `run_pipeline.ps1`, que construye y publica la imagen usando la configuración del entorno.
+
 Para ejecutar las pruebas disponibles:
 
 ```bash
@@ -165,6 +170,7 @@ pytest
 - Separación temporal de datos para reducir riesgo de fuga de información en series temporales.
 - Gestión de secretos fuera del código fuente.
 - Configuración de infraestructura mediante variables de entorno.
+- No versionar especificaciones compiladas dependientes del entorno.
 - Registro de correcciones y decisiones técnicas en `docs/`.
 
 Para un ejemplo de depuración de una versión del pipeline, consulta [docs/Pipeline_v5_error_fix.md](docs/Pipeline_v5_error_fix.md).
